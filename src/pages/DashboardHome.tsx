@@ -9,6 +9,7 @@ import {
 import type {
   ApplicationRecord,
   AuditLog,
+  JobMatch,
   NormalizedJob,
   ProfileCompletion,
   Resume
@@ -21,7 +22,10 @@ interface DashboardHomeProps<RouteId extends string> {
   resume: Resume | null;
   applications: ApplicationRecord[];
   jobs: NormalizedJob[];
+  matches: JobMatch[];
   auditLogs: AuditLog[];
+  isScoring: boolean;
+  onScoreJobs: () => void;
   onNavigate: (route: RouteId) => void;
   routes: {
     profile: RouteId;
@@ -61,11 +65,19 @@ export function DashboardHome<RouteId extends string>({
   resume,
   applications,
   jobs,
+  matches,
   auditLogs,
+  isScoring,
+  onScoreJobs,
   onNavigate,
   routes
 }: DashboardHomeProps<RouteId>) {
   const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued").length;
+  const applyCount = matches.filter((match) => match.recommendation === "apply").length;
+  const maybeCount = matches.filter((match) => match.recommendation === "maybe").length;
+  const browseCount = matches.filter(
+    (match) => match.recommendation === "browse" || match.recommendation === "skip"
+  ).length;
 
   return (
     <div className="space-y-6">
@@ -78,18 +90,29 @@ export function DashboardHome<RouteId extends string>({
             Review center
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-            Phase 2 adds offline job ingestion, deduplication, scan history, and
-            queued normalized jobs for scoring.
+            Phase 3 scores normalized jobs, explains fit, and routes each match
+            for human review.
           </p>
         </div>
-        <button
-          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
-          type="button"
-          onClick={() => onNavigate(routes.profile)}
-        >
-          <UserRound aria-hidden="true" size={18} />
-          Edit profile
-        </button>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-4 text-sm font-semibold text-slate-800 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+            type="button"
+            disabled={isScoring || jobs.length === 0}
+            onClick={onScoreJobs}
+          >
+            <BriefcaseBusiness aria-hidden="true" size={18} />
+            {isScoring ? "Scoring" : "Score jobs now"}
+          </button>
+          <button
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700"
+            type="button"
+            onClick={() => onNavigate(routes.profile)}
+          >
+            <UserRound aria-hidden="true" size={18} />
+            Edit profile
+          </button>
+        </div>
       </header>
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
@@ -156,7 +179,11 @@ export function DashboardHome<RouteId extends string>({
               <div key={label} className="rounded-lg border border-slate-200 bg-panel p-4">
                 <p className="text-sm font-medium text-slate-500">{label}</p>
                 <p className="mt-2 text-2xl font-semibold text-slate-950">
-                  {label === "Browse" ? queuedJobs : 0}
+                  {label === "Apply Review"
+                    ? applyCount
+                    : label === "Maybe"
+                      ? maybeCount
+                      : Math.max(browseCount, queuedJobs)}
                 </p>
               </div>
             ))}

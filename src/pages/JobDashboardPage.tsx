@@ -1,9 +1,29 @@
-import { BriefcaseBusiness, Layers3, Search } from "lucide-react";
-import { useState } from "react";
+import {
+  AlertTriangle,
+  BriefcaseBusiness,
+  Layers3,
+  RefreshCw,
+  Search,
+  Sparkles
+} from "lucide-react";
+import { useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
-import type { NormalizedJob } from "../models/domain";
+import type { JobMatch, NormalizedJob, ProfileCompletion } from "../models/domain";
 
 type QueueTab = "apply_review" | "maybe" | "browse";
+
+interface JobDashboardPageProps {
+  jobs: NormalizedJob[];
+  matches: JobMatch[];
+  profileCompletion: ProfileCompletion;
+  isScoring: boolean;
+  onScoreJobs: () => void;
+}
+
+interface JobCardData {
+  job: NormalizedJob;
+  match: JobMatch | null;
+}
 
 const tabs: Array<{
   id: QueueTab;
@@ -16,57 +36,220 @@ const tabs: Array<{
     id: "apply_review",
     label: "Apply Review",
     icon: BriefcaseBusiness,
-    title: "No jobs ready for review",
+    title: "No high-match jobs yet",
     message:
-      "Scored jobs that look actionable will appear here after ingestion and matching are implemented."
+      "Jobs scoring 8.0 or higher will appear here for human review and next-step decisions."
   },
   {
     id: "maybe",
     label: "Maybe",
     icon: Layers3,
-    title: "No maybe jobs yet",
+    title: "No medium-match jobs yet",
     message:
-      "Borderline matches will be held here for user review after the match engine is added."
+      "Jobs scoring 5.5 to 7.9 will appear here with gaps to inspect before investing effort."
   },
   {
     id: "browse",
     label: "Browse",
     icon: Search,
-    title: "No browse jobs yet",
+    title: "No browsable jobs yet",
     message:
-      "Lower-priority discovered jobs will appear here once Phase 2 ingestion feeds the dashboard."
+      "Low-score and skipped jobs remain visible here instead of being hidden."
   }
 ];
 
-interface JobDashboardPageProps {
-  jobs: NormalizedJob[];
+function scoreTone(score: number): string {
+  if (score >= 8) {
+    return "bg-emerald-50 text-emerald-700";
+  }
+
+  if (score >= 5.5) {
+    return "bg-amber-50 text-amber-700";
+  }
+
+  return "bg-slate-100 text-slate-700";
 }
 
-export function JobDashboardPage({ jobs }: JobDashboardPageProps) {
+function recommendationLabel(match: JobMatch): string {
+  if (match.recommendation === "apply") {
+    return "Apply review";
+  }
+
+  if (match.recommendation === "maybe") {
+    return "Maybe";
+  }
+
+  if (match.recommendation === "skip") {
+    return "Skip";
+  }
+
+  return "Browse";
+}
+
+function JobMatchCard({ item }: { item: JobCardData }) {
+  const { job, match } = item;
+
+  if (!match) {
+    return (
+      <article className="rounded-lg border border-slate-200 bg-white p-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="min-w-0">
+            <h3 className="text-base font-semibold text-slate-950">{job.title}</h3>
+            <p className="mt-1 text-sm text-slate-500">
+              {job.company} · {job.location || "Unknown location"}
+            </p>
+          </div>
+          <span className="inline-flex w-fit rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">
+            Queued
+          </span>
+        </div>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          This job has been ingested and is waiting for match scoring.
+        </p>
+      </article>
+    );
+  }
+
+  const lowMatch = match.queue === "browse" && match.overallScore < 5.5;
+
+  return (
+    <article className="rounded-lg border border-slate-200 bg-white p-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div className="min-w-0">
+          <h3 className="text-base font-semibold text-slate-950">{job.title}</h3>
+          <p className="mt-1 text-sm text-slate-500">
+            {job.company} · {job.location || "Unknown location"}
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <span
+            className={`inline-flex rounded-md px-2 py-1 text-xs font-semibold ${scoreTone(match.overallScore)}`}
+          >
+            {match.overallScore.toFixed(1)} / 10
+          </span>
+          <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+            {recommendationLabel(match)}
+          </span>
+        </div>
+      </div>
+
+      <p className="mt-4 text-sm leading-6 text-slate-700">{match.summary}</p>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-2">
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900">Top match reasons</h4>
+          <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
+            {match.topMatchReasons.slice(0, 3).map((reason) => (
+              <li key={reason}>- {reason}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <h4 className="text-sm font-semibold text-slate-900">
+            {lowMatch ? "Why this is low match" : "Top gaps"}
+          </h4>
+          <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
+            {match.topGaps.slice(0, 3).map((gap) => (
+              <li key={gap}>- {gap}</li>
+            ))}
+          </ul>
+        </div>
+      </div>
+
+      <div className="mt-4 rounded-md border border-slate-200 bg-panel p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Recommended next action
+        </p>
+        <p className="mt-1 text-sm leading-6 text-slate-700">
+          {match.recommendedNextAction}
+        </p>
+      </div>
+    </article>
+  );
+}
+
+export function JobDashboardPage({
+  jobs,
+  matches,
+  profileCompletion,
+  isScoring,
+  onScoreJobs
+}: JobDashboardPageProps) {
   const [activeTab, setActiveTab] = useState<QueueTab>("apply_review");
   const selected = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
-  const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued");
+  const matchByJobId = useMemo(
+    () => new Map(matches.map((match) => [match.jobId, match] as const)),
+    [matches]
+  );
+  const queuedJobs = jobs.filter((job) => !matchByJobId.has(job.id));
+  const cards = useMemo<JobCardData[]>(() => {
+    const matchedCards = jobs
+      .map((job) => ({ job, match: matchByJobId.get(job.id) ?? null }))
+      .filter((item) => item.match !== null)
+      .sort((a, b) => (b.match?.overallScore ?? 0) - (a.match?.overallScore ?? 0));
+
+    if (activeTab === "browse") {
+      return [
+        ...matchedCards.filter((item) => item.match?.queue === "browse"),
+        ...queuedJobs.map((job) => ({ job, match: null }))
+      ];
+    }
+
+    return matchedCards.filter((item) => item.match?.queue === activeTab);
+  }, [activeTab, jobs, matchByJobId, queuedJobs]);
 
   return (
     <div className="space-y-6">
-      <header className="max-w-3xl">
-        <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-          Jobs
-        </p>
-        <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-          Job dashboard
-        </h2>
-        <p className="mt-3 text-sm leading-6 text-slate-600">
-          Ingested jobs remain queued until Phase 3 scoring assigns them to Apply
-          Review, Maybe, or Browse.
-        </p>
+      <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
+        <div className="max-w-3xl">
+          <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
+            Jobs
+          </p>
+          <h2 className="mt-2 text-3xl font-semibold text-slate-950">
+            Job dashboard
+          </h2>
+          <p className="mt-3 text-sm leading-6 text-slate-600">
+            Scored jobs are routed into queues for human review. Low-score jobs stay
+            browsable with explanations.
+          </p>
+        </div>
+        <button
+          className="inline-flex min-h-11 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          type="button"
+          disabled={isScoring || jobs.length === 0}
+          onClick={onScoreJobs}
+        >
+          {isScoring ? (
+            <RefreshCw className="animate-spin" aria-hidden="true" size={18} />
+          ) : (
+            <Sparkles aria-hidden="true" size={18} />
+          )}
+          {isScoring ? "Scoring jobs" : "Score jobs now"}
+        </button>
       </header>
+
+      {profileCompletion.percent < 100 && (
+        <div className="flex gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm leading-6 text-amber-800">
+          <AlertTriangle aria-hidden="true" className="mt-0.5 shrink-0" size={18} />
+          <p>
+            Profile is {profileCompletion.percent}% complete. Scoring will still run
+            as a best-effort estimate, but missing fields can lower confidence.
+          </p>
+        </div>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-wrap gap-2" role="tablist" aria-label="Job queues">
           {tabs.map((tab) => {
             const Icon = tab.icon;
             const active = tab.id === activeTab;
+            const count =
+              tab.id === "browse"
+                ? jobs.filter((job) => {
+                    const match = matchByJobId.get(job.id);
+                    return !match || match.queue === "browse";
+                  }).length
+                : matches.filter((match) => match.queue === tab.id).length;
 
             return (
               <button
@@ -83,38 +266,20 @@ export function JobDashboardPage({ jobs }: JobDashboardPageProps) {
               >
                 <Icon aria-hidden="true" size={17} />
                 {tab.label}
+                <span className="rounded bg-white/20 px-1.5 py-0.5 text-xs">
+                  {count}
+                </span>
               </button>
             );
           })}
         </div>
 
         <div className="mt-5" role="tabpanel">
-          {activeTab === "browse" && queuedJobs.length > 0 ? (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="bg-panel text-slate-600">
-                  <tr>
-                    <th className="px-4 py-3 font-semibold">Title</th>
-                    <th className="px-4 py-3 font-semibold">Company</th>
-                    <th className="px-4 py-3 font-semibold">Location</th>
-                    <th className="px-4 py-3 font-semibold">Source</th>
-                    <th className="px-4 py-3 font-semibold">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {queuedJobs.map((job) => (
-                    <tr key={job.id} className="border-t border-slate-200">
-                      <td className="px-4 py-3 font-medium text-slate-950">
-                        {job.title}
-                      </td>
-                      <td className="px-4 py-3">{job.company}</td>
-                      <td className="px-4 py-3">{job.location || "Unknown"}</td>
-                      <td className="px-4 py-3">{job.source}</td>
-                      <td className="px-4 py-3">{job.scoringStatus}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          {cards.length > 0 ? (
+            <div className="space-y-4">
+              {cards.map((item) => (
+                <JobMatchCard key={item.job.id} item={item} />
+              ))}
             </div>
           ) : (
             <EmptyState

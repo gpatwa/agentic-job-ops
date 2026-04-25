@@ -104,6 +104,13 @@ enum QueueType {
   browse
 }
 
+enum MatchRecommendation {
+  apply
+  maybe
+  browse
+  skip
+}
+
 model Tenant {
   id        String       @id @default(cuid())
   name      String
@@ -223,17 +230,35 @@ model ScanRun {
 }
 
 model JobMatch {
-  id           String    @id @default(cuid())
-  tenantId     String
-  userId       String
-  jobId        String
-  score        Float
-  queue        QueueType
-  rationale    String
-  modelVersion String
-  createdAt    DateTime  @default(now())
+  id                       String              @id @default(cuid())
+  tenantId                 String
+  userId                   String
+  jobId                    String
+  overallScore             Float
+  skillsScore              Float
+  experienceScore          Float
+  seniorityScore           Float
+  locationScore            Float
+  salaryScore              Float
+  industryScore            Float
+  companyFitScore          Float
+  applicationEffortScore   Float
+  strategicValueScore      Float
+  recommendation           MatchRecommendation
+  queue                    QueueType
+  topMatchReasons          String[]
+  topGaps                  String[]
+  employerLookingFor       String[]
+  summary                  String
+  recommendedNextAction    String
+  scoringVersion           String
+  modelName                String
+  promptVersion            String
+  createdAt                DateTime            @default(now())
+  updatedAt                DateTime            @updatedAt
 
   @@index([tenantId, userId])
+  @@index([tenantId, queue])
   @@unique([tenantId, userId, jobId])
 }
 

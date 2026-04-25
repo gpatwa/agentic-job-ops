@@ -22,6 +22,18 @@ Build an offline ingestion foundation with:
 - Deduplication by ATS job ID, application URL, company/title/location, and a description similarity placeholder.
 - Scan-run history with fetched, inserted, updated, duplicate, and error counts.
 
+## Phase 3 Scope
+
+Build the match engine and scoring service with:
+
+- `JobMatch` and `MatchScore` records for each scored job.
+- Per-dimension scores for skills, experience, seniority, location, salary, industry, company fit, application effort, and strategic value.
+- Deterministic fallback scoring that works without LLM keys.
+- Placeholder LLM scoring adapter that can be swapped in later.
+- Manual "Score Jobs Now" dashboard action.
+- Queue assignment: Apply Review for 8.0 to 10.0, Maybe for 5.5 to 7.9, Browse below 5.5, and Skip below 3.0 while remaining browsable.
+- Explanations with summaries, top reasons, top gaps, employer-looking-for notes, and recommended next action.
+
 ## Functional Requirements
 
 - Users can create and edit a career profile.
@@ -32,6 +44,10 @@ Build an offline ingestion foundation with:
 - Operators can configure Greenhouse and Lever sources and run scans.
 - Operators can import a manual job URL as a queued placeholder.
 - New jobs are queued for Phase 3 scoring and not scored in Phase 2.
+- Users can run match scoring manually.
+- Scored jobs appear in Apply Review, Maybe, or Browse queues.
+- Low-score and skipped jobs remain visible with useful explanations.
+- Scoring creates audit events without logging sensitive profile content.
 
 ## Non-Functional Requirements
 

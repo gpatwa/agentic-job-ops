@@ -11,7 +11,7 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/resumeService.ts`: Resume upload record creation and parser placeholder.
 - `src/services/auditLog.ts`: Sanitized audit events for important actions.
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
-- `src/services/matchEngine.ts`: Phase 3 scoring interface placeholder.
+- `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
 - `src/services/browserApplicationAssistant.ts`: Phase 5 browser assistant placeholder with explicit approval requirement.
 - `prisma/schema.prisma`: PostgreSQL-ready model reference.
 
@@ -27,6 +27,18 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 The Greenhouse connector uses the public Job Board API `GET /v1/boards/{board_token}/jobs?content=true`. The Lever connector uses the Postings API `GET /v0/postings/{site}?mode=json&limit=100`.
 
 `runDueScheduledScans` is the offline worker entry point for a future cron or queue worker. The browser admin view only triggers manual scans.
+
+## Match Scoring Flow
+
+1. A user clicks "Score Jobs Now" from the dashboard or job queues.
+2. The match engine scores each normalized job against the current career profile.
+3. The deterministic adapter produces best-effort scores without API keys.
+4. A future LLM adapter can replace or augment deterministic scoring through the same `MatchScoringAdapter` interface.
+5. Each match stores per-dimension scores, recommendation, summary, reasons, gaps, employer-looking-for notes, and next action.
+6. Apply recommendations route to Apply Review, maybe recommendations route to Maybe, and browse or skip recommendations route to Browse.
+7. Jobs below 3.0 are marked skip but remain searchable and visible in Browse.
+
+Incomplete profiles generate a visible warning while still producing best-effort scores. Weak job descriptions are scored conservatively.
 
 ## Data Protection
 

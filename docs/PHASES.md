@@ -10,7 +10,7 @@ Offline job ingestion workers, source configuration, manual scan execution, Gree
 
 ## Phase 3
 
-Match engine, 0 to 10 job scoring, Apply Review Queue, Maybe Queue, Browse Queue, and low-score summaries.
+Match engine, 0 to 10 deterministic fallback scoring, placeholder LLM scoring adapter, per-dimension match scores, Apply Review Queue, Maybe Queue, Browse Queue, skip-but-browsable recommendations, low-score explanations, and audit events.
 
 ## Phase 4
 

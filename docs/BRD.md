@@ -26,6 +26,15 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Scan history with errors visible to operators.
 - New jobs held in queued status for Phase 3 scoring.
 
+## Phase 3 Outcomes
+
+- Deterministic match scoring from 0 to 10 without API keys.
+- Placeholder LLM scoring adapter boundary for later model-backed scoring.
+- Queue routing into Apply Review, Maybe, and Browse.
+- Skip recommendations remain searchable in Browse.
+- Explanations include summary, match reasons, gaps, employer needs, and recommended next action.
+- Manual scoring action for development and testing.
+
 ## Users
 
 - Individual job seekers.

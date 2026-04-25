@@ -10,7 +10,13 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { AppShell, type NavigationItem } from "./components/AppShell";
 import { currentSession } from "./data/currentSession";
-import type { ApplicationRecord, AuditLog, Resume, UserProfile } from "./models/domain";
+import type {
+  ApplicationRecord,
+  AuditLog,
+  JobMatch,
+  Resume,
+  UserProfile
+} from "./models/domain";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
@@ -30,6 +36,7 @@ import {
   upsertJobSourceConfig,
   type JobSourceConfigDraft
 } from "./services/jobIngestion";
+import { loadJobMatches, scoreJobsForProfile } from "./services/matchEngine";
 import {
   loadUserProfile,
   saveUserProfile,
@@ -83,8 +90,12 @@ export default function App() {
   const [normalizedJobs, setNormalizedJobs] = useState(() =>
     loadNormalizedJobs(currentSession)
   );
+  const [jobMatches, setJobMatches] = useState<JobMatch[]>(() =>
+    loadJobMatches(currentSession)
+  );
   const [scanRuns, setScanRuns] = useState(() => loadScanRuns(currentSession));
   const [isScanning, setIsScanning] = useState(false);
+  const [isScoring, setIsScoring] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() =>
     loadAuditLogs(currentSession)
   );
@@ -216,6 +227,36 @@ export default function App() {
     });
   }
 
+  async function handleScoreJobsNow() {
+    setIsScoring(true);
+
+    try {
+      const result = await scoreJobsForProfile(
+        currentSession,
+        profile,
+        normalizedJobs,
+        jobMatches
+      );
+      setNormalizedJobs(result.jobs);
+      setJobMatches(result.matches);
+      recordAudit({
+        action: "job_scoring.completed",
+        resourceType: "JobMatch",
+        resourceId: "batch_score_jobs",
+        metadata: {
+          scoredCount: result.scoredCount,
+          applyCount: result.applyCount,
+          maybeCount: result.maybeCount,
+          browseCount: result.browseCount,
+          skipCount: result.skipCount,
+          profileIncomplete: Boolean(result.profileWarning)
+        }
+      });
+    } finally {
+      setIsScoring(false);
+    }
+  }
+
   function renderRoute() {
     switch (route) {
       case "profile-setup":
@@ -255,7 +296,15 @@ export default function App() {
           />
         );
       case "jobs":
-        return <JobDashboardPage jobs={normalizedJobs} />;
+        return (
+          <JobDashboardPage
+            jobs={normalizedJobs}
+            matches={jobMatches}
+            profileCompletion={completion}
+            isScoring={isScoring}
+            onScoreJobs={handleScoreJobsNow}
+          />
+        );
       case "tracker":
         return <ApplicationTrackerPage applications={applications} />;
       case "dashboard":
@@ -266,7 +315,10 @@ export default function App() {
             resume={resume}
             applications={applications}
             jobs={normalizedJobs}
+            matches={jobMatches}
             auditLogs={auditLogs}
+            onScoreJobs={handleScoreJobsNow}
+            isScoring={isScoring}
             onNavigate={navigate}
             routes={{
               profile: "profile-setup",

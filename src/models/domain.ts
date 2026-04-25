@@ -65,6 +65,9 @@ export type ScoringStatus = (typeof scoringStatuses)[number];
 export const queueTypes = ["apply_review", "maybe", "browse"] as const;
 export type QueueType = (typeof queueTypes)[number];
 
+export const matchRecommendations = ["apply", "maybe", "browse", "skip"] as const;
+export type MatchRecommendation = (typeof matchRecommendations)[number];
+
 export interface Tenant {
   id: string;
   name: string;
@@ -169,16 +172,36 @@ export interface ScanRun {
   errorMessage: string;
 }
 
-export interface JobMatch {
+export interface MatchScore {
   id: string;
   tenantId: string;
   userId: string;
   jobId: string;
-  score: number;
-  queue: QueueType;
-  rationale: string;
-  modelVersion: string;
+  overallScore: number;
+  skillsScore: number;
+  experienceScore: number;
+  seniorityScore: number;
+  locationScore: number;
+  salaryScore: number;
+  industryScore: number;
+  companyFitScore: number;
+  applicationEffortScore: number;
+  strategicValueScore: number;
+  recommendation: MatchRecommendation;
+  topMatchReasons: string[];
+  topGaps: string[];
+  employerLookingFor: string[];
+  summary: string;
+  recommendedNextAction: string;
+  scoringVersion: string;
+  modelName: string;
+  promptVersion: string;
   createdAt: string;
+  updatedAt: string;
+}
+
+export interface JobMatch extends MatchScore {
+  queue: QueueType;
 }
 
 export interface ApplicationRecord {
