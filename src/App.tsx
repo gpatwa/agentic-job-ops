@@ -30,6 +30,7 @@ import { JobDashboardPage } from "./pages/JobDashboardPage";
 import { ProfileSetupPage } from "./pages/ProfileSetupPage";
 import { ResumeUploadPage } from "./pages/ResumeUploadPage";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
+import { clearScopedWorkspace } from "./lib/storage";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
 import {
   approveApplicationPackage,
@@ -85,6 +86,7 @@ const navigationItems: NavigationItem<RouteId>[] = [
 ];
 
 const routeIds = navigationItems.map((item) => item.id);
+const isDevelopment = import.meta.env.DEV;
 
 function routeFromHash(): RouteId {
   const route = window.location.hash.replace("#", "");
@@ -274,7 +276,7 @@ export default function App() {
 
   function handlePlaceholderResume() {
     const placeholderResume = createResumeUpload(currentSession, {
-      fileName: "placeholder-resume.pdf",
+      fileName: "resume-record.pdf",
       hasLocalFile: false
     });
     saveResume(currentSession, placeholderResume);
@@ -289,6 +291,20 @@ export default function App() {
         hasLocalFile: false
       }
     });
+  }
+
+  function handleClearWorkspace() {
+    if (
+      !window.confirm(
+        "Clear all locally stored demo data for this workspace? This cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    clearScopedWorkspace(currentSession.tenant.id, currentSession.userId);
+    window.location.hash = "dashboard";
+    window.location.reload();
   }
 
   function handleSaveJobSourceConfig(draft: JobSourceConfigDraft) {
@@ -575,6 +591,7 @@ export default function App() {
           <CareerProfilePage
             session={currentSession}
             profile={profile}
+            resume={resume}
             onSave={handleSaveProfile}
           />
         );
@@ -660,9 +677,11 @@ export default function App() {
             applications={applications}
             jobs={normalizedJobs}
             matches={jobMatches}
+            sourceConfigCount={jobSourceConfigs.length}
             auditLogs={auditLogs}
             onScoreJobs={handleScoreJobsNow}
             isScoring={isScoring}
+            onClearWorkspace={isDevelopment ? handleClearWorkspace : undefined}
             onNavigate={navigate}
             routes={{
               profile: "profile-setup",

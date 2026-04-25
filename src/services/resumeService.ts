@@ -26,7 +26,7 @@ export function createResumeUpload(
   input: ResumeUploadInput
 ): Resume {
   const id = createId("resume");
-  const fileName = input.fileName.trim() || "placeholder-resume.pdf";
+  const fileName = input.fileName.trim() || "resume-record.pdf";
 
   const resume: Resume = {
     id,
@@ -35,7 +35,7 @@ export function createResumeUpload(
     originalFileName: fileName,
     fileUrl: `${input.hasLocalFile ? "local-upload" : "local-placeholder"}://resume/${id}.${fileExtension(fileName)}`,
     parsedText:
-      "Resume parsing placeholder: Phase 1 stores the upload record and reserves this field for a parser service. No resume content has been extracted yet.",
+      "Resume text extraction has not run yet. Add verified facts in the career profile before using this resume for application drafts.",
     status: "parsed",
     createdAt: new Date().toISOString()
   };

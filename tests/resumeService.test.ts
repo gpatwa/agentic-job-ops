@@ -3,7 +3,7 @@ import { currentSession } from "../src/data/currentSession";
 import { createResumeUpload } from "../src/services/resumeService";
 
 describe("createResumeUpload", () => {
-  it("creates a tenant and user scoped resume placeholder", () => {
+  it("creates a tenant and user scoped resume record", () => {
     const resume = createResumeUpload(currentSession, {
       fileName: "resume.pdf",
       hasLocalFile: true
@@ -12,6 +12,6 @@ describe("createResumeUpload", () => {
     expect(resume.tenantId).toBe(currentSession.tenant.id);
     expect(resume.userId).toBe(currentSession.userId);
     expect(resume.status).toBe("parsed");
-    expect(resume.parsedText).toContain("placeholder");
+    expect(resume.parsedText).toContain("Resume text extraction has not run yet");
   });
 });

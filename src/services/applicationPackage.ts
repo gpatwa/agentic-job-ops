@@ -20,7 +20,7 @@ import {
   upsertApplicationRecord
 } from "./applicationService";
 
-const PROMPT_VERSION = "phase5-application-package-v1";
+const PROMPT_VERSION = "application-package-v1";
 const DETERMINISTIC_MODEL_NAME = "deterministic-package-fallback";
 const LLM_PLACEHOLDER_MODEL_NAME = "llm-package-placeholder";
 
@@ -173,7 +173,8 @@ function usableResumeText(resume: Resume | null): string {
     return "";
   }
 
-  return resume.parsedText.includes("Resume parsing placeholder")
+  return resume.parsedText.includes("Resume text extraction has not run yet")
+    || resume.parsedText.includes("Resume parsing placeholder")
     ? ""
     : resume.parsedText;
 }
@@ -288,7 +289,7 @@ function buildResumeMarkdown(
     "## Source Resume Notes",
     resumeEvidence
       ? resumeEvidence.slice(0, 900)
-      : "No parsed resume evidence is available yet. Use only verified profile facts until parsing is implemented."
+      : "No resume text evidence is available yet. Use only verified profile facts until resume extraction is available."
   ].join("\n");
 }
 

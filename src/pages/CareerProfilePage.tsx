@@ -1,24 +1,30 @@
-import type { AppSession, UserProfile } from "../models/domain";
+import type { AppSession, Resume, UserProfile } from "../models/domain";
 import { ProfileForm } from "../components/ProfileForm";
 import type { UserProfileDraft } from "../services/profileService";
 
 interface CareerProfilePageProps {
   session: AppSession;
   profile: UserProfile | null;
+  resume: Resume | null;
   onSave: (draft: UserProfileDraft) => void;
 }
 
 export function CareerProfilePage({
   session,
   profile,
+  resume,
   onSave
 }: CareerProfilePageProps) {
   return (
     <ProfileForm
       session={session}
       profile={profile}
-      title="Review career profile"
-      description="Keep targets, constraints, and verified facts current before later phases score jobs or prepare application materials."
+      resume={resume}
+      mode="career"
+      eyebrow="Career source of truth"
+      title="Maintain verified career evidence"
+      description="Keep facts, skills, role strategy, and company preferences accurate. Drafts and recommendations should only lean on information you have verified."
+      submitLabel="Save career profile"
       onSave={onSave}
     />
   );

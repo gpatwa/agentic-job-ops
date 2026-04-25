@@ -5,6 +5,12 @@ interface ResumeStatusCardProps {
   resume: Resume | null;
 }
 
+function resumeDisplayName(resume: Resume): string {
+  return resume.originalFileName === "placeholder-resume.pdf"
+    ? "Resume record"
+    : resume.originalFileName;
+}
+
 export function ResumeStatusCard({ resume }: ResumeStatusCardProps) {
   const hasResume = Boolean(resume);
   const Icon = hasResume ? FileCheck2 : FileClock;
@@ -18,11 +24,11 @@ export function ResumeStatusCard({ resume }: ResumeStatusCardProps) {
         <div className="min-w-0">
           <p className="text-sm font-medium text-slate-500">Resume upload status</p>
           <h3 className="mt-1 truncate text-lg font-semibold text-slate-950">
-            {resume ? resume.originalFileName : "No resume uploaded"}
+            {resume ? resumeDisplayName(resume) : "No resume uploaded"}
           </h3>
           <p className="mt-2 text-sm text-slate-500">
             {resume
-              ? `Status: ${resume.status}. Parser output is a Phase 1 placeholder.`
+              ? "Resume record is ready. Text extraction is shown when available."
               : "Upload a resume to create the first resume record."}
           </p>
         </div>

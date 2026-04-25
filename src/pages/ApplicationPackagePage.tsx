@@ -35,6 +35,12 @@ function statusLabel(value: string): string {
   return value.replace(/_/g, " ");
 }
 
+function userFacingJobCopy(value: string): string {
+  return value
+    .split("Manual import queued for normalization")
+    .join("Manually imported job");
+}
+
 function confidenceTone(confidence: ApplicationAnswer["confidence"]): string {
   if (confidence === "high") {
     return "bg-emerald-50 text-emerald-700";
@@ -155,7 +161,7 @@ export function ApplicationPackagePage({
             Application Package
           </p>
           <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-            {job.title} at {job.company}
+            {userFacingJobCopy(job.title)} at {job.company}
           </h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">
             Review and edit the tailored resume draft, cover letter draft, and

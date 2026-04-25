@@ -29,7 +29,7 @@ function statusDescription(status: ApplicationStatus): string {
     case "saved":
       return "Held for later review.";
     case "draft_prepared":
-      return "Application prep placeholder started.";
+      return "Application prep has started and is waiting for review.";
     case "needs_review":
       return "Waiting for human review.";
     case "submitted":
@@ -41,6 +41,16 @@ function statusDescription(status: ApplicationStatus): string {
     default:
       return "Tracked application workflow state.";
   }
+}
+
+function userFacingJobCopy(value: string): string {
+  return value
+    .split("Manual import queued for normalization")
+    .join("Manually imported job")
+    .split("A crawler or parser will normalize this posting in a later phase.")
+    .join(
+      "Details are limited, so scoring confidence may be lower until the posting is enriched."
+    );
 }
 
 function TrackerCard({
@@ -71,7 +81,7 @@ function TrackerCard({
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="min-w-0">
           <h4 className="text-base font-semibold text-slate-950">
-            {job?.title ?? application.jobId}
+            {job ? userFacingJobCopy(job.title) : application.jobId}
           </h4>
           <p className="mt-1 text-sm text-slate-500">
             {job ? `${job.company} · ${job.location || "Unknown location"}` : "Job not found"}
@@ -98,7 +108,9 @@ function TrackerCard({
       </div>
 
       {match && (
-        <p className="mt-3 text-sm leading-6 text-slate-600">{match.summary}</p>
+        <p className="mt-3 text-sm leading-6 text-slate-600">
+          {userFacingJobCopy(match.summary)}
+        </p>
       )}
 
       {applicationPackage && (

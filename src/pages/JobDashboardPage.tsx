@@ -109,6 +109,16 @@ function packageStatusLabel(applicationPackage: ApplicationPackage | null): stri
     : "no package";
 }
 
+function userFacingJobCopy(value: string): string {
+  return value
+    .split("Manual import queued for normalization")
+    .join("Manually imported job")
+    .split("A crawler or parser will normalize this posting in a later phase.")
+    .join(
+      "Details are limited, so scoring confidence may be lower until the posting is enriched."
+    );
+}
+
 function confirmSensitiveAction(action: DashboardJobAction): boolean {
   if (action === "archive") {
     return window.confirm("Archive this job in your tracker?");
@@ -179,7 +189,9 @@ function JobMatchCard({
       <article className="rounded-lg border border-slate-200 bg-white p-4">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
-            <h3 className="text-base font-semibold text-slate-950">{job.title}</h3>
+            <h3 className="text-base font-semibold text-slate-950">
+              {userFacingJobCopy(job.title)}
+            </h3>
             <p className="mt-1 text-sm text-slate-500">
               {job.company} · {job.location || "Unknown location"}
             </p>
@@ -230,7 +242,9 @@ function JobMatchCard({
     <article className="rounded-lg border border-slate-200 bg-white p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
-          <h3 className="text-base font-semibold text-slate-950">{job.title}</h3>
+          <h3 className="text-base font-semibold text-slate-950">
+            {userFacingJobCopy(job.title)}
+          </h3>
           <p className="mt-1 text-sm text-slate-500">
             {job.company} · {job.location || "Unknown location"}
           </p>
@@ -255,7 +269,9 @@ function JobMatchCard({
         </div>
       </div>
 
-      <p className="mt-4 text-sm leading-6 text-slate-700">{match.summary}</p>
+      <p className="mt-4 text-sm leading-6 text-slate-700">
+        {userFacingJobCopy(match.summary)}
+      </p>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <div>

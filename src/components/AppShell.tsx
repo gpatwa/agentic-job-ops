@@ -20,6 +20,12 @@ interface AppShellProps<RouteId extends string> {
   onNavigate: (route: RouteId) => void;
 }
 
+function resumeDisplayName(resume: Resume): string {
+  return resume.originalFileName === "placeholder-resume.pdf"
+    ? "Resume record"
+    : resume.originalFileName;
+}
+
 export function AppShell<RouteId extends string>({
   children,
   currentRoute,
@@ -77,7 +83,7 @@ export function AppShell<RouteId extends string>({
           <div className="mt-4 hidden rounded-lg border border-line bg-white p-4 text-sm text-slate-600 lg:block">
             <p className="font-medium text-slate-800">Resume</p>
             <p className="mt-1 truncate">
-              {resume ? resume.originalFileName : "Not uploaded"}
+              {resume ? resumeDisplayName(resume) : "Not uploaded"}
             </p>
           </div>
         </aside>

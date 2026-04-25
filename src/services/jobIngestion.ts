@@ -376,7 +376,30 @@ export function upsertJobSourceConfig(
 
 export function loadNormalizedJobs(session: AppSession): NormalizedJob[] {
   const jobs = readJson<NormalizedJob[]>(jobsKey(session), []);
-  return jobs.filter((job) => normalizedJobSchema.safeParse(job).success);
+  return jobs
+    .map((job) => {
+      const parsed = normalizedJobSchema.safeParse(job);
+      if (!parsed.success) {
+        return null;
+      }
+
+      if (parsed.data.source !== "manual") {
+        return parsed.data;
+      }
+
+      return normalizedJobSchema.parse({
+        ...parsed.data,
+        title:
+          parsed.data.title === "Manual import queued for normalization"
+            ? "Manually imported job"
+            : parsed.data.title,
+        description: parsed.data.description.replace(
+          "Manual job URL import placeholder. A crawler or parser will normalize this posting in a later phase.",
+          "This manually imported job has limited details. Add more information later for stronger scoring confidence."
+        )
+      });
+    })
+    .filter((job): job is NormalizedJob => Boolean(job));
 }
 
 export function saveNormalizedJobs(
@@ -624,14 +647,14 @@ export function createManualJobImportPlaceholder(
     sourceConfigId: null,
     source: "manual",
     sourceJobId: normalizedUrl,
-    title: "Manual import queued for normalization",
+    title: "Manually imported job",
     company: "Unknown company",
     location: "Unknown",
     remoteType: "unknown",
     salaryMin: null,
     salaryMax: null,
     description:
-      "Manual job URL import placeholder. A crawler or parser will normalize this posting in a later phase.",
+      "This manually imported job has limited details. Add more information later for stronger scoring confidence.",
     responsibilities: [],
     requirements: [],
     applicationUrl: normalizedUrl,
@@ -663,7 +686,7 @@ function connectorFor(source: JobSource): JobIngestionConnector {
     return createLeverConnector();
   }
 
-  throw new Error(`${source} scans are not implemented in Phase 2.`);
+  throw new Error(`${source} scans are not available for this workspace yet.`);
 }
 
 export async function runManualScan(

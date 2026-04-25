@@ -9,6 +9,16 @@ interface ResumeUploadPageProps {
   onPlaceholderUpload: () => void;
 }
 
+function resumeTextPreview(resume: Resume): string {
+  return resume.parsedText
+    .split(
+      "Resume parsing placeholder: Phase 1 stores the upload record and reserves this field for a parser service. No resume content has been extracted yet."
+    )
+    .join(
+      "Resume text extraction has not run yet. Add verified facts in the career profile before using this resume for application drafts."
+    );
+}
+
 export function ResumeUploadPage({
   resume,
   onUpload,
@@ -34,7 +44,8 @@ export function ResumeUploadPage({
           Upload resume
         </h2>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Phase 1 stores upload metadata locally and shows the parser placeholder.
+          Add a resume so future recommendations and application drafts can use
+          your verified background.
         </p>
       </header>
 
@@ -52,7 +63,7 @@ export function ResumeUploadPage({
                 Add resume file
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Accepted by the placeholder flow: PDF, DOC, DOCX, or TXT.
+                Accepted formats: PDF, DOC, DOCX, or TXT.
               </p>
             </div>
           </div>
@@ -63,7 +74,7 @@ export function ResumeUploadPage({
               {file ? file.name : "Choose a resume file"}
             </span>
             <span className="mt-1 text-xs text-slate-500">
-              File content is not parsed in Phase 1.
+              We will keep the upload ready for resume text extraction.
             </span>
             <input
               className="sr-only"
@@ -88,7 +99,7 @@ export function ResumeUploadPage({
               onClick={onPlaceholderUpload}
             >
               <Sparkles aria-hidden="true" size={18} />
-              Use placeholder
+              Create resume record
             </button>
           </div>
         </form>
@@ -99,10 +110,10 @@ export function ResumeUploadPage({
       {resume && (
         <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
           <h3 className="text-base font-semibold text-slate-950">
-            Parsed resume text
+            Resume text preview
           </h3>
           <p className="mt-3 rounded-md border border-slate-200 bg-panel p-4 text-sm leading-6 text-slate-600">
-            {resume.parsedText}
+            {resumeTextPreview(resume)}
           </p>
         </section>
       )}

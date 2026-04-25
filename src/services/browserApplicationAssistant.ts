@@ -16,7 +16,7 @@ export function createBrowserApplicationAssistantPlaceholder(): BrowserApplicati
         throw new Error("Browser application actions require explicit user approval.");
       }
 
-      throw new Error("Browser application assistance is scheduled for Phase 5.");
+      throw new Error("Browser application assistance is not available yet.");
     }
   };
 }

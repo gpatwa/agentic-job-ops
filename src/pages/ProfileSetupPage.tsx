@@ -17,8 +17,11 @@ export function ProfileSetupPage({
     <ProfileForm
       session={session}
       profile={profile}
-      title="Set up your profile"
-      description="Add only verified career information. Later application drafts will be constrained to these facts."
+      mode="setup"
+      eyebrow="Onboarding"
+      title="Set up your search basics"
+      description="Add contact details and search targets so the system knows which jobs to bring into view."
+      submitLabel="Save setup"
       onSave={onSave}
     />
   );

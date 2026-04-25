@@ -69,7 +69,7 @@ function sourceHint(source: JobSource): string {
     return "Use the Lever site name, such as the value after jobs.lever.co/.";
   }
 
-  return "Manual imports currently store the URL as a queued placeholder.";
+  return "Manual imports keep the job URL and may have incomplete details until more information is added.";
 }
 
 export function IngestionAdminPage({
@@ -119,8 +119,7 @@ export function IngestionAdminPage({
             Job ingestion admin
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-            Configure public ATS boards, run manual scans, and keep new jobs queued
-            for Phase 3 scoring.
+            Configure public job boards, run scans, and collect jobs for matching.
           </p>
         </div>
         <div className="rounded-lg border border-line bg-white px-4 py-3 shadow-soft">
@@ -251,7 +250,8 @@ export function IngestionAdminPage({
                 Manual URL import
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Stores a queued placeholder for a later crawler/parser.
+                Add a job URL even when details are incomplete. Limited details can
+                lower scoring confidence until the posting is enriched.
               </p>
             </div>
           </div>
@@ -270,7 +270,7 @@ export function IngestionAdminPage({
             type="submit"
           >
             <Plus aria-hidden="true" size={18} />
-            Import placeholder
+            Import job URL
           </button>
         </form>
       </section>
@@ -413,12 +413,12 @@ export function IngestionAdminPage({
               Recently ingested jobs
             </h3>
             <p className="mt-1 text-sm text-slate-500">
-              New records stay queued until Phase 3 scoring.
+              New jobs wait here until you run matching from the dashboard.
             </p>
           </div>
           <div className="divide-y divide-slate-200">
             {jobs.length === 0 ? (
-              <p className="p-5 text-sm text-slate-500">No normalized jobs stored.</p>
+              <p className="p-5 text-sm text-slate-500">No ingested jobs yet.</p>
             ) : (
               jobs.slice(0, 8).map((job) => (
                 <article key={job.id} className="p-4">
