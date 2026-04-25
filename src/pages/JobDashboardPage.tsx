@@ -110,13 +110,15 @@ function packageStatusLabel(applicationPackage: ApplicationPackage | null): stri
 }
 
 function userFacingJobCopy(value: string): string {
-  return value
-    .split("Manual import queued for normalization")
-    .join("Manually imported job")
-    .split("A crawler or parser will normalize this posting in a later phase.")
-    .join(
-      "Details are limited, so scoring confidence may be lower until the posting is enriched."
-    );
+  if (value.toLowerCase().includes("manual import queued")) {
+    return "Manually imported job";
+  }
+
+  if (value.toLowerCase().includes("normalize this posting")) {
+    return "Details are limited, so scoring confidence may be lower until the posting is enriched.";
+  }
+
+  return value;
 }
 
 function confirmSensitiveAction(action: DashboardJobAction): boolean {

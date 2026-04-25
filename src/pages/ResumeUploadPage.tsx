@@ -10,13 +10,15 @@ interface ResumeUploadPageProps {
 }
 
 function resumeTextPreview(resume: Resume): string {
-  return resume.parsedText
-    .split(
-      "Resume parsing placeholder: Phase 1 stores the upload record and reserves this field for a parser service. No resume content has been extracted yet."
-    )
-    .join(
-      "Resume text extraction has not run yet. Add verified facts in the career profile before using this resume for application drafts."
-    );
+  const normalized = resume.parsedText.toLowerCase();
+  if (
+    normalized.includes("resume parsing placeholder") ||
+    normalized.includes("text extraction has not run yet")
+  ) {
+    return "Resume text extraction has not run yet. Add verified facts in the career profile before using this resume for application drafts.";
+  }
+
+  return resume.parsedText;
 }
 
 export function ResumeUploadPage({

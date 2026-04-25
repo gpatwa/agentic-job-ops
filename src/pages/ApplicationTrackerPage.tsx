@@ -1,7 +1,8 @@
-import { ClipboardList } from "lucide-react";
+import { Bot, ClipboardList } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import type {
+  BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
@@ -15,9 +16,11 @@ interface ApplicationTrackerPageProps {
   jobs: NormalizedJob[];
   matches: JobMatch[];
   packages: ApplicationPackage[];
+  browserSessions: BrowserApplicationSession[];
   onStatusChange: (applicationId: string, status: ApplicationStatus) => void;
   onNotesChange: (applicationId: string, notes: string) => void;
   onOpenPackage: (packageId: string) => void;
+  onOpenBrowserSession: (sessionId: string) => void;
 }
 
 function statusLabel(status: string): string {
@@ -44,13 +47,15 @@ function statusDescription(status: ApplicationStatus): string {
 }
 
 function userFacingJobCopy(value: string): string {
-  return value
-    .split("Manual import queued for normalization")
-    .join("Manually imported job")
-    .split("A crawler or parser will normalize this posting in a later phase.")
-    .join(
-      "Details are limited, so scoring confidence may be lower until the posting is enriched."
-    );
+  if (value.toLowerCase().includes("manual import queued")) {
+    return "Manually imported job";
+  }
+
+  if (value.toLowerCase().includes("normalize this posting")) {
+    return "Details are limited, so scoring confidence may be lower until the posting is enriched.";
+  }
+
+  return value;
 }
 
 function packageStatusMessage(applicationPackage: ApplicationPackage): string {
@@ -68,22 +73,50 @@ function packageStatusMessage(applicationPackage: ApplicationPackage): string {
   return "Application package needs review or regenerate before applying.";
 }
 
+function browserSessionMessage(browserSession: BrowserApplicationSession): string {
+  if (browserSession.status === "submitted") {
+    return "Browser assistant confirmed submission.";
+  }
+
+  if (browserSession.status === "manual_required") {
+    return "Browser assistant marked this application for manual completion.";
+  }
+
+  if (browserSession.status === "approved_for_submit") {
+    return "Submit was approved and is waiting for the assistant submit action.";
+  }
+
+  if (browserSession.status === "ready_for_review") {
+    return "Browser session is ready for final human review.";
+  }
+
+  if (browserSession.status === "needs_user_input") {
+    return "Browser session is paused for human input.";
+  }
+
+  return "Browser session is in progress.";
+}
+
 function TrackerCard({
   application,
   job,
   match,
   applicationPackage,
+  browserSession,
   onStatusChange,
   onNotesChange,
-  onOpenPackage
+  onOpenPackage,
+  onOpenBrowserSession
 }: {
   application: ApplicationRecord;
   job: NormalizedJob | null;
   match: JobMatch | null;
   applicationPackage: ApplicationPackage | null;
+  browserSession: BrowserApplicationSession | null;
   onStatusChange: (applicationId: string, status: ApplicationStatus) => void;
   onNotesChange: (applicationId: string, notes: string) => void;
   onOpenPackage: (packageId: string) => void;
+  onOpenBrowserSession: (sessionId: string) => void;
 }) {
   const [notesDraft, setNotesDraft] = useState(application.notes);
 
@@ -119,6 +152,11 @@ function TrackerCard({
               Package {statusLabel(applicationPackage.status)}
             </span>
           )}
+          {browserSession && (
+            <span className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold capitalize text-emerald-700">
+              Browser {statusLabel(browserSession.status)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -139,6 +177,22 @@ function TrackerCard({
             onClick={() => onOpenPackage(applicationPackage.id)}
           >
             Review package
+          </button>
+        </div>
+      )}
+
+      {browserSession && (
+        <div className="mt-4 flex flex-col gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-emerald-800">
+            {browserSessionMessage(browserSession)}
+          </p>
+          <button
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-emerald-200 bg-white px-3 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100"
+            type="button"
+            onClick={() => onOpenBrowserSession(browserSession.id)}
+          >
+            <Bot aria-hidden="true" size={15} />
+            Open browser session
           </button>
         </div>
       )}
@@ -188,9 +242,11 @@ export function ApplicationTrackerPage({
   jobs,
   matches,
   packages,
+  browserSessions,
   onStatusChange,
   onNotesChange,
-  onOpenPackage
+  onOpenPackage,
+  onOpenBrowserSession
 }: ApplicationTrackerPageProps) {
   const jobById = useMemo(
     () => new Map(jobs.map((job) => [job.id, job] as const)),
@@ -209,6 +265,24 @@ export function ApplicationTrackerPage({
         ] as const)
       ),
     [packages]
+  );
+  const browserSessionByApplicationId = useMemo(
+    () => {
+      const latest = new Map<string, BrowserApplicationSession>();
+      browserSessions
+        .slice()
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        )
+        .forEach((browserSession) => {
+          if (!latest.has(browserSession.applicationRecordId)) {
+            latest.set(browserSession.applicationRecordId, browserSession);
+          }
+        });
+      return latest;
+    },
+    [browserSessions]
   );
   const grouped = applicationStatuses
     .map((status) => ({
@@ -274,9 +348,13 @@ export function ApplicationTrackerPage({
                     applicationPackage={
                       packageByApplicationId.get(application.id) ?? null
                     }
+                    browserSession={
+                      browserSessionByApplicationId.get(application.id) ?? null
+                    }
                     onStatusChange={onStatusChange}
                     onNotesChange={onNotesChange}
                     onOpenPackage={onOpenPackage}
+                    onOpenBrowserSession={onOpenBrowserSession}
                   />
                 ))}
               </div>

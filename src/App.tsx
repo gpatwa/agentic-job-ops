@@ -12,6 +12,7 @@ import { AppShell, type NavigationItem } from "./components/AppShell";
 import { currentSession } from "./data/currentSession";
 import type {
   ApplicationAnswer,
+  BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
@@ -23,6 +24,7 @@ import type {
 } from "./models/domain";
 import { ApplicationPackagePage } from "./pages/ApplicationPackagePage";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
+import { BrowserSessionReviewPage } from "./pages/BrowserSessionReviewPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
 import { IngestionAdminPage } from "./pages/IngestionAdminPage";
@@ -64,6 +66,15 @@ import {
   type UserProfileDraft
 } from "./services/profileService";
 import { createResumeUpload, loadResume, saveResume } from "./services/resumeService";
+import {
+  approveBrowserSubmit,
+  loadBrowserApplicationSessions,
+  markBrowserSessionManualRequired,
+  markBrowserSessionReadyForReview,
+  startBrowserApplicationSession,
+  submitApprovedBrowserApplication,
+  type BrowserApplicationResult
+} from "./services/browserApplicationAssistant";
 
 type RouteId =
   | "dashboard"
@@ -73,7 +84,8 @@ type RouteId =
   | "ingestion"
   | "jobs"
   | "tracker"
-  | "package-review";
+  | "package-review"
+  | "browser-session";
 
 const navigationItems: NavigationItem<RouteId>[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -94,6 +106,10 @@ function routeFromHash(): RouteId {
     return "package-review";
   }
 
+  if (route.startsWith("browser-session:")) {
+    return "browser-session";
+  }
+
   return routeIds.includes(route as RouteId) ? (route as RouteId) : "dashboard";
 }
 
@@ -104,6 +120,15 @@ function packageIdFromHash(): string | null {
   }
 
   return route.replace("package-review:", "") || null;
+}
+
+function browserSessionIdFromHash(): string | null {
+  const route = window.location.hash.replace("#", "");
+  if (!route.startsWith("browser-session:")) {
+    return null;
+  }
+
+  return route.replace("browser-session:", "") || null;
 }
 
 function extensionFor(fileName: string): string {
@@ -129,6 +154,12 @@ export default function App() {
   const [selectedPackageId, setSelectedPackageId] = useState<string | null>(() =>
     packageIdFromHash()
   );
+  const [selectedBrowserSessionId, setSelectedBrowserSessionId] = useState<
+    string | null
+  >(() => browserSessionIdFromHash());
+  const [browserSessions, setBrowserSessions] = useState<
+    BrowserApplicationSession[]
+  >(() => loadBrowserApplicationSessions(currentSession));
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -149,6 +180,7 @@ export default function App() {
     const handleHashChange = () => {
       setRoute(routeFromHash());
       setSelectedPackageId(packageIdFromHash());
+      setSelectedBrowserSessionId(browserSessionIdFromHash());
     };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
@@ -167,9 +199,28 @@ export default function App() {
     setRoute("package-review");
   }
 
+  function navigateToBrowserSession(sessionId: string) {
+    window.location.hash = `browser-session:${sessionId}`;
+    setSelectedBrowserSessionId(sessionId);
+    setRoute("browser-session");
+  }
+
   function recordAudit(log: Parameters<typeof appendAuditLog>[1]) {
     const savedLog = appendAuditLog(currentSession, log);
     setAuditLogs((current) => [savedLog, ...current].slice(0, 50));
+  }
+
+  function recordBrowserResult(result: BrowserApplicationResult) {
+    setBrowserSessions(result.sessions);
+    setApplications(result.applications);
+    result.auditEvents.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+    });
   }
 
   function recordUnsupportedClaimWarnings(
@@ -206,6 +257,19 @@ export default function App() {
       job,
       match: jobMatches.find((match) => match.jobId === job.id) ?? null
     };
+  }
+
+  function latestBrowserSessionForPackage(
+    packageId: string
+  ): BrowserApplicationSession | null {
+    return (
+      browserSessions
+        .filter((browserSession) => browserSession.applicationPackageId === packageId)
+        .sort(
+          (a, b) =>
+            new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+        )[0] ?? null
+    );
   }
 
   function invalidateApprovedApplicationIfEdited(
@@ -568,6 +632,63 @@ export default function App() {
     });
   }
 
+  async function handleStartBrowserApply(packageId: string) {
+    const applicationPackage = applicationPackages.find((item) => item.id === packageId);
+    if (!applicationPackage) {
+      return;
+    }
+
+    const job = normalizedJobs.find((item) => item.id === applicationPackage.jobId);
+    const application = applications.find(
+      (item) => item.id === applicationPackage.applicationRecordId
+    );
+    if (!job || !application) {
+      return;
+    }
+
+    const result = await startBrowserApplicationSession({
+      session: currentSession,
+      actorUserId: currentSession.userId,
+      applicationPackage,
+      application,
+      job,
+      profile,
+      resume,
+      answers: applicationAnswers.filter(
+        (answer) => answer.applicationPackageId === applicationPackage.id
+      )
+    });
+    recordBrowserResult(result);
+    navigateToBrowserSession(result.session.id);
+  }
+
+  function handleMarkBrowserSessionReady(sessionId: string) {
+    const result = markBrowserSessionReadyForReview(currentSession, sessionId);
+    recordBrowserResult(result);
+  }
+
+  function handleApproveBrowserSubmit(sessionId: string) {
+    const result = approveBrowserSubmit(currentSession, sessionId, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    recordBrowserResult(result);
+  }
+
+  async function handleSubmitApprovedBrowserApplication(sessionId: string) {
+    const result = await submitApprovedBrowserApplication(currentSession, sessionId);
+    recordBrowserResult(result);
+  }
+
+  function handleMarkBrowserSessionManualRequired(sessionId: string) {
+    const result = markBrowserSessionManualRequired(
+      currentSession,
+      sessionId,
+      "User chose manual completion from the browser session review."
+    );
+    recordBrowserResult(result);
+  }
+
   function renderRoute() {
     switch (route) {
       case "profile-setup":
@@ -628,9 +749,11 @@ export default function App() {
             jobs={normalizedJobs}
             matches={jobMatches}
             packages={applicationPackages}
+            browserSessions={browserSessions}
             onStatusChange={handleApplicationStatusChange}
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
+            onOpenBrowserSession={navigateToBrowserSession}
           />
         );
       case "package-review": {
@@ -660,11 +783,54 @@ export default function App() {
             application={application}
             job={job}
             match={match}
+            browserSession={
+              applicationPackage
+                ? latestBrowserSessionForPackage(applicationPackage.id)
+                : null
+            }
             onBack={() => navigate("tracker")}
             onSavePackage={handleSaveApplicationPackageDraft}
             onSaveAnswer={handleSaveApplicationAnswer}
             onApprove={handleApproveApplicationPackage}
             onReject={handleRejectApplicationPackage}
+            onStartBrowserApply={handleStartBrowserApply}
+            onOpenBrowserSession={navigateToBrowserSession}
+          />
+        );
+      }
+      case "browser-session": {
+        const browserSession =
+          browserSessions.find((item) => item.id === selectedBrowserSessionId) ??
+          null;
+        const applicationPackage = browserSession
+          ? applicationPackages.find(
+              (item) => item.id === browserSession.applicationPackageId
+            ) ?? null
+          : null;
+        const application = browserSession
+          ? applications.find(
+              (item) => item.id === browserSession.applicationRecordId
+            ) ?? null
+          : null;
+        const job = browserSession
+          ? normalizedJobs.find((item) => item.id === browserSession.jobId) ?? null
+          : null;
+        const match = job
+          ? jobMatches.find((item) => item.jobId === job.id) ?? null
+          : null;
+
+        return (
+          <BrowserSessionReviewPage
+            browserSession={browserSession}
+            applicationPackage={applicationPackage}
+            application={application}
+            job={job}
+            match={match}
+            onBack={() => navigate("tracker")}
+            onMarkReadyForReview={handleMarkBrowserSessionReady}
+            onApproveSubmit={handleApproveBrowserSubmit}
+            onSubmitApproved={handleSubmitApprovedBrowserApplication}
+            onManualRequired={handleMarkBrowserSessionManualRequired}
           />
         );
       }

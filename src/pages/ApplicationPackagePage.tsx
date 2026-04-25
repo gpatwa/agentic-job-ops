@@ -1,6 +1,8 @@
 import {
   AlertTriangle,
+  Bot,
   CheckCircle2,
+  ExternalLink,
   FileText,
   ShieldCheck,
   XCircle
@@ -9,6 +11,7 @@ import { useEffect, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import type {
   ApplicationAnswer,
+  BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
   JobMatch,
@@ -21,6 +24,7 @@ interface ApplicationPackagePageProps {
   application: ApplicationRecord | null;
   job: NormalizedJob | null;
   match: JobMatch | null;
+  browserSession: BrowserApplicationSession | null;
   onBack: () => void;
   onSavePackage: (
     packageId: string,
@@ -29,6 +33,8 @@ interface ApplicationPackagePageProps {
   onSaveAnswer: (answerId: string, answer: string) => void;
   onApprove: (packageId: string) => void;
   onReject: (packageId: string) => void;
+  onStartBrowserApply: (packageId: string) => void;
+  onOpenBrowserSession: (sessionId: string) => void;
 }
 
 function statusLabel(value: string): string {
@@ -36,9 +42,9 @@ function statusLabel(value: string): string {
 }
 
 function userFacingJobCopy(value: string): string {
-  return value
-    .split("Manual import queued for normalization")
-    .join("Manually imported job");
+  return value.toLowerCase().includes("manual import queued")
+    ? "Manually imported job"
+    : value;
 }
 
 function confidenceTone(confidence: ApplicationAnswer["confidence"]): string {
@@ -135,11 +141,14 @@ export function ApplicationPackagePage({
   application,
   job,
   match,
+  browserSession,
   onBack,
   onSavePackage,
   onSaveAnswer,
   onApprove,
-  onReject
+  onReject,
+  onStartBrowserApply,
+  onOpenBrowserSession
 }: ApplicationPackagePageProps) {
   const [resumeDraft, setResumeDraft] = useState(
     applicationPackage?.resumeMarkdown ?? ""
@@ -208,6 +217,26 @@ export function ApplicationPackagePage({
           >
             Back to tracker
           </button>
+          {browserSession && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onOpenBrowserSession(browserSession.id)}
+            >
+              <ExternalLink aria-hidden="true" size={17} />
+              Open browser session
+            </button>
+          )}
+          {!browserSession && applicationPackage.status === "approved" && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              type="button"
+              onClick={() => onStartBrowserApply(applicationPackage.id)}
+            >
+              <Bot aria-hidden="true" size={17} />
+              Start browser apply
+            </button>
+          )}
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"

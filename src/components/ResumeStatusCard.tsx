@@ -6,7 +6,8 @@ interface ResumeStatusCardProps {
 }
 
 function resumeDisplayName(resume: Resume): string {
-  return resume.originalFileName === "placeholder-resume.pdf"
+  const normalizedName = resume.originalFileName.toLowerCase();
+  return normalizedName.includes("placeholder") && normalizedName.includes("resume")
     ? "Resume record"
     : resume.originalFileName;
 }

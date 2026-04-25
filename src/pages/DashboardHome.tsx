@@ -98,7 +98,18 @@ function activityLabel(action: string): string {
     application_package_approved: "Application package approved",
     application_package_rejected: "Application package rejected",
     application_answer_edited: "Application answer edited",
-    unsupported_claim_warning_created: "Unsupported-claim warning created"
+    unsupported_claim_warning_created: "Unsupported-claim warning created",
+    browser_session_created: "Browser session created",
+    browser_application_opened: "Application opened",
+    ats_detected: "ATS detected",
+    form_fields_detected: "Form fields detected",
+    form_field_filled: "Form fields filled",
+    uncertain_field_detected: "Pause item detected",
+    browser_session_ready_for_review: "Browser session ready for review",
+    user_approved_browser_submit: "Browser submit approved",
+    application_submitted: "Application submitted",
+    browser_session_failed: "Browser session failed",
+    manual_application_required: "Manual application required"
   };
 
   return labels[action] ?? action.replace(/[._]/g, " ");

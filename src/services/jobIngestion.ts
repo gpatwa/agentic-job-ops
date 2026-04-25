@@ -390,13 +390,14 @@ export function loadNormalizedJobs(session: AppSession): NormalizedJob[] {
       return normalizedJobSchema.parse({
         ...parsed.data,
         title:
-          parsed.data.title === "Manual import queued for normalization"
+          parsed.data.title.toLowerCase().includes("manual import queued")
             ? "Manually imported job"
             : parsed.data.title,
-        description: parsed.data.description.replace(
-          "Manual job URL import placeholder. A crawler or parser will normalize this posting in a later phase.",
-          "This manually imported job has limited details. Add more information later for stronger scoring confidence."
-        )
+        description:
+          parsed.data.description.toLowerCase().includes("manual job url import") ||
+          parsed.data.description.toLowerCase().includes("normalize this posting")
+            ? "This manually imported job has limited details. Add more information later for stronger scoring confidence."
+            : parsed.data.description
       });
     })
     .filter((job): job is NormalizedJob => Boolean(job));

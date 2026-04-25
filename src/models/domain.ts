@@ -86,6 +86,75 @@ export type JobSource = (typeof jobSources)[number];
 export const atsTypes = ["greenhouse", "lever", "manual", "crawler", "api"] as const;
 export type AtsType = (typeof atsTypes)[number];
 
+export const browserAtsTypes = [
+  "greenhouse",
+  "lever",
+  "ashby",
+  "workday",
+  "linkedin",
+  "custom",
+  "unknown"
+] as const;
+
+export type BrowserAtsType = (typeof browserAtsTypes)[number];
+
+export const browserApplicationSessionStatuses = [
+  "queued",
+  "opening",
+  "detecting_ats",
+  "detecting_form",
+  "filling",
+  "needs_user_input",
+  "ready_for_review",
+  "approved_for_submit",
+  "submitted",
+  "failed",
+  "manual_required"
+] as const;
+
+export type BrowserApplicationSessionStatus =
+  (typeof browserApplicationSessionStatuses)[number];
+
+export const applicationFieldTypes = [
+  "text",
+  "email",
+  "phone",
+  "url",
+  "file",
+  "textarea",
+  "select",
+  "checkbox",
+  "captcha",
+  "unknown"
+] as const;
+
+export type ApplicationFieldType = (typeof applicationFieldTypes)[number];
+
+export const applicationFieldSources = [
+  "profile",
+  "resume",
+  "application_package",
+  "application_answer",
+  "user_required",
+  "none"
+] as const;
+
+export type ApplicationFieldSource = (typeof applicationFieldSources)[number];
+
+export const uncertainFieldReasons = [
+  "captcha",
+  "login_challenge",
+  "salary_missing",
+  "demographic",
+  "sensitive",
+  "unclear_required",
+  "low_confidence",
+  "final_submit",
+  "unknown"
+] as const;
+
+export type UncertainFieldReason = (typeof uncertainFieldReasons)[number];
+
 export const scanSchedules = ["manual", "daily", "every_6_hours"] as const;
 export type ScanSchedule = (typeof scanSchedules)[number];
 
@@ -279,6 +348,52 @@ export interface ApplicationAnswer {
   confidence: AnswerConfidence;
   source: ApplicationAnswerSource;
   needsUserReview: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DetectedApplicationField {
+  id: string;
+  label: string;
+  fieldType: ApplicationFieldType;
+  required: boolean;
+  sensitive: boolean;
+  confidence: number;
+  source: ApplicationFieldSource;
+  sourceField: string;
+}
+
+export interface FilledApplicationField {
+  fieldId: string;
+  label: string;
+  source: ApplicationFieldSource;
+  sourceField: string;
+  valuePreview: string;
+  confidence: number;
+}
+
+export interface UncertainApplicationField {
+  fieldId: string;
+  label: string;
+  reason: UncertainFieldReason;
+  required: boolean;
+  guidance: string;
+}
+
+export interface BrowserApplicationSession {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string;
+  applicationPackageId: string;
+  atsType: BrowserAtsType;
+  status: BrowserApplicationSessionStatus;
+  fieldsDetected: DetectedApplicationField[];
+  fieldsFilled: FilledApplicationField[];
+  uncertainFields: UncertainApplicationField[];
+  screenshotUrl: string | null;
+  errorMessage: string;
   createdAt: string;
   updatedAt: string;
 }

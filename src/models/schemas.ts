@@ -2,9 +2,13 @@ import { z } from "zod";
 import {
   answerConfidences,
   applicationAnswerSources,
+  applicationFieldSources,
+  applicationFieldTypes,
   applicationPackageStatuses,
   applicationStatuses,
   atsTypes,
+  browserApplicationSessionStatuses,
+  browserAtsTypes,
   generationModes,
   jobRemoteTypes,
   jobSources,
@@ -15,6 +19,7 @@ import {
   scanRunStatuses,
   scanSchedules,
   scoringStatuses,
+  uncertainFieldReasons,
   tenantPlans,
   tenantStatuses,
   tenantTypes
@@ -199,6 +204,52 @@ export const applicationAnswerSchema = z.object({
   confidence: z.enum(answerConfidences),
   source: z.enum(applicationAnswerSources),
   needsUserReview: z.boolean(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const detectedApplicationFieldSchema = z.object({
+  id: idSchema,
+  label: z.string().trim().min(1),
+  fieldType: z.enum(applicationFieldTypes),
+  required: z.boolean(),
+  sensitive: z.boolean(),
+  confidence: z.number().min(0).max(1),
+  source: z.enum(applicationFieldSources),
+  sourceField: z.string().trim()
+});
+
+export const filledApplicationFieldSchema = z.object({
+  fieldId: idSchema,
+  label: z.string().trim().min(1),
+  source: z.enum(applicationFieldSources),
+  sourceField: z.string().trim(),
+  valuePreview: z.string().trim().min(1),
+  confidence: z.number().min(0).max(1)
+});
+
+export const uncertainApplicationFieldSchema = z.object({
+  fieldId: idSchema,
+  label: z.string().trim().min(1),
+  reason: z.enum(uncertainFieldReasons),
+  required: z.boolean(),
+  guidance: z.string().trim().min(1)
+});
+
+export const browserApplicationSessionSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema,
+  applicationPackageId: idSchema,
+  atsType: z.enum(browserAtsTypes),
+  status: z.enum(browserApplicationSessionStatuses),
+  fieldsDetected: z.array(detectedApplicationFieldSchema),
+  fieldsFilled: z.array(filledApplicationFieldSchema),
+  uncertainFields: z.array(uncertainApplicationFieldSchema),
+  screenshotUrl: z.string().trim().url().nullable(),
+  errorMessage: z.string(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

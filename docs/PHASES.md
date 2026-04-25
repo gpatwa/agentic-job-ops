@@ -22,7 +22,7 @@ Application package generation: tailored resume draft, cover letter draft, short
 
 ## Phase 6
 
-Playwright browser application assistant with human approval before submit. Do not bypass CAPTCHA, rate limits, or anti-bot systems.
+Browser application assistant with a deterministic development flow, ATS detection placeholder, form-field detection, safe field mapping from approved package data, pause items for uncertain or sensitive fields, manual-required fallback, tracker visibility, Playwright adapter boundary, and explicit job-seeker approval before any submit action. Do not bypass CAPTCHA, rate limits, or anti-bot systems.
 
 ## Phase 7
 

@@ -74,6 +74,16 @@ enum AtsType {
   api
 }
 
+enum BrowserAtsType {
+  greenhouse
+  lever
+  ashby
+  workday
+  linkedin
+  custom
+  unknown
+}
+
 enum JobRemoteType {
   remote
   hybrid
@@ -133,6 +143,20 @@ enum AnswerConfidence {
 enum ApplicationAnswerSource {
   generated
   user_edited
+}
+
+enum BrowserApplicationSessionStatus {
+  queued
+  opening
+  detecting_ats
+  detecting_form
+  filling
+  needs_user_input
+  ready_for_review
+  approved_for_submit
+  submitted
+  failed
+  manual_required
 }
 
 model Tenant {
@@ -339,6 +363,28 @@ model ApplicationAnswer {
 
   @@index([tenantId, userId])
   @@index([tenantId, applicationPackageId])
+}
+
+model BrowserApplicationSession {
+  id                   String                          @id @default(cuid())
+  tenantId             String
+  userId               String
+  jobId                String
+  applicationRecordId  String
+  applicationPackageId String
+  atsType              BrowserAtsType
+  status               BrowserApplicationSessionStatus
+  fieldsDetected       Json
+  fieldsFilled         Json
+  uncertainFields      Json
+  screenshotUrl        String?
+  errorMessage         String
+  createdAt            DateTime                        @default(now())
+  updatedAt            DateTime                        @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, applicationPackageId])
+  @@index([tenantId, applicationRecordId])
 }
 
 model AuditLog {

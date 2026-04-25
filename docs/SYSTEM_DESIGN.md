@@ -14,7 +14,7 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/applicationPackage.ts`: Phase 5 application package generation, deterministic fallback, LLM adapter boundary, safety checks, package persistence, answer persistence, and approval workflow.
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
 - `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
-- `src/services/browserApplicationAssistant.ts`: Future browser assistant placeholder with explicit approval requirement.
+- `src/services/browserApplicationAssistant.ts`: Browser application session state machine, deterministic adapter, Playwright adapter boundary, safe field mapping, approval guardrails, and manual-required fallback.
 - `prisma/schema.prisma`: PostgreSQL-ready model reference.
 
 ## Ingestion Flow
@@ -60,10 +60,23 @@ Notes are stored on the application record, but audit metadata records only note
 
 The LLM package generator is represented by `ApplicationPackageGenerator`. It is intentionally a placeholder until model-backed generation is configured.
 
+## Browser Application Flow
+
+1. A user opens an approved application package and starts browser apply.
+2. The browser assistant creates a `BrowserApplicationSession` scoped to the tenant and user.
+3. The deterministic adapter detects the ATS, form fields, safely fillable fields, and pause items.
+4. Safe fields are mapped from profile data, resume/package drafts, and approved application answers without storing private answer text in audit logs.
+5. CAPTCHA, login challenges, demographic questions, missing salary expectations, low-confidence required fields, and final submit always pause for human control.
+6. The browser session page shows detected fields, filled-field provenance, pause items, and a screenshot placeholder.
+7. The job seeker must move the session to review, explicitly approve submit, and then choose the assistant submit action.
+8. The tracker updates to submitted only after confirmed submission or an explicit manual application action.
+
+The Playwright adapter is represented by `BrowserAutomationAdapter` and `PlaywrightBrowserAutomationAdapterBoundary`. It is intentionally a boundary until real browser automation is configured.
+
 ## Data Protection
 
 Audit metadata is intentionally narrow. Resume content, profile details, credentials, and application answers must not be logged. Future backend implementation should enforce tenant isolation at query and authorization layers.
 
 ## Human Approval Gate
 
-The browser application assistant boundary accepts an `approvedByUser` flag and rejects unapproved requests. Future implementation must keep final submit behind an explicit user approval step.
+Browser submit approval requires the job seeker identity and an explicit approval flag. The submit action is unavailable until the session reaches `ready_for_review`, and the assistant cannot submit until the session is `approved_for_submit`.
