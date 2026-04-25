@@ -1,0 +1,184 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantType {
+  individual
+  career_coach
+  university
+  bootcamp
+  outplacement
+  enterprise
+}
+
+enum TenantPlan {
+  free
+  pro
+  team
+  enterprise
+}
+
+enum TenantStatus {
+  active
+  trialing
+  paused
+  closed
+}
+
+enum RemotePreference {
+  remote
+  hybrid
+  onsite
+  any
+}
+
+enum ResumeStatus {
+  uploaded
+  parsed
+  failed
+}
+
+enum ApplicationStatus {
+  discovered
+  recommended
+  draft_prepared
+  needs_review
+  approved
+  submitted
+  recruiter_contacted
+  interviewing
+  rejected
+  offer
+  archived
+}
+
+enum JobSource {
+  greenhouse
+  lever
+  crawler
+  manual
+  api
+}
+
+enum QueueType {
+  apply_review
+  maybe
+  browse
+}
+
+model Tenant {
+  id        String       @id @default(cuid())
+  name      String
+  type      TenantType
+  plan      TenantPlan
+  status    TenantStatus
+  createdAt DateTime     @default(now())
+}
+
+model UserProfile {
+  id                    String           @id @default(cuid())
+  tenantId              String
+  userId                String
+  fullName              String
+  email                 String
+  phone                 String
+  location              String
+  workAuthorization     String
+  linkedinUrl           String
+  portfolioUrl          String
+  githubUrl             String
+  targetTitles          String[]
+  targetLocations       String[]
+  targetIndustries      String[]
+  remotePreference      RemotePreference
+  salaryMin             Int?
+  salaryTarget          Int?
+  companiesToAvoid      String[]
+  companiesToPrioritize String[]
+  careerSummary         String
+  verifiedFacts         String[]
+  createdAt             DateTime         @default(now())
+  updatedAt             DateTime         @updatedAt
+
+  @@index([tenantId, userId])
+  @@unique([tenantId, userId])
+}
+
+model Resume {
+  id               String       @id @default(cuid())
+  tenantId         String
+  userId           String
+  originalFileName String
+  fileUrl          String
+  parsedText       String
+  status           ResumeStatus
+  createdAt        DateTime     @default(now())
+
+  @@index([tenantId, userId])
+}
+
+model NormalizedJob {
+  id               String           @id @default(cuid())
+  tenantId         String
+  userId           String
+  source           JobSource
+  externalId       String
+  title            String
+  companyName      String
+  location         String
+  remotePreference RemotePreference
+  descriptionText  String
+  applyUrl         String
+  discoveredAt     DateTime
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  @@index([tenantId, userId])
+  @@unique([tenantId, source, externalId])
+}
+
+model JobMatch {
+  id           String    @id @default(cuid())
+  tenantId     String
+  userId       String
+  jobId        String
+  score        Float
+  queue        QueueType
+  rationale    String
+  modelVersion String
+  createdAt    DateTime  @default(now())
+
+  @@index([tenantId, userId])
+  @@unique([tenantId, userId, jobId])
+}
+
+model ApplicationRecord {
+  id        String            @id @default(cuid())
+  tenantId  String
+  userId    String
+  jobId     String
+  status    ApplicationStatus
+  notes     String
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@index([tenantId, userId])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  tenantId    String
+  actorUserId String
+  action      String
+  resourceType String
+  resourceId  String
+  metadata    Json
+  createdAt   DateTime @default(now())
+
+  @@index([tenantId, actorUserId])
+}
