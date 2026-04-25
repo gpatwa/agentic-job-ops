@@ -6,23 +6,32 @@ import {
   Search,
   Sparkles
 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
-import type { JobMatch, NormalizedJob, ProfileCompletion } from "../models/domain";
+import type {
+  ApplicationRecord,
+  DashboardJobAction,
+  JobMatch,
+  NormalizedJob,
+  ProfileCompletion
+} from "../models/domain";
 
 type QueueTab = "apply_review" | "maybe" | "browse";
 
 interface JobDashboardPageProps {
   jobs: NormalizedJob[];
   matches: JobMatch[];
+  applications: ApplicationRecord[];
   profileCompletion: ProfileCompletion;
   isScoring: boolean;
   onScoreJobs: () => void;
+  onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
 }
 
 interface JobCardData {
   job: NormalizedJob;
   match: JobMatch | null;
+  application: ApplicationRecord | null;
 }
 
 const tabs: Array<{
@@ -86,8 +95,72 @@ function recommendationLabel(match: JobMatch): string {
   return "Browse";
 }
 
-function JobMatchCard({ item }: { item: JobCardData }) {
-  const { job, match } = item;
+function applicationStatusLabel(application: ApplicationRecord | null): string {
+  return application ? application.status.replace(/_/g, " ") : "not tracked";
+}
+
+function confirmSensitiveAction(action: DashboardJobAction): boolean {
+  if (action === "archive") {
+    return window.confirm("Archive this job in your tracker?");
+  }
+
+  if (action === "reject" || action === "mark_not_interested") {
+    return window.confirm("Mark this job as not moving forward?");
+  }
+
+  return true;
+}
+
+function ActionButton({
+  label,
+  action,
+  jobId,
+  onJobAction,
+  notes,
+  variant = "secondary"
+}: {
+  label: string;
+  action: DashboardJobAction;
+  jobId: string;
+  onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
+  notes?: string;
+  variant?: "primary" | "secondary" | "danger";
+}) {
+  const className =
+    variant === "primary"
+      ? "border-ink bg-ink text-white hover:bg-slate-700"
+      : variant === "danger"
+        ? "border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50";
+
+  return (
+    <button
+      className={`inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-xs font-semibold transition ${className}`}
+      type="button"
+      onClick={() => {
+        if (confirmSensitiveAction(action)) {
+          onJobAction(jobId, action, notes);
+        }
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
+function JobMatchCard({
+  item,
+  onJobAction
+}: {
+  item: JobCardData;
+  onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
+}) {
+  const { job, match, application } = item;
+  const [notesDraft, setNotesDraft] = useState(application?.notes ?? "");
+
+  useEffect(() => {
+    setNotesDraft(application?.notes ?? "");
+  }, [application?.notes]);
 
   if (!match) {
     return (
@@ -106,6 +179,21 @@ function JobMatchCard({ item }: { item: JobCardData }) {
         <p className="mt-3 text-sm leading-6 text-slate-600">
           This job has been ingested and is waiting for match scoring.
         </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <ActionButton
+            label="Save for later"
+            action="save_for_later"
+            jobId={job.id}
+            onJobAction={onJobAction}
+          />
+          <ActionButton
+            label="Archive"
+            action="archive"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant="danger"
+          />
+        </div>
       </article>
     );
   }
@@ -129,6 +217,9 @@ function JobMatchCard({ item }: { item: JobCardData }) {
           </span>
           <span className="inline-flex rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
             {recommendationLabel(match)}
+          </span>
+          <span className="inline-flex rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold capitalize text-blue-700">
+            {applicationStatusLabel(application)}
           </span>
         </div>
       </div>
@@ -164,6 +255,85 @@ function JobMatchCard({ item }: { item: JobCardData }) {
           {match.recommendedNextAction}
         </p>
       </div>
+
+      <div className="mt-4 rounded-md border border-slate-200 p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Actions
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <ActionButton
+            label="Save for later"
+            action="save_for_later"
+            jobId={job.id}
+            onJobAction={onJobAction}
+          />
+          <ActionButton
+            label="Move to Apply Review"
+            action="move_to_apply_review"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant={match.queue === "apply_review" ? "primary" : "secondary"}
+          />
+          <ActionButton
+            label="Move to Maybe"
+            action="move_to_maybe"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant={match.queue === "maybe" ? "primary" : "secondary"}
+          />
+          <ActionButton
+            label="Start application prep"
+            action="start_application_prep"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant="primary"
+          />
+          <ActionButton
+            label="Mark manually applied"
+            action="mark_manually_applied"
+            jobId={job.id}
+            onJobAction={onJobAction}
+          />
+          <ActionButton
+            label="Mark not interested"
+            action="mark_not_interested"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant="danger"
+          />
+          <ActionButton
+            label="Reject"
+            action="reject"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant="danger"
+          />
+          <ActionButton
+            label="Archive"
+            action="archive"
+            jobId={job.id}
+            onJobAction={onJobAction}
+            variant="danger"
+          />
+        </div>
+
+        <label className="mt-4 block space-y-2">
+          <span className="text-sm font-medium text-slate-700">Notes</span>
+          <textarea
+            className="min-h-20 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900"
+            value={notesDraft}
+            onChange={(event) => setNotesDraft(event.target.value)}
+            placeholder="Add private job-search notes"
+          />
+        </label>
+        <button
+          className="mt-2 inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          type="button"
+          onClick={() => onJobAction(job.id, "update_notes", notesDraft)}
+        >
+          Save notes
+        </button>
+      </div>
     </article>
   );
 }
@@ -171,9 +341,11 @@ function JobMatchCard({ item }: { item: JobCardData }) {
 export function JobDashboardPage({
   jobs,
   matches,
+  applications,
   profileCompletion,
   isScoring,
-  onScoreJobs
+  onScoreJobs,
+  onJobAction
 }: JobDashboardPageProps) {
   const [activeTab, setActiveTab] = useState<QueueTab>("apply_review");
   const selected = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -181,22 +353,37 @@ export function JobDashboardPage({
     () => new Map(matches.map((match) => [match.jobId, match] as const)),
     [matches]
   );
+  const applicationByJobId = useMemo(
+    () =>
+      new Map(
+        applications.map((application) => [application.jobId, application] as const)
+      ),
+    [applications]
+  );
   const queuedJobs = jobs.filter((job) => !matchByJobId.has(job.id));
   const cards = useMemo<JobCardData[]>(() => {
     const matchedCards = jobs
-      .map((job) => ({ job, match: matchByJobId.get(job.id) ?? null }))
+      .map((job) => ({
+        job,
+        match: matchByJobId.get(job.id) ?? null,
+        application: applicationByJobId.get(job.id) ?? null
+      }))
       .filter((item) => item.match !== null)
       .sort((a, b) => (b.match?.overallScore ?? 0) - (a.match?.overallScore ?? 0));
 
     if (activeTab === "browse") {
       return [
         ...matchedCards.filter((item) => item.match?.queue === "browse"),
-        ...queuedJobs.map((job) => ({ job, match: null }))
+        ...queuedJobs.map((job) => ({
+          job,
+          match: null,
+          application: applicationByJobId.get(job.id) ?? null
+        }))
       ];
     }
 
     return matchedCards.filter((item) => item.match?.queue === activeTab);
-  }, [activeTab, jobs, matchByJobId, queuedJobs]);
+  }, [activeTab, applicationByJobId, jobs, matchByJobId, queuedJobs]);
 
   return (
     <div className="space-y-6">
@@ -278,7 +465,11 @@ export function JobDashboardPage({
           {cards.length > 0 ? (
             <div className="space-y-4">
               {cards.map((item) => (
-                <JobMatchCard key={item.job.id} item={item} />
+                <JobMatchCard
+                  key={item.job.id}
+                  item={item}
+                  onJobAction={onJobAction}
+                />
               ))}
             </div>
           ) : (

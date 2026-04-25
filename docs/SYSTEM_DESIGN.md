@@ -10,6 +10,8 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/profileService.ts`: Profile draft normalization, validation, and persistence.
 - `src/services/resumeService.ts`: Resume upload record creation and parser placeholder.
 - `src/services/auditLog.ts`: Sanitized audit events for important actions.
+- `src/services/applicationWorkflow.ts`: Phase 4 dashboard actions, application record upserts, queue overrides, and workflow audit metadata.
+- `src/services/applicationPackage.ts`: Phase 5 placeholder interface for tailored application packages.
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
 - `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
 - `src/services/browserApplicationAssistant.ts`: Phase 5 browser assistant placeholder with explicit approval requirement.
@@ -39,6 +41,12 @@ The Greenhouse connector uses the public Job Board API `GET /v1/boards/{board_to
 7. Jobs below 3.0 are marked skip but remain searchable and visible in Browse.
 
 Incomplete profiles generate a visible warning while still producing best-effort scores. Weak job descriptions are scored conservatively.
+
+## Application Workflow
+
+Dashboard actions create or update `ApplicationRecord` rows with tenant and user scope. Rejected and archived jobs are never deleted; they remain available in the tracker and source job store. Queue override actions update the match queue while preserving the original score and logging a user override event.
+
+Notes are stored on the application record, but audit metadata records only note length and status, not note content. Marking a job submitted requires the explicit manual applied action or a deliberate tracker status change.
 
 ## Data Protection
 

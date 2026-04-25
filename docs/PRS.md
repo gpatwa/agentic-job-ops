@@ -34,6 +34,17 @@ Build the match engine and scoring service with:
 - Queue assignment: Apply Review for 8.0 to 10.0, Maybe for 5.5 to 7.9, Browse below 5.5, and Skip below 3.0 while remaining browsable.
 - Explanations with summaries, top reasons, top gaps, employer-looking-for notes, and recommended next action.
 
+## Phase 4 Scope
+
+Build dashboard actions and application tracking workflows with:
+
+- Job card actions: save for later, reject, archive, move to Apply Review, move to Maybe, start application prep, add/edit notes, mark manually applied, and mark not interested.
+- Application record creation or update for every user action.
+- Manual status updates across discovered, recommended, saved, draft prepared, needs review, approved, submitted, recruiter contacted, interviewing, rejected, offer, and archived.
+- Tracker grouped by status with source job, company, title, match score, last updated date, and notes.
+- Audit events for job saves, rejects, archives, queue overrides, prep start, status changes, note updates, and manual applications.
+- Placeholder application package generator boundary for Phase 5.
+
 ## Functional Requirements
 
 - Users can create and edit a career profile.
@@ -48,6 +59,9 @@ Build the match engine and scoring service with:
 - Scored jobs appear in Apply Review, Maybe, or Browse queues.
 - Low-score and skipped jobs remain visible with useful explanations.
 - Scoring creates audit events without logging sensitive profile content.
+- Users can take next-step actions on scored jobs.
+- Users can save, reject, archive, add notes, move jobs between queues, and start an application prep placeholder.
+- Rejected and archived jobs are retained for history and filtering.
 
 ## Non-Functional Requirements
 

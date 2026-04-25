@@ -35,6 +35,14 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Explanations include summary, match reasons, gaps, employer needs, and recommended next action.
 - Manual scoring action for development and testing.
 
+## Phase 4 Outcomes
+
+- Dashboard actions for saving, rejecting, archiving, queue movement, prep placeholders, note taking, and manual application status.
+- Application tracker records created or updated from user actions.
+- Tracker grouped by application status with manual status and note edits.
+- User overrides logged without deleting jobs.
+- Phase 5 application package generation kept behind a placeholder service boundary.
+
 ## Users
 
 - Individual job seekers.

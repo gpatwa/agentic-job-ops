@@ -46,6 +46,7 @@ enum ResumeStatus {
 enum ApplicationStatus {
   discovered
   recommended
+  saved
   draft_prepared
   needs_review
   approved

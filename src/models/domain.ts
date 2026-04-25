@@ -27,6 +27,7 @@ export type ResumeStatus = (typeof resumeStatuses)[number];
 export const applicationStatuses = [
   "discovered",
   "recommended",
+  "saved",
   "draft_prepared",
   "needs_review",
   "approved",
@@ -39,6 +40,20 @@ export const applicationStatuses = [
 ] as const;
 
 export type ApplicationStatus = (typeof applicationStatuses)[number];
+
+export const dashboardJobActions = [
+  "save_for_later",
+  "reject",
+  "archive",
+  "move_to_apply_review",
+  "move_to_maybe",
+  "start_application_prep",
+  "update_notes",
+  "mark_manually_applied",
+  "mark_not_interested"
+] as const;
+
+export type DashboardJobAction = (typeof dashboardJobActions)[number];
 
 export const jobSources = [
   "greenhouse",

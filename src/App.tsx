@@ -12,7 +12,9 @@ import { AppShell, type NavigationItem } from "./components/AppShell";
 import { currentSession } from "./data/currentSession";
 import type {
   ApplicationRecord,
+  ApplicationStatus,
   AuditLog,
+  DashboardJobAction,
   JobMatch,
   Resume,
   UserProfile
@@ -27,6 +29,11 @@ import { ResumeUploadPage } from "./pages/ResumeUploadPage";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
 import { loadApplications } from "./services/applicationService";
+import {
+  applyDashboardJobAction,
+  changeApplicationNotes,
+  changeApplicationStatus
+} from "./services/applicationWorkflow";
 import {
   importManualJobUrl,
   loadJobSourceConfigs,
@@ -81,7 +88,7 @@ export default function App() {
     loadUserProfile(currentSession)
   );
   const [resume, setResume] = useState<Resume | null>(() => loadResume(currentSession));
-  const [applications] = useState<ApplicationRecord[]>(() =>
+  const [applications, setApplications] = useState<ApplicationRecord[]>(() =>
     loadApplications(currentSession)
   );
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
@@ -116,6 +123,23 @@ export default function App() {
   function recordAudit(log: Parameters<typeof appendAuditLog>[1]) {
     const savedLog = appendAuditLog(currentSession, log);
     setAuditLogs((current) => [savedLog, ...current].slice(0, 50));
+  }
+
+  function recordWorkflowResult(result: {
+    applications: ApplicationRecord[];
+    matches: JobMatch[];
+    auditAction: string;
+    application: ApplicationRecord;
+    auditMetadata: Record<string, string | number | boolean | null>;
+  }) {
+    setApplications(result.applications);
+    setJobMatches(result.matches);
+    recordAudit({
+      action: result.auditAction,
+      resourceType: "ApplicationRecord",
+      resourceId: result.application.id,
+      metadata: result.auditMetadata
+    });
   }
 
   function handleSaveProfile(draft: UserProfileDraft) {
@@ -257,6 +281,28 @@ export default function App() {
     }
   }
 
+  function handleDashboardJobAction(
+    jobId: string,
+    action: DashboardJobAction,
+    notes?: string
+  ) {
+    const result = applyDashboardJobAction(currentSession, jobId, action, { notes });
+    recordWorkflowResult(result);
+  }
+
+  function handleApplicationStatusChange(
+    applicationId: string,
+    status: ApplicationStatus
+  ) {
+    const result = changeApplicationStatus(currentSession, applicationId, status);
+    recordWorkflowResult(result);
+  }
+
+  function handleApplicationNotesChange(applicationId: string, notes: string) {
+    const result = changeApplicationNotes(currentSession, applicationId, notes);
+    recordWorkflowResult(result);
+  }
+
   function renderRoute() {
     switch (route) {
       case "profile-setup":
@@ -300,13 +346,23 @@ export default function App() {
           <JobDashboardPage
             jobs={normalizedJobs}
             matches={jobMatches}
+            applications={applications}
             profileCompletion={completion}
             isScoring={isScoring}
             onScoreJobs={handleScoreJobsNow}
+            onJobAction={handleDashboardJobAction}
           />
         );
       case "tracker":
-        return <ApplicationTrackerPage applications={applications} />;
+        return (
+          <ApplicationTrackerPage
+            applications={applications}
+            jobs={normalizedJobs}
+            matches={jobMatches}
+            onStatusChange={handleApplicationStatusChange}
+            onNotesChange={handleApplicationNotesChange}
+          />
+        );
       case "dashboard":
       default:
         return (

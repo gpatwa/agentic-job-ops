@@ -14,7 +14,7 @@ Match engine, 0 to 10 deterministic fallback scoring, placeholder LLM scoring ad
 
 ## Phase 4
 
-Dashboard actions, application tracker workflows, and tailored application package generation from verified facts.
+Dashboard actions, application tracker workflows, status transitions, notes, save/reject/archive behavior, manual application tracking, and placeholder tailored application package boundaries.
 
 ## Phase 5
 
