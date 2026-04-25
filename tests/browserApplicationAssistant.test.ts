@@ -1,8 +1,9 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { currentSession } from "../src/data/currentSession";
 import type {
   ApplicationAnswer,
   ApplicationPackage,
+  BrowserApplicationSession,
   NormalizedJob,
   Resume,
   UserProfile
@@ -20,6 +21,8 @@ import {
   saveApplicationPackages
 } from "../src/services/applicationPackage";
 import { loadApplications, upsertApplicationRecord } from "../src/services/applicationService";
+import { appendAuditLog } from "../src/services/auditLog";
+import type { BrowserAuditEvent } from "../src/services/browserApplicationAssistant";
 import { createEmptyProfile } from "../src/services/profileService";
 
 function installLocalStorageMock() {
@@ -156,6 +159,43 @@ function setupApprovedPackage() {
   return { application, packageRecord };
 }
 
+function persistAuditEvents(events: BrowserAuditEvent[]) {
+  events.forEach((event) => {
+    appendAuditLog(currentSession, {
+      action: event.action,
+      resourceType: event.resourceType,
+      resourceId: event.resourceId,
+      metadata: event.metadata
+    });
+  });
+}
+
+async function setupReadySession(): Promise<{
+  packageRecord: ApplicationPackage;
+  readySession: BrowserApplicationSession;
+}> {
+  const { application, packageRecord } = setupApprovedPackage();
+  const started = await startBrowserApplicationSession({
+    session: currentSession,
+    actorUserId: currentSession.userId,
+    applicationPackage: packageRecord,
+    application,
+    job: job(),
+    profile: profile(),
+    resume: resume(),
+    answers: answers(packageRecord.id)
+  });
+  const ready = markBrowserSessionReadyForReview(
+    currentSession,
+    started.session.id
+  );
+
+  return {
+    packageRecord,
+    readySession: ready.session
+  };
+}
+
 describe("browser application assistant", () => {
   beforeEach(() => {
     installLocalStorageMock();
@@ -262,6 +302,7 @@ describe("browser application assistant", () => {
       approvedByUser: true
     });
     expect(approved.session.status).toBe("approved_for_submit");
+    persistAuditEvents(approved.auditEvents);
 
     const submitted = await submitApprovedBrowserApplication(
       currentSession,
@@ -269,6 +310,95 @@ describe("browser application assistant", () => {
     );
     expect(submitted.session.status).toBe("submitted");
     expect(loadApplications(currentSession)[0].status).toBe("submitted");
+  });
+
+  it("blocks submit when approval audit is missing or belongs to another session", async () => {
+    const { readySession } = await setupReadySession();
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    const submit = vi.fn(async () => ({ submitted: true }));
+
+    await expect(
+      submitApprovedBrowserApplication(currentSession, approved.session.id, {
+        name: "test-adapter",
+        runDetection: vi.fn(),
+        submit
+      })
+    ).rejects.toThrow("persisted approval audit");
+    expect(submit).not.toHaveBeenCalled();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+
+    appendAuditLog(currentSession, {
+      action: "user_approved_browser_submit",
+      resourceType: "BrowserApplicationSession",
+      resourceId: "other_session",
+      metadata: {
+        jobId: approved.session.jobId,
+        applicationRecordId: approved.session.applicationRecordId,
+        applicationPackageId: approved.session.applicationPackageId
+      }
+    });
+
+    await expect(
+      submitApprovedBrowserApplication(currentSession, approved.session.id, {
+        name: "test-adapter",
+        runDetection: vi.fn(),
+        submit
+      })
+    ).rejects.toThrow("persisted approval audit");
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it("blocks submit if the package is no longer approved", async () => {
+    const { packageRecord, readySession } = await setupReadySession();
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    persistAuditEvents(approved.auditEvents);
+    saveApplicationPackages(currentSession, [
+      {
+        ...packageRecord,
+        status: "ready_for_review",
+        approvedAt: null,
+        updatedAt: new Date().toISOString()
+      }
+    ]);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(currentSession, approved.session.id, {
+        name: "test-adapter",
+        runDetection: vi.fn(),
+        submit
+      })
+    ).rejects.toThrow("package is approved");
+    expect(submit).not.toHaveBeenCalled();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+  });
+
+  it("keeps application status unchanged when submit is not confirmed", async () => {
+    const { readySession } = await setupReadySession();
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    persistAuditEvents(approved.auditEvents);
+
+    const result = await submitApprovedBrowserApplication(
+      currentSession,
+      approved.session.id,
+      {
+        name: "test-adapter",
+        runDetection: vi.fn(),
+        submit: vi.fn(async () => ({ submitted: false }))
+      }
+    );
+
+    expect(result.session.status).toBe("manual_required");
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
   });
 
   it("supports a manual-required fallback without deleting the session", async () => {

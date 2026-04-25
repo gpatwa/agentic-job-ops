@@ -80,3 +80,5 @@ Audit metadata is intentionally narrow. Resume content, profile details, credent
 ## Human Approval Gate
 
 Browser submit approval requires the job seeker identity and an explicit approval flag. The submit action is unavailable until the session reaches `ready_for_review`, and the assistant cannot submit until the session is `approved_for_submit`.
+
+Before any submit adapter can run, the service verifies that the application package is still `approved`, the persisted audit log contains `user_approved_browser_submit` for the same browser session, that approval was granted from `ready_for_review`, and the session still matches the same package, application record, and job. The application record moves to `submitted` only after the adapter confirms submission or when the user explicitly marks a manual application as submitted.

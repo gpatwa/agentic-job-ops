@@ -16,7 +16,9 @@ import type {
 } from "../models/domain";
 import { browserApplicationSessionSchema } from "../models/schemas";
 import { readJson, scopedKey, writeJson } from "../lib/storage";
+import { loadApplicationPackages } from "./applicationPackage";
 import { loadApplications, updateApplicationStatus } from "./applicationService";
+import { loadAuditLogs } from "./auditLog";
 
 type AuditMetadata = Record<string, string | number | boolean | null>;
 
@@ -136,6 +138,53 @@ function createEvent(
       ...metadata
     }
   };
+}
+
+function assertPackageStillApproved(
+  session: AppSession,
+  browserSession: BrowserApplicationSession
+): void {
+  const applicationPackage = loadApplicationPackages(session).find(
+    (item) => item.id === browserSession.applicationPackageId
+  );
+
+  if (!applicationPackage || applicationPackage.status !== "approved") {
+    throw new Error("The assistant cannot submit unless the package is approved.");
+  }
+
+  if (
+    applicationPackage.jobId !== browserSession.jobId ||
+    applicationPackage.applicationRecordId !== browserSession.applicationRecordId
+  ) {
+    throw new Error("Browser session no longer matches the approved package.");
+  }
+}
+
+function hasApprovalAuditForSession(
+  session: AppSession,
+  browserSession: BrowserApplicationSession
+): boolean {
+  return loadAuditLogs(session).some(
+    (log) =>
+      log.action === "user_approved_browser_submit" &&
+      log.resourceType === "BrowserApplicationSession" &&
+      log.resourceId === browserSession.id &&
+      log.metadata.jobId === browserSession.jobId &&
+      log.metadata.applicationRecordId === browserSession.applicationRecordId &&
+      log.metadata.applicationPackageId === browserSession.applicationPackageId &&
+      log.metadata.approvedFromStatus === "ready_for_review"
+  );
+}
+
+function assertPersistedApprovalAudit(
+  session: AppSession,
+  browserSession: BrowserApplicationSession
+): void {
+  if (!hasApprovalAuditForSession(session, browserSession)) {
+    throw new Error(
+      "The assistant cannot submit without a persisted approval audit for this session."
+    );
+  }
 }
 
 function filledPreview(source: ApplicationFieldSource, sourceField: string): string {
@@ -753,7 +802,11 @@ export function approveBrowserSubmit(
     sessions,
     application,
     applications: loadApplications(session),
-    auditEvents: [createEvent("user_approved_browser_submit", updated)]
+    auditEvents: [
+      createEvent("user_approved_browser_submit", updated, {
+        approvedFromStatus: existing.status
+      })
+    ]
   };
 }
 
@@ -772,6 +825,9 @@ export async function submitApprovedBrowserApplication(
   if (existing.status !== "approved_for_submit") {
     throw new Error("The assistant cannot submit before explicit user approval.");
   }
+
+  assertPackageStillApproved(session, existing);
+  assertPersistedApprovalAudit(session, existing);
 
   const submitResult = await adapter.submit(existing);
   if (!submitResult.submitted) {
