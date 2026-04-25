@@ -1,6 +1,7 @@
 import {
   BriefcaseBusiness,
   ClipboardList,
+  DatabaseZap,
   FileUp,
   LayoutDashboard,
   UserCog,
@@ -13,12 +14,22 @@ import type { ApplicationRecord, AuditLog, Resume, UserProfile } from "./models/
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
+import { IngestionAdminPage } from "./pages/IngestionAdminPage";
 import { JobDashboardPage } from "./pages/JobDashboardPage";
 import { ProfileSetupPage } from "./pages/ProfileSetupPage";
 import { ResumeUploadPage } from "./pages/ResumeUploadPage";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
 import { loadApplications } from "./services/applicationService";
+import {
+  importManualJobUrl,
+  loadJobSourceConfigs,
+  loadNormalizedJobs,
+  loadScanRuns,
+  runManualScan,
+  upsertJobSourceConfig,
+  type JobSourceConfigDraft
+} from "./services/jobIngestion";
 import {
   loadUserProfile,
   saveUserProfile,
@@ -31,6 +42,7 @@ type RouteId =
   | "profile-setup"
   | "resume-upload"
   | "career-profile"
+  | "ingestion"
   | "jobs"
   | "tracker";
 
@@ -39,6 +51,7 @@ const navigationItems: NavigationItem<RouteId>[] = [
   { id: "profile-setup", label: "Profile setup", icon: UserRound },
   { id: "resume-upload", label: "Resume upload", icon: FileUp },
   { id: "career-profile", label: "Career profile", icon: UserCog },
+  { id: "ingestion", label: "Ingestion", icon: DatabaseZap },
   { id: "jobs", label: "Job queues", icon: BriefcaseBusiness },
   { id: "tracker", label: "Tracker", icon: ClipboardList }
 ];
@@ -64,6 +77,14 @@ export default function App() {
   const [applications] = useState<ApplicationRecord[]>(() =>
     loadApplications(currentSession)
   );
+  const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
+    loadJobSourceConfigs(currentSession)
+  );
+  const [normalizedJobs, setNormalizedJobs] = useState(() =>
+    loadNormalizedJobs(currentSession)
+  );
+  const [scanRuns, setScanRuns] = useState(() => loadScanRuns(currentSession));
+  const [isScanning, setIsScanning] = useState(false);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() =>
     loadAuditLogs(currentSession)
   );
@@ -139,6 +160,62 @@ export default function App() {
     });
   }
 
+  function handleSaveJobSourceConfig(draft: JobSourceConfigDraft) {
+    const config = upsertJobSourceConfig(currentSession, draft);
+    setJobSourceConfigs(loadJobSourceConfigs(currentSession));
+    recordAudit({
+      action: "job_source_config.saved",
+      resourceType: "JobSourceConfig",
+      resourceId: config.id,
+      metadata: {
+        source: config.source,
+        schedule: config.schedule,
+        enabled: config.enabled
+      }
+    });
+  }
+
+  async function handleRunScan(configId: string) {
+    setIsScanning(true);
+
+    try {
+      const result = await runManualScan(currentSession, configId);
+      setJobSourceConfigs(result.configs);
+      setNormalizedJobs(result.jobs);
+      setScanRuns(loadScanRuns(currentSession));
+      recordAudit({
+        action:
+          result.scanRun.status === "succeeded"
+            ? "job_scan.succeeded"
+            : "job_scan.failed",
+        resourceType: "ScanRun",
+        resourceId: result.scanRun.id,
+        metadata: {
+          source: result.scanRun.source,
+          jobsFetched: result.scanRun.jobsFetched,
+          jobsInserted: result.scanRun.jobsInserted,
+          duplicatesSkipped: result.scanRun.duplicatesSkipped
+        }
+      });
+    } finally {
+      setIsScanning(false);
+    }
+  }
+
+  function handleManualImport(url: string) {
+    const summary = importManualJobUrl(currentSession, url);
+    setNormalizedJobs(summary.jobs);
+    recordAudit({
+      action: "manual_job_url.imported",
+      resourceType: "NormalizedJob",
+      resourceId: summary.jobs[0]?.id ?? "manual_import",
+      metadata: {
+        inserted: summary.inserted,
+        duplicatesSkipped: summary.duplicatesSkipped
+      }
+    });
+  }
+
   function renderRoute() {
     switch (route) {
       case "profile-setup":
@@ -165,8 +242,20 @@ export default function App() {
             onSave={handleSaveProfile}
           />
         );
+      case "ingestion":
+        return (
+          <IngestionAdminPage
+            configs={jobSourceConfigs}
+            scanRuns={scanRuns}
+            jobs={normalizedJobs}
+            isScanning={isScanning}
+            onSaveConfig={handleSaveJobSourceConfig}
+            onRunScan={handleRunScan}
+            onManualImport={handleManualImport}
+          />
+        );
       case "jobs":
-        return <JobDashboardPage />;
+        return <JobDashboardPage jobs={normalizedJobs} />;
       case "tracker":
         return <ApplicationTrackerPage applications={applications} />;
       case "dashboard":
@@ -176,11 +265,13 @@ export default function App() {
             completion={completion}
             resume={resume}
             applications={applications}
+            jobs={normalizedJobs}
             auditLogs={auditLogs}
             onNavigate={navigate}
             routes={{
               profile: "profile-setup",
               resume: "resume-upload",
+              ingestion: "ingestion",
               jobs: "jobs",
               tracker: "tracker"
             }}

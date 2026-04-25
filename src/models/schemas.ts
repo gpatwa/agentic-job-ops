@@ -1,10 +1,15 @@
 import { z } from "zod";
 import {
   applicationStatuses,
+  atsTypes,
+  jobRemoteTypes,
   jobSources,
   queueTypes,
   remotePreferences,
   resumeStatuses,
+  scanRunStatuses,
+  scanSchedules,
+  scoringStatuses,
   tenantPlans,
   tenantStatuses,
   tenantTypes
@@ -64,17 +69,58 @@ export const normalizedJobSchema = z.object({
   id: idSchema,
   tenantId: idSchema,
   userId: idSchema,
+  sourceConfigId: idSchema.nullable(),
   source: z.enum(jobSources),
-  externalId: z.string().trim().min(1),
+  sourceJobId: z.string().trim().min(1),
   title: z.string().trim().min(1),
-  companyName: z.string().trim().min(1),
+  company: z.string().trim().min(1),
   location: z.string().trim(),
-  remotePreference: z.enum(remotePreferences),
-  descriptionText: z.string(),
-  applyUrl: z.string().trim().url(),
+  remoteType: z.enum(jobRemoteTypes),
+  salaryMin: z.number().int().positive().nullable(),
+  salaryMax: z.number().int().positive().nullable(),
+  description: z.string(),
+  responsibilities: stringListSchema,
+  requirements: stringListSchema,
+  applicationUrl: z.string().trim().url(),
+  atsType: z.enum(atsTypes),
+  postedAt: isoDateSchema.nullable(),
   discoveredAt: isoDateSchema,
+  scoringStatus: z.enum(scoringStatuses),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
+});
+
+export const jobSourceConfigSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  source: z.enum(jobSources),
+  displayName: z.string().trim().min(1),
+  companyName: z.string().trim(),
+  boardToken: z.string().trim(),
+  siteName: z.string().trim(),
+  manualUrl: z.string().trim().url().or(z.literal("")),
+  schedule: z.enum(scanSchedules),
+  enabled: z.boolean(),
+  lastScanAt: isoDateSchema.nullable(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const scanRunSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  sourceConfigId: idSchema,
+  source: z.enum(jobSources),
+  status: z.enum(scanRunStatuses),
+  startedAt: isoDateSchema,
+  finishedAt: isoDateSchema.nullable(),
+  jobsFetched: z.number().int().min(0),
+  jobsInserted: z.number().int().min(0),
+  jobsUpdated: z.number().int().min(0),
+  duplicatesSkipped: z.number().int().min(0),
+  errorMessage: z.string()
 });
 
 export const jobMatchSchema = z.object({

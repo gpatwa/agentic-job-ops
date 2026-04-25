@@ -9,6 +9,7 @@ import {
 import type {
   ApplicationRecord,
   AuditLog,
+  NormalizedJob,
   ProfileCompletion,
   Resume
 } from "../models/domain";
@@ -19,11 +20,13 @@ interface DashboardHomeProps<RouteId extends string> {
   completion: ProfileCompletion;
   resume: Resume | null;
   applications: ApplicationRecord[];
+  jobs: NormalizedJob[];
   auditLogs: AuditLog[];
   onNavigate: (route: RouteId) => void;
   routes: {
     profile: RouteId;
     resume: RouteId;
+    ingestion: RouteId;
     jobs: RouteId;
     tracker: RouteId;
   };
@@ -57,10 +60,13 @@ export function DashboardHome<RouteId extends string>({
   completion,
   resume,
   applications,
+  jobs,
   auditLogs,
   onNavigate,
   routes
 }: DashboardHomeProps<RouteId>) {
+  const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued").length;
+
   return (
     <div className="space-y-6">
       <header className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -72,8 +78,8 @@ export function DashboardHome<RouteId extends string>({
             Review center
           </h2>
           <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600">
-            Phase 1 captures the profile, resume record, and review surfaces that later
-            phases will populate.
+            Phase 2 adds offline job ingestion, deduplication, scan history, and
+            queued normalized jobs for scoring.
           </p>
         </div>
         <button
@@ -97,7 +103,11 @@ export function DashboardHome<RouteId extends string>({
           value={resume ? "Uploaded" : "Missing"}
           icon={FileUp}
         />
-        <StatCard label="Review queue" value="0" icon={BriefcaseBusiness} />
+        <StatCard
+          label="Queued jobs"
+          value={String(queuedJobs)}
+          icon={BriefcaseBusiness}
+        />
         <StatCard
           label="Applications tracked"
           value={String(applications.length)}
@@ -128,26 +138,26 @@ export function DashboardHome<RouteId extends string>({
                 Queue overview
               </h3>
               <p className="mt-1 text-sm text-slate-500">
-                Apply Review, Maybe, and Browse are ready for scored jobs.
+                Ingested jobs wait in queued status until Phase 3 scoring assigns
+                them to review queues.
               </p>
             </div>
             <button
               className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-300 px-3 text-sm font-semibold text-slate-800 transition hover:bg-slate-50"
               type="button"
-              onClick={() => onNavigate(routes.jobs)}
+              onClick={() => onNavigate(routes.ingestion)}
             >
               <ListChecks aria-hidden="true" size={17} />
-              Open queues
+              Open ingestion
             </button>
           </div>
           <div className="mt-5 grid gap-3 sm:grid-cols-3">
             {["Apply Review", "Maybe", "Browse"].map((label) => (
-              <div
-                key={label}
-                className="rounded-lg border border-slate-200 bg-panel p-4"
-              >
+              <div key={label} className="rounded-lg border border-slate-200 bg-panel p-4">
                 <p className="text-sm font-medium text-slate-500">{label}</p>
-                <p className="mt-2 text-2xl font-semibold text-slate-950">0</p>
+                <p className="mt-2 text-2xl font-semibold text-slate-950">
+                  {label === "Browse" ? queuedJobs : 0}
+                </p>
               </div>
             ))}
           </div>

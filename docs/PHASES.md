@@ -6,7 +6,7 @@ Foundation: app shell, tenant-aware data model, profile setup, resume upload, pa
 
 ## Phase 2
 
-Offline job ingestion workers, Greenhouse connector, Lever connector, normalized job schema, and deduplication.
+Offline job ingestion workers, source configuration, manual scan execution, Greenhouse connector, Lever connector, manual URL import placeholder, normalized job schema, queued scoring status, scan history, visible errors, and deduplication.
 
 ## Phase 3
 

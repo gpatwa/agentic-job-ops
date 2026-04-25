@@ -65,6 +65,39 @@ enum JobSource {
   api
 }
 
+enum AtsType {
+  greenhouse
+  lever
+  manual
+  crawler
+  api
+}
+
+enum JobRemoteType {
+  remote
+  hybrid
+  onsite
+  unknown
+}
+
+enum ScanSchedule {
+  manual
+  daily
+  every_6_hours
+}
+
+enum ScanRunStatus {
+  running
+  succeeded
+  failed
+}
+
+enum ScoringStatus {
+  queued
+  scored
+  skipped
+}
+
 enum QueueType {
   apply_review
   maybe
@@ -123,23 +156,70 @@ model Resume {
 }
 
 model NormalizedJob {
-  id               String           @id @default(cuid())
+  id               String        @id @default(cuid())
   tenantId         String
   userId           String
+  sourceConfigId   String?
   source           JobSource
-  externalId       String
+  sourceJobId      String
   title            String
-  companyName      String
+  company          String
   location         String
-  remotePreference RemotePreference
-  descriptionText  String
-  applyUrl         String
+  remoteType       JobRemoteType
+  salaryMin        Int?
+  salaryMax        Int?
+  description      String
+  responsibilities String[]
+  requirements     String[]
+  applicationUrl   String
+  atsType          AtsType
+  postedAt         DateTime?
   discoveredAt     DateTime
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  scoringStatus    ScoringStatus @default(queued)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   @@index([tenantId, userId])
-  @@unique([tenantId, source, externalId])
+  @@index([tenantId, sourceConfigId])
+  @@unique([tenantId, source, sourceJobId])
+}
+
+model JobSourceConfig {
+  id          String       @id @default(cuid())
+  tenantId    String
+  userId      String
+  source      JobSource
+  displayName String
+  companyName String
+  boardToken  String
+  siteName    String
+  manualUrl   String
+  schedule    ScanSchedule
+  enabled     Boolean      @default(true)
+  lastScanAt  DateTime?
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([tenantId, userId])
+}
+
+model ScanRun {
+  id                String        @id @default(cuid())
+  tenantId          String
+  userId            String
+  sourceConfigId    String
+  source            JobSource
+  status            ScanRunStatus
+  startedAt         DateTime
+  finishedAt        DateTime?
+  jobsFetched       Int           @default(0)
+  jobsInserted      Int           @default(0)
+  jobsUpdated       Int           @default(0)
+  duplicatesSkipped Int           @default(0)
+  errorMessage      String
+
+  @@index([tenantId, userId])
+  @@index([tenantId, sourceConfigId])
 }
 
 model JobMatch {

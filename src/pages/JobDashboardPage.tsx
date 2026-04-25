@@ -1,6 +1,7 @@
 import { BriefcaseBusiness, Layers3, Search } from "lucide-react";
 import { useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import type { NormalizedJob } from "../models/domain";
 
 type QueueTab = "apply_review" | "maybe" | "browse";
 
@@ -37,9 +38,14 @@ const tabs: Array<{
   }
 ];
 
-export function JobDashboardPage() {
+interface JobDashboardPageProps {
+  jobs: NormalizedJob[];
+}
+
+export function JobDashboardPage({ jobs }: JobDashboardPageProps) {
   const [activeTab, setActiveTab] = useState<QueueTab>("apply_review");
   const selected = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
+  const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued");
 
   return (
     <div className="space-y-6">
@@ -51,7 +57,8 @@ export function JobDashboardPage() {
           Job dashboard
         </h2>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Queues are intentionally empty until job ingestion and scoring are added.
+          Ingested jobs remain queued until Phase 3 scoring assigns them to Apply
+          Review, Maybe, or Browse.
         </p>
       </header>
 
@@ -82,11 +89,40 @@ export function JobDashboardPage() {
         </div>
 
         <div className="mt-5" role="tabpanel">
-          <EmptyState
-            icon={selected.icon}
-            title={selected.title}
-            message={selected.message}
-          />
+          {activeTab === "browse" && queuedJobs.length > 0 ? (
+            <div className="overflow-x-auto rounded-lg border border-slate-200">
+              <table className="w-full min-w-[720px] text-left text-sm">
+                <thead className="bg-panel text-slate-600">
+                  <tr>
+                    <th className="px-4 py-3 font-semibold">Title</th>
+                    <th className="px-4 py-3 font-semibold">Company</th>
+                    <th className="px-4 py-3 font-semibold">Location</th>
+                    <th className="px-4 py-3 font-semibold">Source</th>
+                    <th className="px-4 py-3 font-semibold">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {queuedJobs.map((job) => (
+                    <tr key={job.id} className="border-t border-slate-200">
+                      <td className="px-4 py-3 font-medium text-slate-950">
+                        {job.title}
+                      </td>
+                      <td className="px-4 py-3">{job.company}</td>
+                      <td className="px-4 py-3">{job.location || "Unknown"}</td>
+                      <td className="px-4 py-3">{job.source}</td>
+                      <td className="px-4 py-3">{job.scoringStatus}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <EmptyState
+              icon={selected.icon}
+              title={selected.title}
+              message={selected.message}
+            />
+          )}
         </div>
       </section>
     </div>

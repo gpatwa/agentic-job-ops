@@ -17,6 +17,15 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Tenant-aware data model for future PostgreSQL storage.
 - Audit log helper for important actions without sensitive content.
 
+## Phase 2 Outcomes
+
+- Configurable job sources for Greenhouse and Lever public company boards.
+- Manual, daily, and every 6 hours scan cadence settings.
+- Manual scans that normalize postings into one job schema.
+- Deduplication so repeated scans do not repeatedly insert the same jobs.
+- Scan history with errors visible to operators.
+- New jobs held in queued status for Phase 3 scoring.
+
 ## Users
 
 - Individual job seekers.

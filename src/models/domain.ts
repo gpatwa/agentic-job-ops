@@ -18,6 +18,9 @@ export type TenantStatus = (typeof tenantStatuses)[number];
 export const remotePreferences = ["remote", "hybrid", "onsite", "any"] as const;
 export type RemotePreference = (typeof remotePreferences)[number];
 
+export const jobRemoteTypes = ["remote", "hybrid", "onsite", "unknown"] as const;
+export type JobRemoteType = (typeof jobRemoteTypes)[number];
+
 export const resumeStatuses = ["uploaded", "parsed", "failed"] as const;
 export type ResumeStatus = (typeof resumeStatuses)[number];
 
@@ -46,6 +49,18 @@ export const jobSources = [
 ] as const;
 
 export type JobSource = (typeof jobSources)[number];
+
+export const atsTypes = ["greenhouse", "lever", "manual", "crawler", "api"] as const;
+export type AtsType = (typeof atsTypes)[number];
+
+export const scanSchedules = ["manual", "daily", "every_6_hours"] as const;
+export type ScanSchedule = (typeof scanSchedules)[number];
+
+export const scanRunStatuses = ["running", "succeeded", "failed"] as const;
+export type ScanRunStatus = (typeof scanRunStatuses)[number];
+
+export const scoringStatuses = ["queued", "scored", "skipped"] as const;
+export type ScoringStatus = (typeof scoringStatuses)[number];
 
 export const queueTypes = ["apply_review", "maybe", "browse"] as const;
 export type QueueType = (typeof queueTypes)[number];
@@ -100,17 +115,58 @@ export interface NormalizedJob {
   id: string;
   tenantId: string;
   userId: string;
+  sourceConfigId: string | null;
   source: JobSource;
-  externalId: string;
+  sourceJobId: string;
   title: string;
-  companyName: string;
+  company: string;
   location: string;
-  remotePreference: RemotePreference;
-  descriptionText: string;
-  applyUrl: string;
+  remoteType: JobRemoteType;
+  salaryMin: number | null;
+  salaryMax: number | null;
+  description: string;
+  responsibilities: string[];
+  requirements: string[];
+  applicationUrl: string;
+  atsType: AtsType;
+  postedAt: string | null;
   discoveredAt: string;
+  scoringStatus: ScoringStatus;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface JobSourceConfig {
+  id: string;
+  tenantId: string;
+  userId: string;
+  source: JobSource;
+  displayName: string;
+  companyName: string;
+  boardToken: string;
+  siteName: string;
+  manualUrl: string;
+  schedule: ScanSchedule;
+  enabled: boolean;
+  lastScanAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ScanRun {
+  id: string;
+  tenantId: string;
+  userId: string;
+  sourceConfigId: string;
+  source: JobSource;
+  status: ScanRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  jobsFetched: number;
+  jobsInserted: number;
+  jobsUpdated: number;
+  duplicatesSkipped: number;
+  errorMessage: string;
 }
 
 export interface JobMatch {
