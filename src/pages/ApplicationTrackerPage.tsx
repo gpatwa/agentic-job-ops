@@ -53,6 +53,21 @@ function userFacingJobCopy(value: string): string {
     );
 }
 
+function packageStatusMessage(applicationPackage: ApplicationPackage): string {
+  if (
+    applicationPackage.status === "draft" ||
+    applicationPackage.status === "ready_for_review"
+  ) {
+    return "Application package is ready for review and edits.";
+  }
+
+  if (applicationPackage.status === "approved") {
+    return "Application package is ready for browser application assistant.";
+  }
+
+  return "Application package needs review or regenerate before applying.";
+}
+
 function TrackerCard({
   application,
   job,
@@ -116,7 +131,7 @@ function TrackerCard({
       {applicationPackage && (
         <div className="mt-4 flex flex-col gap-3 rounded-md border border-slate-200 bg-panel p-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-6 text-slate-600">
-            Application package is ready for human review and edits.
+            {packageStatusMessage(applicationPackage)}
           </p>
           <button
             className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"

@@ -53,6 +53,21 @@ function confidenceTone(confidence: ApplicationAnswer["confidence"]): string {
   return "bg-red-50 text-red-700";
 }
 
+function packageStatusMessage(applicationPackage: ApplicationPackage): string {
+  if (
+    applicationPackage.status === "draft" ||
+    applicationPackage.status === "ready_for_review"
+  ) {
+    return "This package is ready for review and edits.";
+  }
+
+  if (applicationPackage.status === "approved") {
+    return "This package is ready for browser application assistant.";
+  }
+
+  return "This package needs review or regenerate before applying.";
+}
+
 function DraftPreview({ text }: { text: string }) {
   return (
     <div className="max-h-[420px] overflow-auto rounded-md border border-slate-200 bg-panel p-4">
@@ -164,8 +179,9 @@ export function ApplicationPackagePage({
             {userFacingJobCopy(job.title)} at {job.company}
           </h2>
           <p className="mt-3 text-sm leading-6 text-slate-600">
-            Review and edit the tailored resume draft, cover letter draft, and
-            short-answer drafts before approving any application work.
+            {packageStatusMessage(applicationPackage)} Review the tailored resume
+            draft, cover letter draft, and short-answer drafts before any
+            application work continues.
           </p>
           <div className="mt-4 flex flex-wrap gap-2">
             {match && (
@@ -196,11 +212,7 @@ export function ApplicationPackagePage({
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:bg-red-100 disabled:cursor-not-allowed disabled:opacity-50"
             type="button"
             disabled={!canReject}
-            onClick={() => {
-              if (window.confirm("Reject this generated application package?")) {
-                onReject(applicationPackage.id);
-              }
-            }}
+            onClick={() => onReject(applicationPackage.id)}
           >
             <XCircle aria-hidden="true" size={17} />
             Reject
