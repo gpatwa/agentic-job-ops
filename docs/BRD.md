@@ -41,7 +41,16 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Application tracker records created or updated from user actions.
 - Tracker grouped by application status with manual status and note edits.
 - User overrides logged without deleting jobs.
-- Phase 5 application package generation kept behind a placeholder service boundary.
+- Phase 5 application package generation prepared behind a service boundary.
+
+## Phase 5 Outcomes
+
+- Start application prep generates a reviewable application package.
+- Packages include a tailored resume draft, concise cover letter draft, and editable short-answer drafts.
+- Deterministic generation works without LLM keys through a swappable adapter boundary.
+- Generated content uses profile, parsed resume text, verified facts, and job descriptions only.
+- Unsupported-claim warnings flag risky company, tool, credential, and metric mentions.
+- Users can edit, approve, or reject packages; no application is submitted.
 
 ## Users
 
@@ -53,6 +62,5 @@ The AI does the work. The human makes the decision. The product must not submit 
 
 - Offline job ingestion from Greenhouse, Lever, APIs, and crawlers.
 - Match scoring from 0 to 10.
-- Tailored resume and cover letter generation from verified facts only.
 - Browser-based application assistant with a human approval gate before submit.
 - Evals, feedback loops, tenant isolation, RBAC, audit logs, and metering.

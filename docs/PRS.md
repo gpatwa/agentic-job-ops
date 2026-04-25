@@ -43,7 +43,19 @@ Build dashboard actions and application tracking workflows with:
 - Manual status updates across discovered, recommended, saved, draft prepared, needs review, approved, submitted, recruiter contacted, interviewing, rejected, offer, and archived.
 - Tracker grouped by status with source job, company, title, match score, last updated date, and notes.
 - Audit events for job saves, rejects, archives, queue overrides, prep start, status changes, note updates, and manual applications.
-- Placeholder application package generator boundary for Phase 5.
+- Application package generator boundary prepared for Phase 5.
+
+## Phase 5 Scope
+
+Build application package generation with:
+
+- `ApplicationPackage` records for generated resume drafts, cover letter drafts, generation metadata, hashes, status, and safety warnings.
+- `ApplicationAnswer` records for common application questions, generated answers, confidence, source, and review flags.
+- Deterministic package generation that works without API keys.
+- Placeholder LLM generation adapter that can be swapped in later.
+- Package review page with resume preview, cover letter preview, short-answer editing, safety warnings, approve, and reject actions.
+- Tracker and job dashboard links into package review.
+- Audit events for generation, edits, answer edits, approval, rejection, and unsupported-claim warnings.
 
 ## Functional Requirements
 
@@ -62,6 +74,10 @@ Build dashboard actions and application tracking workflows with:
 - Users can take next-step actions on scored jobs.
 - Users can save, reject, archive, add notes, move jobs between queues, and start an application prep placeholder.
 - Rejected and archived jobs are retained for history and filtering.
+- Users can start application prep and receive a reviewable package.
+- Users can edit generated resume, cover letter, and answers before approving.
+- Users can approve or reject a generated package.
+- Unsupported-claim warnings are visible when generated or edited text mentions risky unsupported claims.
 
 ## Non-Functional Requirements
 

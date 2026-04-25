@@ -18,8 +18,12 @@ Dashboard actions, application tracker workflows, status transitions, notes, sav
 
 ## Phase 5
 
-Playwright browser application assistant with human approval before submit. Do not bypass CAPTCHA, rate limits, or anti-bot systems.
+Application package generation: tailored resume draft, cover letter draft, short-answer drafts, deterministic fallback generation, LLM adapter boundary, unsupported-claim warnings, review/edit workflow, approval, and rejection. Do not submit applications.
 
 ## Phase 6
+
+Playwright browser application assistant with human approval before submit. Do not bypass CAPTCHA, rate limits, or anti-bot systems.
+
+## Phase 7
 
 Evals, feedback events, model and prompt versioning, usage metering, RBAC, tenant administration, and audit reporting.

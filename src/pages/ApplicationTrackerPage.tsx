@@ -2,6 +2,7 @@ import { ClipboardList } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import type {
+  ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
   JobMatch,
@@ -13,11 +14,13 @@ interface ApplicationTrackerPageProps {
   applications: ApplicationRecord[];
   jobs: NormalizedJob[];
   matches: JobMatch[];
+  packages: ApplicationPackage[];
   onStatusChange: (applicationId: string, status: ApplicationStatus) => void;
   onNotesChange: (applicationId: string, notes: string) => void;
+  onOpenPackage: (packageId: string) => void;
 }
 
-function statusLabel(status: ApplicationStatus): string {
+function statusLabel(status: string): string {
   return status.replace(/_/g, " ");
 }
 
@@ -44,14 +47,18 @@ function TrackerCard({
   application,
   job,
   match,
+  applicationPackage,
   onStatusChange,
-  onNotesChange
+  onNotesChange,
+  onOpenPackage
 }: {
   application: ApplicationRecord;
   job: NormalizedJob | null;
   match: JobMatch | null;
+  applicationPackage: ApplicationPackage | null;
   onStatusChange: (applicationId: string, status: ApplicationStatus) => void;
   onNotesChange: (applicationId: string, notes: string) => void;
+  onOpenPackage: (packageId: string) => void;
 }) {
   const [notesDraft, setNotesDraft] = useState(application.notes);
 
@@ -82,11 +89,31 @@ function TrackerCard({
           <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
             {statusLabel(application.status)}
           </span>
+          {applicationPackage && (
+            <span className="rounded-md bg-purple-50 px-2 py-1 text-xs font-semibold capitalize text-purple-700">
+              Package {statusLabel(applicationPackage.status)}
+            </span>
+          )}
         </div>
       </div>
 
       {match && (
         <p className="mt-3 text-sm leading-6 text-slate-600">{match.summary}</p>
+      )}
+
+      {applicationPackage && (
+        <div className="mt-4 flex flex-col gap-3 rounded-md border border-slate-200 bg-panel p-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-slate-600">
+            Application package is ready for human review and edits.
+          </p>
+          <button
+            className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            type="button"
+            onClick={() => onOpenPackage(applicationPackage.id)}
+          >
+            Review package
+          </button>
+        </div>
       )}
 
       <div className="mt-4 grid gap-3 md:grid-cols-[220px_1fr_auto] md:items-end">
@@ -133,8 +160,10 @@ export function ApplicationTrackerPage({
   applications,
   jobs,
   matches,
+  packages,
   onStatusChange,
-  onNotesChange
+  onNotesChange,
+  onOpenPackage
 }: ApplicationTrackerPageProps) {
   const jobById = useMemo(
     () => new Map(jobs.map((job) => [job.id, job] as const)),
@@ -143,6 +172,16 @@ export function ApplicationTrackerPage({
   const matchByJobId = useMemo(
     () => new Map(matches.map((match) => [match.jobId, match] as const)),
     [matches]
+  );
+  const packageByApplicationId = useMemo(
+    () =>
+      new Map(
+        packages.map((applicationPackage) => [
+          applicationPackage.applicationRecordId,
+          applicationPackage
+        ] as const)
+      ),
+    [packages]
   );
   const grouped = applicationStatuses
     .map((status) => ({
@@ -205,8 +244,12 @@ export function ApplicationTrackerPage({
                     application={application}
                     job={jobById.get(application.jobId) ?? null}
                     match={matchByJobId.get(application.jobId) ?? null}
+                    applicationPackage={
+                      packageByApplicationId.get(application.id) ?? null
+                    }
                     onStatusChange={onStatusChange}
                     onNotesChange={onNotesChange}
+                    onOpenPackage={onOpenPackage}
                   />
                 ))}
               </div>

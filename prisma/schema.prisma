@@ -112,6 +112,29 @@ enum MatchRecommendation {
   skip
 }
 
+enum ApplicationPackageStatus {
+  draft
+  ready_for_review
+  approved
+  rejected
+}
+
+enum GenerationMode {
+  deterministic
+  llm
+}
+
+enum AnswerConfidence {
+  high
+  medium
+  low
+}
+
+enum ApplicationAnswerSource {
+  generated
+  user_edited
+}
+
 model Tenant {
   id        String       @id @default(cuid())
   name      String
@@ -274,6 +297,48 @@ model ApplicationRecord {
   updatedAt DateTime          @updatedAt
 
   @@index([tenantId, userId])
+}
+
+model ApplicationPackage {
+  id                  String                   @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  applicationRecordId String
+  status              ApplicationPackageStatus
+  resumeMarkdown      String
+  coverLetter         String
+  generationMode      GenerationMode
+  modelName           String
+  promptVersion       String
+  inputHash           String
+  outputHash          String
+  safetyWarnings      String[]
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+  approvedAt          DateTime?
+  rejectedAt          DateTime?
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+  @@unique([tenantId, userId, applicationRecordId])
+}
+
+model ApplicationAnswer {
+  id                   String                  @id @default(cuid())
+  tenantId             String
+  userId               String
+  applicationPackageId String
+  question             String
+  answer               String
+  confidence           AnswerConfidence
+  source               ApplicationAnswerSource
+  needsUserReview      Boolean                 @default(true)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, applicationPackageId])
 }
 
 model AuditLog {

@@ -55,6 +55,24 @@ export const dashboardJobActions = [
 
 export type DashboardJobAction = (typeof dashboardJobActions)[number];
 
+export const applicationPackageStatuses = [
+  "draft",
+  "ready_for_review",
+  "approved",
+  "rejected"
+] as const;
+
+export type ApplicationPackageStatus = (typeof applicationPackageStatuses)[number];
+
+export const generationModes = ["deterministic", "llm"] as const;
+export type GenerationMode = (typeof generationModes)[number];
+
+export const answerConfidences = ["high", "medium", "low"] as const;
+export type AnswerConfidence = (typeof answerConfidences)[number];
+
+export const applicationAnswerSources = ["generated", "user_edited"] as const;
+export type ApplicationAnswerSource = (typeof applicationAnswerSources)[number];
+
 export const jobSources = [
   "greenhouse",
   "lever",
@@ -226,6 +244,41 @@ export interface ApplicationRecord {
   jobId: string;
   status: ApplicationStatus;
   notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ApplicationPackage {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string;
+  status: ApplicationPackageStatus;
+  resumeMarkdown: string;
+  coverLetter: string;
+  generationMode: GenerationMode;
+  modelName: string;
+  promptVersion: string;
+  inputHash: string;
+  outputHash: string;
+  safetyWarnings: string[];
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  rejectedAt: string | null;
+}
+
+export interface ApplicationAnswer {
+  id: string;
+  tenantId: string;
+  userId: string;
+  applicationPackageId: string;
+  question: string;
+  answer: string;
+  confidence: AnswerConfidence;
+  source: ApplicationAnswerSource;
+  needsUserReview: boolean;
   createdAt: string;
   updatedAt: string;
 }

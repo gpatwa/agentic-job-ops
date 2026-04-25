@@ -1,7 +1,11 @@
 import { z } from "zod";
 import {
+  answerConfidences,
+  applicationAnswerSources,
+  applicationPackageStatuses,
   applicationStatuses,
   atsTypes,
+  generationModes,
   jobRemoteTypes,
   jobSources,
   matchRecommendations,
@@ -160,6 +164,41 @@ export const applicationRecordSchema = z.object({
   jobId: idSchema,
   status: z.enum(applicationStatuses),
   notes: z.string(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const applicationPackageSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema,
+  status: z.enum(applicationPackageStatuses),
+  resumeMarkdown: z.string(),
+  coverLetter: z.string(),
+  generationMode: z.enum(generationModes),
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  inputHash: z.string().trim().min(1),
+  outputHash: z.string().trim().min(1),
+  safetyWarnings: stringListSchema,
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema,
+  approvedAt: isoDateSchema.nullable(),
+  rejectedAt: isoDateSchema.nullable()
+});
+
+export const applicationAnswerSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  applicationPackageId: idSchema,
+  question: z.string().trim().min(1),
+  answer: z.string(),
+  confidence: z.enum(answerConfidences),
+  source: z.enum(applicationAnswerSources),
+  needsUserReview: z.boolean(),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

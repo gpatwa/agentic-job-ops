@@ -11,10 +11,10 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/resumeService.ts`: Resume upload record creation and parser placeholder.
 - `src/services/auditLog.ts`: Sanitized audit events for important actions.
 - `src/services/applicationWorkflow.ts`: Phase 4 dashboard actions, application record upserts, queue overrides, and workflow audit metadata.
-- `src/services/applicationPackage.ts`: Phase 5 placeholder interface for tailored application packages.
+- `src/services/applicationPackage.ts`: Phase 5 application package generation, deterministic fallback, LLM adapter boundary, safety checks, package persistence, answer persistence, and approval workflow.
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
 - `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
-- `src/services/browserApplicationAssistant.ts`: Phase 5 browser assistant placeholder with explicit approval requirement.
+- `src/services/browserApplicationAssistant.ts`: Future browser assistant placeholder with explicit approval requirement.
 - `prisma/schema.prisma`: PostgreSQL-ready model reference.
 
 ## Ingestion Flow
@@ -47,6 +47,18 @@ Incomplete profiles generate a visible warning while still producing best-effort
 Dashboard actions create or update `ApplicationRecord` rows with tenant and user scope. Rejected and archived jobs are never deleted; they remain available in the tracker and source job store. Queue override actions update the match queue while preserving the original score and logging a user override event.
 
 Notes are stored on the application record, but audit metadata records only note length and status, not note content. Marking a job submitted requires the explicit manual applied action or a deliberate tracker status change.
+
+## Application Package Flow
+
+1. A user clicks "Start application prep" on a scored job.
+2. The application workflow sets the `ApplicationRecord` status to `draft_prepared`.
+3. The package service generates or updates an `ApplicationPackage` and default `ApplicationAnswer` rows.
+4. The deterministic generator uses only profile fields, verified facts, parsed resume text, job requirements, and job responsibilities.
+5. The unsupported-claim checker flags suspicious company, tool, credential, and metric mentions that are not present in the evidence.
+6. The package review page lets the user edit the resume draft, cover letter draft, and answers.
+7. Approval marks the package approved and moves the application record to `approved`. Rejection marks the package rejected and returns the application to `needs_review`.
+
+The LLM package generator is represented by `ApplicationPackageGenerator`. It is intentionally a placeholder until model-backed generation is configured.
 
 ## Data Protection
 

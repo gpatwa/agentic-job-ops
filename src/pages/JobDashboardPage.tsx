@@ -9,6 +9,7 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import type {
+  ApplicationPackage,
   ApplicationRecord,
   DashboardJobAction,
   JobMatch,
@@ -22,16 +23,19 @@ interface JobDashboardPageProps {
   jobs: NormalizedJob[];
   matches: JobMatch[];
   applications: ApplicationRecord[];
+  packages: ApplicationPackage[];
   profileCompletion: ProfileCompletion;
   isScoring: boolean;
   onScoreJobs: () => void;
   onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
+  onOpenPackage: (packageId: string) => void;
 }
 
 interface JobCardData {
   job: NormalizedJob;
   match: JobMatch | null;
   application: ApplicationRecord | null;
+  applicationPackage: ApplicationPackage | null;
 }
 
 const tabs: Array<{
@@ -99,6 +103,12 @@ function applicationStatusLabel(application: ApplicationRecord | null): string {
   return application ? application.status.replace(/_/g, " ") : "not tracked";
 }
 
+function packageStatusLabel(applicationPackage: ApplicationPackage | null): string {
+  return applicationPackage
+    ? applicationPackage.status.replace(/_/g, " ")
+    : "no package";
+}
+
 function confirmSensitiveAction(action: DashboardJobAction): boolean {
   if (action === "archive") {
     return window.confirm("Archive this job in your tracker?");
@@ -150,12 +160,14 @@ function ActionButton({
 
 function JobMatchCard({
   item,
-  onJobAction
+  onJobAction,
+  onOpenPackage
 }: {
   item: JobCardData;
   onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
+  onOpenPackage: (packageId: string) => void;
 }) {
-  const { job, match, application } = item;
+  const { job, match, application, applicationPackage } = item;
   const [notesDraft, setNotesDraft] = useState(application?.notes ?? "");
 
   useEffect(() => {
@@ -175,6 +187,11 @@ function JobMatchCard({
           <span className="inline-flex w-fit rounded-md bg-sky-50 px-2 py-1 text-xs font-semibold text-sky-700">
             Queued
           </span>
+          {applicationPackage && (
+            <span className="inline-flex w-fit rounded-md bg-purple-50 px-2 py-1 text-xs font-semibold capitalize text-purple-700">
+              Package {packageStatusLabel(applicationPackage)}
+            </span>
+          )}
         </div>
         <p className="mt-3 text-sm leading-6 text-slate-600">
           This job has been ingested and is waiting for match scoring.
@@ -186,6 +203,15 @@ function JobMatchCard({
             jobId={job.id}
             onJobAction={onJobAction}
           />
+          {applicationPackage && (
+            <button
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onOpenPackage(applicationPackage.id)}
+            >
+              Review package
+            </button>
+          )}
           <ActionButton
             label="Archive"
             action="archive"
@@ -221,6 +247,11 @@ function JobMatchCard({
           <span className="inline-flex rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold capitalize text-blue-700">
             {applicationStatusLabel(application)}
           </span>
+          {applicationPackage && (
+            <span className="inline-flex rounded-md bg-purple-50 px-2 py-1 text-xs font-semibold capitalize text-purple-700">
+              Package {packageStatusLabel(applicationPackage)}
+            </span>
+          )}
         </div>
       </div>
 
@@ -288,6 +319,15 @@ function JobMatchCard({
             onJobAction={onJobAction}
             variant="primary"
           />
+          {applicationPackage && (
+            <button
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onOpenPackage(applicationPackage.id)}
+            >
+              Review package
+            </button>
+          )}
           <ActionButton
             label="Mark manually applied"
             action="mark_manually_applied"
@@ -342,10 +382,12 @@ export function JobDashboardPage({
   jobs,
   matches,
   applications,
+  packages,
   profileCompletion,
   isScoring,
   onScoreJobs,
-  onJobAction
+  onJobAction,
+  onOpenPackage
 }: JobDashboardPageProps) {
   const [activeTab, setActiveTab] = useState<QueueTab>("apply_review");
   const selected = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -360,13 +402,24 @@ export function JobDashboardPage({
       ),
     [applications]
   );
+  const packageByJobId = useMemo(
+    () =>
+      new Map(
+        packages.map((applicationPackage) => [
+          applicationPackage.jobId,
+          applicationPackage
+        ] as const)
+      ),
+    [packages]
+  );
   const queuedJobs = jobs.filter((job) => !matchByJobId.has(job.id));
   const cards = useMemo<JobCardData[]>(() => {
     const matchedCards = jobs
       .map((job) => ({
         job,
         match: matchByJobId.get(job.id) ?? null,
-        application: applicationByJobId.get(job.id) ?? null
+        application: applicationByJobId.get(job.id) ?? null,
+        applicationPackage: packageByJobId.get(job.id) ?? null
       }))
       .filter((item) => item.match !== null)
       .sort((a, b) => (b.match?.overallScore ?? 0) - (a.match?.overallScore ?? 0));
@@ -377,13 +430,14 @@ export function JobDashboardPage({
         ...queuedJobs.map((job) => ({
           job,
           match: null,
-          application: applicationByJobId.get(job.id) ?? null
+          application: applicationByJobId.get(job.id) ?? null,
+          applicationPackage: packageByJobId.get(job.id) ?? null
         }))
       ];
     }
 
     return matchedCards.filter((item) => item.match?.queue === activeTab);
-  }, [activeTab, applicationByJobId, jobs, matchByJobId, queuedJobs]);
+  }, [activeTab, applicationByJobId, jobs, matchByJobId, packageByJobId, queuedJobs]);
 
   return (
     <div className="space-y-6">
@@ -469,6 +523,7 @@ export function JobDashboardPage({
                   key={item.job.id}
                   item={item}
                   onJobAction={onJobAction}
+                  onOpenPackage={onOpenPackage}
                 />
               ))}
             </div>

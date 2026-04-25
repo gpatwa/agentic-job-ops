@@ -11,6 +11,8 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell, type NavigationItem } from "./components/AppShell";
 import { currentSession } from "./data/currentSession";
 import type {
+  ApplicationAnswer,
+  ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
   AuditLog,
@@ -19,6 +21,7 @@ import type {
   Resume,
   UserProfile
 } from "./models/domain";
+import { ApplicationPackagePage } from "./pages/ApplicationPackagePage";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
@@ -28,6 +31,16 @@ import { ProfileSetupPage } from "./pages/ProfileSetupPage";
 import { ResumeUploadPage } from "./pages/ResumeUploadPage";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
+import {
+  approveApplicationPackage,
+  generateApplicationPackage,
+  loadApplicationAnswers,
+  loadApplicationPackages,
+  rejectApplicationPackage,
+  updateApplicationAnswerDraft,
+  updateApplicationPackageDraft,
+  type ApplicationPackageContext
+} from "./services/applicationPackage";
 import { loadApplications } from "./services/applicationService";
 import {
   applyDashboardJobAction,
@@ -58,7 +71,8 @@ type RouteId =
   | "career-profile"
   | "ingestion"
   | "jobs"
-  | "tracker";
+  | "tracker"
+  | "package-review";
 
 const navigationItems: NavigationItem<RouteId>[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
@@ -73,8 +87,21 @@ const navigationItems: NavigationItem<RouteId>[] = [
 const routeIds = navigationItems.map((item) => item.id);
 
 function routeFromHash(): RouteId {
-  const route = window.location.hash.replace("#", "") as RouteId;
-  return routeIds.includes(route) ? route : "dashboard";
+  const route = window.location.hash.replace("#", "");
+  if (route.startsWith("package-review:")) {
+    return "package-review";
+  }
+
+  return routeIds.includes(route as RouteId) ? (route as RouteId) : "dashboard";
+}
+
+function packageIdFromHash(): string | null {
+  const route = window.location.hash.replace("#", "");
+  if (!route.startsWith("package-review:")) {
+    return null;
+  }
+
+  return route.replace("package-review:", "") || null;
 }
 
 function extensionFor(fileName: string): string {
@@ -90,6 +117,15 @@ export default function App() {
   const [resume, setResume] = useState<Resume | null>(() => loadResume(currentSession));
   const [applications, setApplications] = useState<ApplicationRecord[]>(() =>
     loadApplications(currentSession)
+  );
+  const [applicationPackages, setApplicationPackages] = useState<ApplicationPackage[]>(
+    () => loadApplicationPackages(currentSession)
+  );
+  const [applicationAnswers, setApplicationAnswers] = useState<ApplicationAnswer[]>(
+    () => loadApplicationAnswers(currentSession)
+  );
+  const [selectedPackageId, setSelectedPackageId] = useState<string | null>(() =>
+    packageIdFromHash()
   );
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
@@ -108,7 +144,10 @@ export default function App() {
   );
 
   useEffect(() => {
-    const handleHashChange = () => setRoute(routeFromHash());
+    const handleHashChange = () => {
+      setRoute(routeFromHash());
+      setSelectedPackageId(packageIdFromHash());
+    };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
   }, []);
@@ -120,9 +159,66 @@ export default function App() {
     setRoute(nextRoute);
   }
 
+  function navigateToPackage(packageId: string) {
+    window.location.hash = `package-review:${packageId}`;
+    setSelectedPackageId(packageId);
+    setRoute("package-review");
+  }
+
   function recordAudit(log: Parameters<typeof appendAuditLog>[1]) {
     const savedLog = appendAuditLog(currentSession, log);
     setAuditLogs((current) => [savedLog, ...current].slice(0, 50));
+  }
+
+  function recordUnsupportedClaimWarnings(
+    packageId: string,
+    jobId: string,
+    warnings: string[]
+  ) {
+    if (warnings.length === 0) {
+      return;
+    }
+
+    recordAudit({
+      action: "unsupported_claim_warning_created",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId,
+        warningCount: warnings.length
+      }
+    });
+  }
+
+  function packageContext(
+    applicationPackage: ApplicationPackage
+  ): ApplicationPackageContext | null {
+    const job = normalizedJobs.find((item) => item.id === applicationPackage.jobId);
+    if (!job) {
+      return null;
+    }
+
+    return {
+      profile,
+      resume,
+      job,
+      match: jobMatches.find((match) => match.jobId === job.id) ?? null
+    };
+  }
+
+  function invalidateApprovedApplicationIfEdited(
+    applicationPackage: ApplicationPackage
+  ) {
+    if (applicationPackage.status !== "approved") {
+      return;
+    }
+
+    const result = changeApplicationStatus(
+      currentSession,
+      applicationPackage.applicationRecordId,
+      "needs_review"
+    );
+    recordWorkflowResult(result);
   }
 
   function recordWorkflowResult(result: {
@@ -281,13 +377,51 @@ export default function App() {
     }
   }
 
-  function handleDashboardJobAction(
+  async function handleDashboardJobAction(
     jobId: string,
     action: DashboardJobAction,
     notes?: string
   ) {
     const result = applyDashboardJobAction(currentSession, jobId, action, { notes });
     recordWorkflowResult(result);
+
+    if (action !== "start_application_prep") {
+      return;
+    }
+
+    const job = normalizedJobs.find((item) => item.id === jobId);
+    if (!job) {
+      return;
+    }
+
+    const packageResult = await generateApplicationPackage({
+      session: currentSession,
+      application: result.application,
+      profile,
+      resume,
+      job,
+      match: jobMatches.find((match) => match.jobId === jobId) ?? null
+    });
+
+    setApplicationPackages(loadApplicationPackages(currentSession));
+    setApplicationAnswers(loadApplicationAnswers(currentSession));
+    recordAudit({
+      action: "application_package_generated",
+      resourceType: "ApplicationPackage",
+      resourceId: packageResult.package.id,
+      metadata: {
+        jobId,
+        applicationRecordId: result.application.id,
+        generationMode: packageResult.package.generationMode,
+        warningCount: packageResult.warningsCreated.length
+      }
+    });
+    recordUnsupportedClaimWarnings(
+      packageResult.package.id,
+      jobId,
+      packageResult.warningsCreated
+    );
+    navigateToPackage(packageResult.package.id);
   }
 
   function handleApplicationStatusChange(
@@ -301,6 +435,121 @@ export default function App() {
   function handleApplicationNotesChange(applicationId: string, notes: string) {
     const result = changeApplicationNotes(currentSession, applicationId, notes);
     recordWorkflowResult(result);
+  }
+
+  function handleSaveApplicationPackageDraft(
+    packageId: string,
+    updates: { resumeMarkdown: string; coverLetter: string }
+  ) {
+    const existing = applicationPackages.find(
+      (applicationPackage) => applicationPackage.id === packageId
+    );
+    if (!existing) {
+      return;
+    }
+
+    const context = packageContext(existing);
+    if (!context) {
+      return;
+    }
+
+    const result = updateApplicationPackageDraft(
+      currentSession,
+      packageId,
+      updates,
+      context
+    );
+    setApplicationPackages(loadApplicationPackages(currentSession));
+    setApplicationAnswers(loadApplicationAnswers(currentSession));
+    invalidateApprovedApplicationIfEdited(existing);
+    recordAudit({
+      action: "application_package_edited",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId: result.package.jobId,
+        status: result.package.status,
+        warningCount: result.warningsCreated.length
+      }
+    });
+    recordUnsupportedClaimWarnings(
+      packageId,
+      result.package.jobId,
+      result.warningsCreated
+    );
+  }
+
+  function handleSaveApplicationAnswer(answerId: string, answer: string) {
+    const existingAnswer = applicationAnswers.find((item) => item.id === answerId);
+    const existingPackage = applicationPackages.find(
+      (applicationPackage) =>
+        applicationPackage.id === existingAnswer?.applicationPackageId
+    );
+    if (!existingPackage) {
+      return;
+    }
+
+    const context = packageContext(existingPackage);
+    if (!context) {
+      return;
+    }
+
+    const result = updateApplicationAnswerDraft(
+      currentSession,
+      answerId,
+      answer,
+      context
+    );
+    setApplicationPackages(loadApplicationPackages(currentSession));
+    setApplicationAnswers(loadApplicationAnswers(currentSession));
+    invalidateApprovedApplicationIfEdited(existingPackage);
+    recordAudit({
+      action: "application_answer_edited",
+      resourceType: "ApplicationAnswer",
+      resourceId: answerId,
+      metadata: {
+        packageId: result.package.id,
+        jobId: result.package.jobId,
+        warningCount: result.warningsCreated.length
+      }
+    });
+    recordUnsupportedClaimWarnings(
+      result.package.id,
+      result.package.jobId,
+      result.warningsCreated
+    );
+  }
+
+  function handleApproveApplicationPackage(packageId: string) {
+    const result = approveApplicationPackage(currentSession, packageId);
+    setApplicationPackages(result.packages);
+    setApplications(result.applications);
+    recordAudit({
+      action: "application_package_approved",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId: result.package.jobId,
+        applicationRecordId: result.application.id,
+        status: result.application.status
+      }
+    });
+  }
+
+  function handleRejectApplicationPackage(packageId: string) {
+    const result = rejectApplicationPackage(currentSession, packageId);
+    setApplicationPackages(result.packages);
+    setApplications(result.applications);
+    recordAudit({
+      action: "application_package_rejected",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId: result.package.jobId,
+        applicationRecordId: result.application.id,
+        status: result.application.status
+      }
+    });
   }
 
   function renderRoute() {
@@ -347,10 +596,12 @@ export default function App() {
             jobs={normalizedJobs}
             matches={jobMatches}
             applications={applications}
+            packages={applicationPackages}
             profileCompletion={completion}
             isScoring={isScoring}
             onScoreJobs={handleScoreJobsNow}
             onJobAction={handleDashboardJobAction}
+            onOpenPackage={navigateToPackage}
           />
         );
       case "tracker":
@@ -359,10 +610,47 @@ export default function App() {
             applications={applications}
             jobs={normalizedJobs}
             matches={jobMatches}
+            packages={applicationPackages}
             onStatusChange={handleApplicationStatusChange}
             onNotesChange={handleApplicationNotesChange}
+            onOpenPackage={navigateToPackage}
           />
         );
+      case "package-review": {
+        const applicationPackage =
+          applicationPackages.find((item) => item.id === selectedPackageId) ?? null;
+        const job = applicationPackage
+          ? normalizedJobs.find((item) => item.id === applicationPackage.jobId) ?? null
+          : null;
+        const application = applicationPackage
+          ? applications.find(
+              (item) => item.id === applicationPackage.applicationRecordId
+            ) ?? null
+          : null;
+        const match = job
+          ? jobMatches.find((item) => item.jobId === job.id) ?? null
+          : null;
+        const answers = applicationPackage
+          ? applicationAnswers.filter(
+              (answer) => answer.applicationPackageId === applicationPackage.id
+            )
+          : [];
+
+        return (
+          <ApplicationPackagePage
+            applicationPackage={applicationPackage}
+            answers={answers}
+            application={application}
+            job={job}
+            match={match}
+            onBack={() => navigate("tracker")}
+            onSavePackage={handleSaveApplicationPackageDraft}
+            onSaveAnswer={handleSaveApplicationAnswer}
+            onApprove={handleApproveApplicationPackage}
+            onReject={handleRejectApplicationPackage}
+          />
+        );
+      }
       case "dashboard":
       default:
         return (
