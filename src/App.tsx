@@ -42,6 +42,7 @@ import type {
   RealSiteDryRunSnapshot,
   RecruiterLead,
   Resume,
+  ResumeImprovementDraft,
   ResumeIntelligenceReport,
   UsageMeteringEvent,
   UserProfile
@@ -189,6 +190,16 @@ import {
   selectionFromRecommendation,
   type ResumeIntelligenceAuditEvent
 } from "./services/resumeIntelligenceService";
+import {
+  editResumeImprovementDraft,
+  generateResumeImprovementDraft,
+  getLatestDraftForSourceResume,
+  loadResumeImprovementDrafts,
+  reanalyzeImprovedResume,
+  rejectResumeImprovementDraft,
+  saveResumeImprovementDraft,
+  type ResumeImprovementAuditEvent
+} from "./services/resumeImprovementService";
 
 type RouteId =
   | "dashboard"
@@ -318,6 +329,10 @@ export default function App() {
     JobTargetRecommendation[]
   >(() => loadJobTargetRecommendations(currentSession));
   const [isAnalyzingResume, setIsAnalyzingResume] = useState(false);
+  const [resumeImprovementDrafts, setResumeImprovementDrafts] = useState<
+    ResumeImprovementDraft[]
+  >(() => loadResumeImprovementDrafts(currentSession));
+  const [isImprovingResume, setIsImprovingResume] = useState(false);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -2141,6 +2156,174 @@ export default function App() {
     persistResumeIntelligenceAuditEvents(events);
   }
 
+  function persistResumeImprovementAuditEvents(
+    events: ResumeImprovementAuditEvent[]
+  ) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (event.action === "resume_improvement_generated") {
+        recordFeedback({
+          eventType: "resume_improvement_generated",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "resume_improvement_generated",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_improvement_edited") {
+        recordFeedback({
+          eventType: "resume_improvement_edited",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_improvement_saved") {
+        recordFeedback({
+          eventType: "resume_improvement_saved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "resume_improvement_saved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_improvement_rejected") {
+        recordFeedback({
+          eventType: "resume_improvement_rejected",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_improvement_reanalyzed") {
+        recordFeedback({
+          eventType: "resume_improvement_reanalyzed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "resume_improvement_reanalyzed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  async function handleGenerateResumeImprovement() {
+    if (!resume) return;
+    setIsImprovingResume(true);
+    try {
+      const result = await generateResumeImprovementDraft(
+        currentSession,
+        resume.id,
+        { targetRoles: profile?.targetTitles ?? [] }
+      );
+      setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+      persistResumeImprovementAuditEvents(result.auditEvents);
+    } finally {
+      setIsImprovingResume(false);
+    }
+  }
+
+  function handleEditResumeImprovement(markdown: string) {
+    if (!resume) return;
+    const draft = getLatestDraftForSourceResume(currentSession, resume.id);
+    if (!draft) return;
+    const result = editResumeImprovementDraft(currentSession, draft.id, markdown);
+    setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+    persistResumeImprovementAuditEvents(result.auditEvents);
+  }
+
+  async function handleSaveResumeImprovement() {
+    if (!resume) return;
+    const draft = getLatestDraftForSourceResume(currentSession, resume.id);
+    if (!draft) return;
+    const saved = saveResumeImprovementDraft(currentSession, draft.id);
+    setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+    setResume(loadResume(currentSession));
+    persistResumeImprovementAuditEvents(saved.auditEvents);
+    // Run intelligence on the improved resume immediately so the user sees
+    // the before/after risk score without needing a second click.
+    setIsImprovingResume(true);
+    try {
+      const reanalyzed = await reanalyzeImprovedResume(
+        currentSession,
+        saved.draft.id
+      );
+      setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+      setResumeIntelligenceReports(loadResumeIntelligenceReports(currentSession));
+      setJobTargetRecommendations(loadJobTargetRecommendations(currentSession));
+      persistResumeImprovementAuditEvents(
+        reanalyzed.auditEvents.filter(
+          (event): event is ResumeImprovementAuditEvent =>
+            event.action.startsWith("resume_improvement_")
+        )
+      );
+      persistResumeIntelligenceAuditEvents(
+        reanalyzed.auditEvents.filter(
+          (event) => !event.action.startsWith("resume_improvement_")
+        ) as ResumeIntelligenceAuditEvent[]
+      );
+    } finally {
+      setIsImprovingResume(false);
+    }
+  }
+
+  async function handleReanalyzeResumeImprovement() {
+    if (!resume) return;
+    // The active resume after save is the improved one, so we look up the
+    // latest draft via the previously saved sourceResumeId on the most
+    // recently saved draft (which is the only one that can be reanalyzed).
+    const draft = resumeImprovementDrafts.find(
+      (d) => d.improvedResumeId === resume.id
+    );
+    if (!draft) return;
+    setIsImprovingResume(true);
+    try {
+      const result = await reanalyzeImprovedResume(currentSession, draft.id);
+      setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+      setResumeIntelligenceReports(loadResumeIntelligenceReports(currentSession));
+      setJobTargetRecommendations(loadJobTargetRecommendations(currentSession));
+      persistResumeImprovementAuditEvents(
+        result.auditEvents.filter((event): event is ResumeImprovementAuditEvent =>
+          event.action.startsWith("resume_improvement_")
+        )
+      );
+      // Resume intelligence audit events from the re-analysis must also flow
+      // through the standard intelligence persistence path.
+      persistResumeIntelligenceAuditEvents(
+        result.auditEvents.filter(
+          (event) => !event.action.startsWith("resume_improvement_")
+        ) as ResumeIntelligenceAuditEvent[]
+      );
+    } finally {
+      setIsImprovingResume(false);
+    }
+  }
+
+  function handleRejectResumeImprovement() {
+    if (!resume) return;
+    const draft = getLatestDraftForSourceResume(currentSession, resume.id);
+    if (!draft) return;
+    const result = rejectResumeImprovementDraft(currentSession, draft.id);
+    setResumeImprovementDrafts(loadResumeImprovementDrafts(currentSession));
+    persistResumeImprovementAuditEvents(result.auditEvents);
+  }
+
   async function handleConfirmRecommendedTargets(selection: {
     selectedRoles: string[];
     selectedIndustries: string[];
@@ -2351,6 +2534,27 @@ export default function App() {
             resumeIntelligenceReport={currentReport}
             jobTargetRecommendation={currentRecommendation}
             isAnalyzingResume={isAnalyzingResume}
+            resumeImprovementDraft={
+              resume
+                ? resumeImprovementDrafts
+                    .filter(
+                      (d) =>
+                        d.sourceResumeId === resume.id ||
+                        d.improvedResumeId === resume.id
+                    )
+                    .sort(
+                      (a, b) =>
+                        new Date(b.updatedAt).getTime() -
+                        new Date(a.updatedAt).getTime()
+                    )[0] ?? null
+                : null
+            }
+            isImprovingResume={isImprovingResume}
+            onGenerateImprovement={handleGenerateResumeImprovement}
+            onEditImprovement={handleEditResumeImprovement}
+            onSaveImprovement={handleSaveResumeImprovement}
+            onReanalyzeImprovement={handleReanalyzeResumeImprovement}
+            onRejectImprovement={handleRejectResumeImprovement}
             onPasteResumeText={handlePasteResumeText}
             onTryDemoProfile={handleTryDemoProfile}
             onAnalyzeResume={handleAnalyzeResumeIntelligence}

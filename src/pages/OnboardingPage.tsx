@@ -24,6 +24,7 @@ import type {
   RecommendedRole,
   Resume,
   ResumeFieldConfidence,
+  ResumeImprovementDraft,
   ResumeIntelligenceReport,
   UserProfile
 } from "../models/domain";
@@ -40,7 +41,14 @@ interface OnboardingPageProps {
   lastResult: OnboardingRecommendationResult | null;
   resumeIntelligenceReport: ResumeIntelligenceReport | null;
   jobTargetRecommendation: JobTargetRecommendation | null;
+  resumeImprovementDraft: ResumeImprovementDraft | null;
   isAnalyzingResume: boolean;
+  isImprovingResume: boolean;
+  onGenerateImprovement: () => void;
+  onEditImprovement: (markdown: string) => void;
+  onSaveImprovement: () => void;
+  onReanalyzeImprovement: () => void;
+  onRejectImprovement: () => void;
   onPasteResumeText: (text: string) => void;
   onTryDemoProfile: () => void;
   onAnalyzeResume: () => void;
@@ -145,7 +153,14 @@ export function OnboardingPage({
   lastResult,
   resumeIntelligenceReport,
   jobTargetRecommendation,
+  resumeImprovementDraft,
   isAnalyzingResume,
+  isImprovingResume,
+  onGenerateImprovement,
+  onEditImprovement,
+  onSaveImprovement,
+  onReanalyzeImprovement,
+  onRejectImprovement,
   onPasteResumeText,
   onTryDemoProfile,
   onAnalyzeResume,
@@ -315,8 +330,15 @@ export function OnboardingPage({
           resume={resume}
           report={resumeIntelligenceReport}
           recommendation={jobTargetRecommendation}
+          improvementDraft={resumeImprovementDraft}
           isAnalyzing={isAnalyzingResume}
+          isImproving={isImprovingResume}
           onAnalyzeResume={onAnalyzeResume}
+          onGenerateImprovement={onGenerateImprovement}
+          onEditImprovement={onEditImprovement}
+          onSaveImprovement={onSaveImprovement}
+          onReanalyzeImprovement={onReanalyzeImprovement}
+          onRejectImprovement={onRejectImprovement}
           onConfirmResumeProfile={onConfirmResumeProfile}
           onConfirmRecommendedTargets={(selection) => {
             onConfirmRecommendedTargets(selection);
@@ -978,8 +1000,15 @@ interface ResumeIntelligenceSectionProps {
   resume: Resume | null;
   report: ResumeIntelligenceReport | null;
   recommendation: JobTargetRecommendation | null;
+  improvementDraft: ResumeImprovementDraft | null;
   isAnalyzing: boolean;
+  isImproving: boolean;
   onAnalyzeResume: () => void;
+  onGenerateImprovement: () => void;
+  onEditImprovement: (markdown: string) => void;
+  onSaveImprovement: () => void;
+  onReanalyzeImprovement: () => void;
+  onRejectImprovement: () => void;
   onConfirmResumeProfile: () => void;
   onConfirmRecommendedTargets: (selection: {
     selectedRoles: string[];
@@ -993,8 +1022,15 @@ function ResumeIntelligenceSection({
   resume,
   report,
   recommendation,
+  improvementDraft,
   isAnalyzing,
+  isImproving,
   onAnalyzeResume,
+  onGenerateImprovement,
+  onEditImprovement,
+  onSaveImprovement,
+  onReanalyzeImprovement,
+  onRejectImprovement,
   onConfirmResumeProfile,
   onConfirmRecommendedTargets,
   onNavigateResume
@@ -1084,6 +1120,16 @@ function ResumeIntelligenceSection({
                 onConfirm={onConfirmResumeProfile}
               />
               <AtsRiskCard report={report} />
+              <ResumeImprovementCard
+                report={report}
+                draft={improvementDraft}
+                isImproving={isImproving}
+                onGenerate={onGenerateImprovement}
+                onEdit={onEditImprovement}
+                onSave={onSaveImprovement}
+                onReanalyze={onReanalyzeImprovement}
+                onReject={onRejectImprovement}
+              />
               {recommendation && (
                 <JobTargetRecommendationCard
                   recommendation={recommendation}
@@ -1247,6 +1293,252 @@ function AtsRiskCard({ report }: { report: ResumeIntelligenceReport }) {
             );
           })}
         </ul>
+      )}
+    </div>
+  );
+}
+
+interface ResumeImprovementCardProps {
+  report: ResumeIntelligenceReport;
+  draft: ResumeImprovementDraft | null;
+  isImproving: boolean;
+  onGenerate: () => void;
+  onEdit: (markdown: string) => void;
+  onSave: () => void;
+  onReanalyze: () => void;
+  onReject: () => void;
+}
+
+function ResumeImprovementCard({
+  report,
+  draft,
+  isImproving,
+  onGenerate,
+  onEdit,
+  onSave,
+  onReanalyze,
+  onReject
+}: ResumeImprovementCardProps) {
+  const [editingMarkdown, setEditingMarkdown] = useState(
+    draft?.draftMarkdown ?? ""
+  );
+  const [editing, setEditing] = useState(false);
+
+  useEffect(() => {
+    setEditingMarkdown(draft?.draftMarkdown ?? "");
+    setEditing(false);
+  }, [draft?.id, draft?.draftMarkdown]);
+
+  const isFresh = !draft || draft.status === "rejected";
+  const canSave =
+    draft && (draft.status === "draft" || draft.status === "edited") &&
+    !draft.savedAt;
+  const canReanalyze =
+    draft && draft.status === "saved" && Boolean(draft.improvedResumeId);
+  const beforeAfter = draft
+    ? {
+        original: Math.round(draft.originalRiskScore),
+        improved:
+          draft.improvedRiskScore !== null
+            ? Math.round(draft.improvedRiskScore)
+            : null,
+        delta:
+          draft.improvedRiskScore !== null
+            ? Math.round(draft.originalRiskScore - draft.improvedRiskScore)
+            : null
+      }
+    : null;
+
+  return (
+    <div className="rounded-md border border-slate-200 bg-panel p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            ATS-friendly improvement
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">
+            If our parser struggles to read your resume, job boards probably
+            do too. Generate a single-column ATS-friendly draft from the
+            verified facts we already extracted — no fake metrics, no fake
+            skills, original resume preserved.
+          </p>
+        </div>
+        {isFresh && (
+          <button
+            type="button"
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            onClick={onGenerate}
+            disabled={isImproving}
+          >
+            {isImproving ? (
+              <RefreshCw className="animate-spin" aria-hidden="true" size={13} />
+            ) : (
+              <Sparkles aria-hidden="true" size={13} />
+            )}
+            {isImproving ? "Generating…" : "Generate ATS-friendly draft"}
+          </button>
+        )}
+      </div>
+
+      {report.suggestedFixes.length === 0 && !draft && (
+        <p className="mt-3 text-xs text-slate-500">
+          No ATS warnings detected on this resume — improvement is optional.
+        </p>
+      )}
+
+      {draft && (
+        <div className="mt-3 space-y-3">
+          <div className="flex flex-wrap gap-2">
+            <StatusPill tone="neutral">
+              Status {statusLabel(draft.status)}
+            </StatusPill>
+            {beforeAfter && (
+              <StatusPill tone="neutral">
+                Original risk {beforeAfter.original}/100
+              </StatusPill>
+            )}
+            {beforeAfter?.improved !== null && beforeAfter && (
+              <StatusPill tone={(beforeAfter.delta ?? 0) > 0 ? "good" : "warn"}>
+                Improved risk {beforeAfter.improved}/100
+                {beforeAfter.delta !== null
+                  ? ` · Δ ${beforeAfter.delta >= 0 ? "-" : "+"}${Math.abs(beforeAfter.delta)}`
+                  : ""}
+              </StatusPill>
+            )}
+          </div>
+
+          {draft.changesSummary.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Changes summary
+              </p>
+              <ul className="mt-1 space-y-1 text-xs text-slate-700">
+                {draft.changesSummary.map((line) => (
+                  <li key={line}>• {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {draft.appliedFixes.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                Applied fixes
+              </p>
+              <ul className="mt-1 space-y-1 text-xs text-emerald-800">
+                {draft.appliedFixes.map((line) => (
+                  <li key={line}>✓ {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {draft.warningsRemaining.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                Remaining warnings
+              </p>
+              <ul className="mt-1 space-y-1 text-xs text-amber-900">
+                {draft.warningsRemaining.map((line) => (
+                  <li key={line}>⚠ {line}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Draft preview
+            </p>
+            {editing ? (
+              <textarea
+                className="mt-1 min-h-48 w-full rounded-md border border-slate-300 px-3 py-2 font-mono text-xs leading-5"
+                value={editingMarkdown}
+                onChange={(e) => setEditingMarkdown(e.target.value)}
+              />
+            ) : (
+              <pre className="mt-1 max-h-72 overflow-auto rounded-md border border-slate-200 bg-white p-3 font-mono text-xs leading-5 text-slate-800 whitespace-pre-wrap">
+                {draft.draftMarkdown}
+              </pre>
+            )}
+          </div>
+
+          <div className="flex flex-wrap gap-2">
+            {!editing && draft.status !== "saved" && draft.status !== "rejected" && (
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setEditing(true)}
+              >
+                Edit draft
+              </button>
+            )}
+            {editing && (
+              <>
+                <button
+                  type="button"
+                  className="inline-flex min-h-9 items-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white hover:bg-slate-700"
+                  onClick={() => {
+                    onEdit(editingMarkdown);
+                    setEditing(false);
+                  }}
+                >
+                  Save draft edit
+                </button>
+                <button
+                  type="button"
+                  className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={() => {
+                    setEditingMarkdown(draft.draftMarkdown);
+                    setEditing(false);
+                  }}
+                >
+                  Cancel
+                </button>
+              </>
+            )}
+            {canSave && !editing && (
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800"
+                onClick={onSave}
+              >
+                <CheckCircle2 aria-hidden="true" size={13} />
+                Save as new resume version
+              </button>
+            )}
+            {canReanalyze && (
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                onClick={onReanalyze}
+                disabled={isImproving}
+              >
+                <RefreshCw aria-hidden="true" size={13} />
+                Re-run analysis
+              </button>
+            )}
+            {draft.status !== "saved" && draft.status !== "rejected" && !editing && (
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-2 rounded-md border border-red-200 bg-red-50 px-3 text-xs font-semibold text-red-700 hover:bg-red-100"
+                onClick={onReject}
+              >
+                Reject draft
+              </button>
+            )}
+            {draft.status === "saved" && (
+              <button
+                type="button"
+                className="inline-flex min-h-9 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={onGenerate}
+                disabled={isImproving}
+              >
+                Generate a new draft
+              </button>
+            )}
+          </div>
+        </div>
       )}
     </div>
   );

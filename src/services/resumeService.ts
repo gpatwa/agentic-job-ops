@@ -16,6 +16,10 @@ function resumeKey(session: AppSession): string {
   return scopedKey(session.tenant.id, session.userId, "resume");
 }
 
+function resumeVersionsKey(session: AppSession): string {
+  return scopedKey(session.tenant.id, session.userId, "resume_versions");
+}
+
 function fileExtension(fileName: string): string {
   const pieces = fileName.split(".");
   return pieces.length > 1 ? pieces[pieces.length - 1].toLowerCase() : "unknown";
@@ -102,4 +106,55 @@ export function saveResume(session: AppSession, resume: Resume): Resume {
   const parsed = resumeSchema.parse(resume);
   writeJson(resumeKey(session), parsed);
   return parsed;
+}
+
+export function loadResumeVersions(session: AppSession): Resume[] {
+  const versions = readJson<Resume[]>(resumeVersionsKey(session), []);
+  return versions.filter((version) => resumeSchema.safeParse(version).success);
+}
+
+export function saveResumeVersions(
+  session: AppSession,
+  versions: Resume[]
+): Resume[] {
+  const parsed = versions.map((version) => resumeSchema.parse(version));
+  writeJson(resumeVersionsKey(session), parsed.slice(0, 50));
+  return parsed;
+}
+
+/**
+ * Append a resume to the version history. Preserves anything already there
+ * (including the original resume) and never deletes prior versions.
+ */
+export function addResumeVersion(
+  session: AppSession,
+  resume: Resume
+): Resume[] {
+  const existing = loadResumeVersions(session);
+  if (existing.some((version) => version.id === resume.id)) {
+    return existing;
+  }
+  return saveResumeVersions(session, [resume, ...existing]);
+}
+
+/**
+ * Promote a resume to the active slot while making sure both the previous
+ * active resume and the new one are recorded in version history. The
+ * original is never overwritten — it stays accessible via
+ * loadResumeVersions.
+ */
+export function promoteResumeAsActive(
+  session: AppSession,
+  resume: Resume
+): { active: Resume; versions: Resume[] } {
+  const previousActive = loadResume(session);
+  let versions = loadResumeVersions(session);
+  if (previousActive && !versions.some((v) => v.id === previousActive.id)) {
+    versions = saveResumeVersions(session, [previousActive, ...versions]);
+  }
+  if (!versions.some((v) => v.id === resume.id)) {
+    versions = saveResumeVersions(session, [resume, ...versions]);
+  }
+  const active = saveResume(session, resume);
+  return { active, versions };
 }

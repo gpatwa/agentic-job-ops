@@ -212,6 +212,11 @@ enum FeedbackEventType {
   resume_profile_confirmed
   job_target_recommendations_confirmed
   job_target_recommendations_edited
+  resume_improvement_generated
+  resume_improvement_edited
+  resume_improvement_saved
+  resume_improvement_rejected
+  resume_improvement_reanalyzed
 }
 
 enum UsageMeteringEventType {
@@ -250,6 +255,16 @@ enum UsageMeteringEventType {
   resume_fix_suggestion_created
   job_target_recommendations_generated
   job_target_recommendations_confirmed
+  resume_improvement_generated
+  resume_improvement_saved
+  resume_improvement_reanalyzed
+}
+
+enum ResumeImprovementStatus {
+  draft
+  edited
+  saved
+  rejected
 }
 
 enum ResumeIntelligenceMode {
@@ -359,6 +374,7 @@ enum EvalSuite {
   company_intelligence
   onboarding
   resume_intelligence
+  resume_improvement
 }
 
 enum EvalRunSuite {
@@ -371,6 +387,7 @@ enum EvalRunSuite {
   company_intelligence
   onboarding
   resume_intelligence
+  resume_improvement
 }
 
 enum EvalRunStatus {
@@ -842,6 +859,34 @@ model RecruiterLead {
 
   @@index([tenantId, userId])
   @@index([tenantId, jobId])
+}
+
+model ResumeImprovementDraft {
+  id                  String                  @id @default(cuid())
+  tenantId            String
+  userId              String
+  sourceResumeId      String
+  improvedResumeId    String?
+  reportId            String
+  status              ResumeImprovementStatus
+  generationMode      ResumeIntelligenceMode
+  modelName           String
+  promptVersion       String
+  originalRiskLevel   AtsRiskLevel
+  improvedRiskLevel   AtsRiskLevel?
+  originalRiskScore   Float
+  improvedRiskScore   Float?
+  draftMarkdown       String
+  changesSummary      Json
+  appliedFixes        Json
+  warningsRemaining   Json
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+  savedAt             DateTime?
+  rejectedAt          DateTime?
+
+  @@index([tenantId, userId])
+  @@index([tenantId, sourceResumeId])
 }
 
 model ResumeIntelligenceReport {

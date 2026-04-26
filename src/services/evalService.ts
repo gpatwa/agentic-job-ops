@@ -74,6 +74,16 @@ import {
   analyzeResumeIntelligence,
   selectionFromRecommendation
 } from "./resumeIntelligenceService";
+import {
+  generateResumeImprovementDraft,
+  reanalyzeImprovedResume,
+  saveResumeImprovementDraft
+} from "./resumeImprovementService";
+import {
+  loadResume,
+  loadResumeVersions,
+  saveResume
+} from "./resumeService";
 import { userProfileSchema } from "../models/schemas";
 
 interface EvalRunBundle {
@@ -739,6 +749,62 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "selectionFromRecommendation returns the strongest+adjacent titles in order so the UI can prefill onboarding pills.",
       inputSummary: "Recommendation with strongest and adjacent roles.",
       expectedBehavior: "selection.selectedRoles begins with the strongest role title."
+    },
+    {
+      id: "eval_rimp_multi_column_to_single_column",
+      suite: "resume_improvement",
+      name: "Multi-column warning produces a single-column draft",
+      description: "Resume parsed with pipes ('|') triggers a layout warning; the improver must produce a draft with no pipes.",
+      inputSummary: "Pipe-delimited resume that triggers the multi-column warning.",
+      expectedBehavior: "draftMarkdown has no '|' characters."
+    },
+    {
+      id: "eval_rimp_skills_only_from_existing",
+      suite: "resume_improvement",
+      name: "Missing skills section creates skills only from existing skills",
+      description: "If the resume mentions a skill, the draft should include a Skills section listing only existing skills.",
+      inputSummary: "Resume mentioning Product Management and SQL.",
+      expectedBehavior: "draftMarkdown contains a Skills section with both skills and no fabricated entries."
+    },
+    {
+      id: "eval_rimp_no_invented_email",
+      suite: "resume_improvement",
+      name: "Missing email warning is not invented",
+      description: "If the source resume lacks an email, the improvement draft must not invent one.",
+      inputSummary: "Resume without an email line.",
+      expectedBehavior: "draftMarkdown contains no email and warningsRemaining mentions email."
+    },
+    {
+      id: "eval_rimp_no_fake_metrics",
+      suite: "resume_improvement",
+      name: "No fake metrics added",
+      description: "When the source resume has no quantified achievements, the draft must not add fake numbers.",
+      inputSummary: "Resume with no measurable outcomes.",
+      expectedBehavior: "draftMarkdown contains no fabricated percentages or dollar amounts."
+    },
+    {
+      id: "eval_rimp_original_not_overwritten",
+      suite: "resume_improvement",
+      name: "Original resume is not overwritten",
+      description: "Saving an improved draft must keep the original resume accessible in version history.",
+      inputSummary: "Resume saved → improved draft generated → saved.",
+      expectedBehavior: "loadResumeVersions includes the original resume id and the improved resume id."
+    },
+    {
+      id: "eval_rimp_saved_can_be_reanalyzed",
+      suite: "resume_improvement",
+      name: "Saved improved resume can be re-analyzed",
+      description: "After saving a draft, re-analysing produces a fresh report keyed to the improved resume id.",
+      inputSummary: "Saved improved resume.",
+      expectedBehavior: "improvedReport.resumeId matches the improved resume id; draft.improvedRiskScore is set."
+    },
+    {
+      id: "eval_rimp_risk_score_improves",
+      suite: "resume_improvement",
+      name: "Risk score improves when warnings are addressed",
+      description: "An ATS-friendly draft should reduce the risk score below the original.",
+      inputSummary: "Resume with multi-column layout + missing skills section.",
+      expectedBehavior: "improvedRiskScore <= originalRiskScore after re-analysis."
     }
   ];
 
@@ -2344,6 +2410,199 @@ LLM, Agents, RAG, Model Evals, Python`;
   );
 }
 
+async function resumeImprovementEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "resume",
+      "resume_versions",
+      "resume_intelligence_reports",
+      "job_target_recommendations",
+      "resume_improvement_drafts",
+      "audit_logs"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  function makeResume(text: string, id = "resume_eval"): Resume {
+    const now = nowIso();
+    return {
+      id,
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId,
+      originalFileName: "resume.txt",
+      fileUrl: "local://resume.txt",
+      parsedText: text,
+      status: "parsed",
+      createdAt: now
+    };
+  }
+
+  const RICH_RESUME = `Jane Doe
+Senior Product Manager
+Remote
+jane.doe@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+
+Experience
+Senior Product Manager — DemoLabs — 2022 - 2026
+Led B2B SaaS workflow automation roadmap; +20% activation, +12% retention.
+Skills
+Product Management, Roadmap, SQL`;
+
+  const PIPED_RESUME = `Jane Doe | Senior PM | jane@example.com | +1 555-555-0100\nLinkedIn | https://www.linkedin.com/in/janedoe\nProduct Management | Roadmap | SQL`;
+
+  if (evalCase.id === "eval_rimp_multi_column_to_single_column") {
+    const resume = saveResume(sandbox, makeResume(PIPED_RESUME, "resume_pipes"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const passed = !draft.draft.draftMarkdown.includes("|");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `pipesInDraft=${draft.draft.draftMarkdown.includes("|")}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_skills_only_from_existing") {
+    const resume = saveResume(sandbox, makeResume(RICH_RESUME, "resume_skills"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const md = draft.draft.draftMarkdown;
+    const hasSection = /## Skills/.test(md);
+    const hasProductManagement = md.includes("Product Management");
+    const hasSql = md.includes("SQL");
+    // Negative check: no fabricated skills like Java, Kubernetes that aren't on the resume.
+    const hasInventedSkill = /\b(Java|Kubernetes|Go)\b/.test(md);
+    const passed =
+      hasSection && hasProductManagement && hasSql && !hasInventedSkill;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `section=${hasSection} pm=${hasProductManagement} sql=${hasSql} invented=${hasInventedSkill}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_no_invented_email") {
+    const resume = saveResume(
+      sandbox,
+      makeResume(
+        RICH_RESUME.replace("jane.doe@example.com\n", ""),
+        "resume_no_email"
+      )
+    );
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const md = draft.draft.draftMarkdown;
+    const hasEmail = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(md);
+    const remainingMentionsEmail = draft.draft.warningsRemaining.some((w) =>
+      w.toLowerCase().includes("email")
+    );
+    const passed = !hasEmail && remainingMentionsEmail;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `hasEmail=${hasEmail} remainingMentionsEmail=${remainingMentionsEmail}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_no_fake_metrics") {
+    const text = `Jane Doe\nSenior Product Manager\njane@example.com\n+1 555-555-0100\nhttps://www.linkedin.com/in/janedoe\n\nExperience\nSenior Product Manager — DemoLabs — 2022 - 2026\nWorked on roadmap and discovery.\nSkills\nProduct Management`;
+    const resume = saveResume(sandbox, makeResume(text, "resume_no_metrics"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const md = draft.draft.draftMarkdown;
+    // The deterministic improver may include a placeholder reminder bracketed in [] but no raw % or $.
+    const hasFakePercent = /\d+\s*%/.test(md.replace(/\[[^\]]+\]/g, ""));
+    const hasFakeDollar = /\$\d+/.test(md.replace(/\[[^\]]+\]/g, ""));
+    const passed = !hasFakePercent && !hasFakeDollar;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `hasFakePercent=${hasFakePercent} hasFakeDollar=${hasFakeDollar}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_original_not_overwritten") {
+    const resume = saveResume(sandbox, makeResume(RICH_RESUME, "resume_orig"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const saved = saveResumeImprovementDraft(sandbox, draft.draft.id);
+    const versions = loadResumeVersions(sandbox);
+    const hasOriginal = versions.some((v) => v.id === resume.id);
+    const hasImproved = versions.some((v) => v.id === saved.improvedResume.id);
+    const passed = hasOriginal && hasImproved;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `versions=${versions.length} hasOriginal=${hasOriginal} hasImproved=${hasImproved}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_saved_can_be_reanalyzed") {
+    const resume = saveResume(sandbox, makeResume(RICH_RESUME, "resume_reanalyze"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const saved = saveResumeImprovementDraft(sandbox, draft.draft.id);
+    const reanalyzed = await reanalyzeImprovedResume(sandbox, saved.draft.id);
+    const passed =
+      reanalyzed.improvedReport.resumeId === saved.improvedResume.id &&
+      reanalyzed.draft.improvedRiskScore !== null;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `reportResumeId=${reanalyzed.improvedReport.resumeId} improvedScore=${reanalyzed.draft.improvedRiskScore}`
+    );
+  }
+
+  if (evalCase.id === "eval_rimp_risk_score_improves") {
+    const resume = saveResume(sandbox, makeResume(PIPED_RESUME, "resume_improves"));
+    await analyzeResumeIntelligence(sandbox, resume);
+    const draft = await generateResumeImprovementDraft(sandbox, resume.id);
+    const saved = saveResumeImprovementDraft(sandbox, draft.draft.id);
+    const reanalyzed = await reanalyzeImprovedResume(sandbox, saved.draft.id);
+    const original = reanalyzed.draft.originalRiskScore;
+    const improved = reanalyzed.draft.improvedRiskScore ?? Number.POSITIVE_INFINITY;
+    const passed = improved <= original;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `original=${original} improved=${improved}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown resume_improvement eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -2376,6 +2635,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "resume_intelligence") {
       return await resumeIntelligenceEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "resume_improvement") {
+      return await resumeImprovementEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

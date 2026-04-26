@@ -22,6 +22,7 @@ import {
   jobRiskSignalTypes,
   recommendedRoleFitLevels,
   resumeFieldConfidences,
+  resumeImprovementStatuses,
   resumeIntelligenceModes,
   skillGapImportances,
   evalRunStatuses,
@@ -528,6 +529,31 @@ export const jobTargetRecommendationSchema = z.object({
   promptVersion: z.string().trim().min(1),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
+});
+
+export const resumeImprovementDraftSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  sourceResumeId: idSchema,
+  improvedResumeId: idSchema.nullable(),
+  reportId: idSchema,
+  status: z.enum(resumeImprovementStatuses),
+  generationMode: z.enum(resumeIntelligenceModes),
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  originalRiskLevel: z.enum(atsRiskLevels),
+  improvedRiskLevel: z.enum(atsRiskLevels).nullable(),
+  originalRiskScore: z.number().min(0).max(100),
+  improvedRiskScore: z.number().min(0).max(100).nullable(),
+  draftMarkdown: z.string(),
+  changesSummary: stringListSchema,
+  appliedFixes: stringListSchema,
+  warningsRemaining: stringListSchema,
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema,
+  savedAt: isoDateSchema.nullable(),
+  rejectedAt: isoDateSchema.nullable()
 });
 
 export const onboardingStateSchema = z.object({

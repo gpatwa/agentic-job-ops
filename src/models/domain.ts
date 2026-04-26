@@ -227,7 +227,12 @@ export const feedbackEventTypes = [
   "onboarding_completed",
   "resume_profile_confirmed",
   "job_target_recommendations_confirmed",
-  "job_target_recommendations_edited"
+  "job_target_recommendations_edited",
+  "resume_improvement_generated",
+  "resume_improvement_edited",
+  "resume_improvement_saved",
+  "resume_improvement_rejected",
+  "resume_improvement_reanalyzed"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -267,7 +272,10 @@ export const usageMeteringEventTypes = [
   "resume_intelligence_completed",
   "resume_fix_suggestion_created",
   "job_target_recommendations_generated",
-  "job_target_recommendations_confirmed"
+  "job_target_recommendations_confirmed",
+  "resume_improvement_generated",
+  "resume_improvement_saved",
+  "resume_improvement_reanalyzed"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -280,7 +288,8 @@ export const evalSuites = [
   "career_ops",
   "company_intelligence",
   "onboarding",
-  "resume_intelligence"
+  "resume_intelligence",
+  "resume_improvement"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -714,6 +723,39 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export const resumeImprovementStatuses = [
+  "draft",
+  "edited",
+  "saved",
+  "rejected"
+] as const;
+export type ResumeImprovementStatus = (typeof resumeImprovementStatuses)[number];
+
+export interface ResumeImprovementDraft {
+  id: string;
+  tenantId: string;
+  userId: string;
+  sourceResumeId: string;
+  improvedResumeId: string | null;
+  reportId: string;
+  status: ResumeImprovementStatus;
+  generationMode: "deterministic" | "llm";
+  modelName: string;
+  promptVersion: string;
+  originalRiskLevel: AtsRiskLevel;
+  improvedRiskLevel: AtsRiskLevel | null;
+  originalRiskScore: number;
+  improvedRiskScore: number | null;
+  draftMarkdown: string;
+  changesSummary: string[];
+  appliedFixes: string[];
+  warningsRemaining: string[];
+  createdAt: string;
+  updatedAt: string;
+  savedAt: string | null;
+  rejectedAt: string | null;
 }
 
 export const resumeIntelligenceModes = ["deterministic", "llm"] as const;
