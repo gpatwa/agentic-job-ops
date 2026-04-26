@@ -1,6 +1,7 @@
 import {
   BarChart3,
   BriefcaseBusiness,
+  CalendarClock,
   ClipboardList,
   DatabaseZap,
   FileUp,
@@ -21,6 +22,9 @@ import type {
   ApplicationRecord,
   ApplicationStatus,
   AuditLog,
+  CareerOpsRun,
+  CareerOpsScheduleMode,
+  CareerOpsSettings,
   DashboardJobAction,
   EvalCase,
   EvalResult,
@@ -39,6 +43,7 @@ import { AdminSystemPage } from "./pages/AdminSystemPage";
 import { ApplicationPackagePage } from "./pages/ApplicationPackagePage";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { BrowserSessionReviewPage } from "./pages/BrowserSessionReviewPage";
+import { CareerOpsPage } from "./pages/CareerOpsPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
 import { ExtensionSetupPage } from "./pages/ExtensionSetupPage";
@@ -132,6 +137,14 @@ import {
   type RealSiteAuditEvent,
   type RealSiteDryRunComparison
 } from "./services/realSiteDryRunService";
+import {
+  loadCareerOpsRuns,
+  loadCareerOpsSettings,
+  runCareerOps,
+  saveCareerOpsSettings,
+  type CareerOpsAuditEvent,
+  type CareerOpsRunResult
+} from "./services/careerOpsService";
 
 type RouteId =
   | "dashboard"
@@ -143,6 +156,7 @@ type RouteId =
   | "tracker"
   | "admin"
   | "extension-setup"
+  | "career-ops"
   | "package-review"
   | "browser-session";
 
@@ -154,6 +168,7 @@ const navigationItems: NavigationItem<RouteId>[] = [
   { id: "ingestion", label: "Ingestion", icon: DatabaseZap },
   { id: "jobs", label: "Job queues", icon: BriefcaseBusiness },
   { id: "tracker", label: "Tracker", icon: ClipboardList },
+  { id: "career-ops", label: "Career Ops", icon: CalendarClock },
   { id: "extension-setup", label: "Extension setup", icon: Plug },
   { id: "admin", label: "Admin", icon: BarChart3 }
 ];
@@ -227,6 +242,13 @@ export default function App() {
   const [realSiteSnapshots, setRealSiteSnapshots] = useState<RealSiteDryRunSnapshot[]>(
     () => loadDryRunSnapshots(currentSession)
   );
+  const [careerOpsSettings, setCareerOpsSettings] = useState<CareerOpsSettings>(
+    () => loadCareerOpsSettings(currentSession)
+  );
+  const [careerOpsRuns, setCareerOpsRuns] = useState<CareerOpsRun[]>(() =>
+    loadCareerOpsRuns(currentSession)
+  );
+  const [isCareerOpsRunning, setIsCareerOpsRunning] = useState(false);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -1596,6 +1618,118 @@ export default function App() {
     persistRealSiteAuditEvents(events);
   }
 
+  function persistCareerOpsAuditEvents(events: CareerOpsAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+
+      if (event.action === "career_ops_run_started") {
+        recordFeedback({
+          eventType: "career_ops_run_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "career_ops_run_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "career_ops_scoring_completed") {
+        recordUsage({
+          eventType: "career_ops_jobs_scored",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "career_ops_package_preparation_completed") {
+        recordUsage({
+          eventType: "career_ops_packages_prepared",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "career_ops_digest_created") {
+        recordFeedback({
+          eventType: "career_ops_digest_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "career_ops_digest_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "career_ops_run_completed") {
+        recordFeedback({
+          eventType: "career_ops_run_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "career_ops_run_failed") {
+        recordFeedback({
+          eventType: "career_ops_run_failed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  function applyCareerOpsResult(result: CareerOpsRunResult) {
+    setCareerOpsRuns(result.runs);
+    persistCareerOpsAuditEvents(result.auditEvents);
+    // Refresh downstream collections that may have changed during the run.
+    setNormalizedJobs(loadNormalizedJobs(currentSession));
+    setJobMatches(loadJobMatches(currentSession));
+    setApplications(loadApplications(currentSession));
+    setApplicationPackages(loadApplicationPackages(currentSession));
+    setApplicationAnswers(loadApplicationAnswers(currentSession));
+    setScanRuns(loadScanRuns(currentSession));
+    setJobSourceConfigs(loadJobSourceConfigs(currentSession));
+  }
+
+  async function handleRunCareerOpsNow() {
+    if (isCareerOpsRunning) {
+      return;
+    }
+    setIsCareerOpsRunning(true);
+    try {
+      const result = await runCareerOps(currentSession, { mode: "manual" });
+      applyCareerOpsResult(result);
+    } finally {
+      setIsCareerOpsRunning(false);
+    }
+  }
+
+  function handleSaveCareerOpsSettings(next: {
+    scheduleMode: CareerOpsScheduleMode;
+    preparePackagesForHighScoreJobs: boolean;
+    highScoreThreshold: number;
+  }) {
+    const saved = saveCareerOpsSettings(currentSession, next);
+    setCareerOpsSettings(saved);
+    recordAudit({
+      action: "career_ops_settings_updated",
+      resourceType: "CareerOpsSettings",
+      resourceId: saved.id,
+      metadata: {
+        scheduleMode: saved.scheduleMode,
+        preparePackagesForHighScoreJobs: saved.preparePackagesForHighScoreJobs,
+        highScoreThreshold: saved.highScoreThreshold
+      }
+    });
+  }
+
   async function handleRunEvals() {
     setIsRunningEvals(true);
 
@@ -1685,6 +1819,16 @@ export default function App() {
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
             onOpenBrowserSession={navigateToBrowserSession}
+          />
+        );
+      case "career-ops":
+        return (
+          <CareerOpsPage
+            settings={careerOpsSettings}
+            runs={careerOpsRuns}
+            isRunning={isCareerOpsRunning}
+            onRunNow={handleRunCareerOpsNow}
+            onSaveSettings={handleSaveCareerOpsSettings}
           />
         );
       case "extension-setup":
@@ -1835,8 +1979,13 @@ export default function App() {
               resume: "resume-upload",
               ingestion: "ingestion",
               jobs: "jobs",
-              tracker: "tracker"
+              tracker: "tracker",
+              careerOps: "career-ops"
             }}
+            careerOpsSettings={careerOpsSettings}
+            careerOpsRuns={careerOpsRuns}
+            isCareerOpsRunning={isCareerOpsRunning}
+            onRunCareerOpsNow={handleRunCareerOpsNow}
           />
         );
     }

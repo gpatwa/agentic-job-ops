@@ -197,6 +197,10 @@ enum FeedbackEventType {
   real_site_dry_run_started
   real_site_snapshot_saved
   real_site_snapshot_exported
+  career_ops_run_started
+  career_ops_run_completed
+  career_ops_run_failed
+  career_ops_digest_created
 }
 
 enum UsageMeteringEventType {
@@ -220,6 +224,31 @@ enum UsageMeteringEventType {
   real_site_dry_run_started
   real_site_snapshot_saved
   real_site_snapshot_exported
+  career_ops_run_started
+  career_ops_jobs_scored
+  career_ops_packages_prepared
+  career_ops_digest_created
+}
+
+enum CareerOpsRunMode {
+  manual
+  daily
+  every_6_hours
+}
+
+enum CareerOpsRunStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+}
+
+enum CareerOpsScheduleMode {
+  disabled
+  manual_only
+  daily
+  every_6_hours
 }
 
 enum ExtensionSessionStatus {
@@ -243,6 +272,7 @@ enum EvalSuite {
   application_package
   ats_adapter
   browser_assistant_safety
+  career_ops
 }
 
 enum EvalRunSuite {
@@ -251,6 +281,7 @@ enum EvalRunSuite {
   application_package
   ats_adapter
   browser_assistant_safety
+  career_ops
 }
 
 enum EvalRunStatus {
@@ -665,6 +696,46 @@ model RealSiteDryRunSnapshot {
 
   @@index([tenantId, userId])
   @@index([tenantId, hostname])
+}
+
+model CareerOpsSettings {
+  id                              String                @id @default(cuid())
+  tenantId                        String
+  userId                          String
+  scheduleMode                    CareerOpsScheduleMode
+  preparePackagesForHighScoreJobs Boolean               @default(false)
+  highScoreThreshold              Float                 @default(8.0)
+  createdAt                       DateTime              @default(now())
+  updatedAt                       DateTime              @updatedAt
+
+  @@unique([tenantId, userId])
+}
+
+model CareerOpsRun {
+  id                String             @id @default(cuid())
+  tenantId          String
+  userId            String
+  mode              CareerOpsRunMode
+  status            CareerOpsRunStatus
+  startedAt         DateTime
+  completedAt       DateTime?
+  ingestionRunIds   Json
+  jobsFound         Int                @default(0)
+  jobsInserted      Int                @default(0)
+  jobsUpdated       Int                @default(0)
+  duplicatesFound   Int                @default(0)
+  jobsScored        Int                @default(0)
+  applyReviewCount  Int                @default(0)
+  maybeCount        Int                @default(0)
+  browseCount       Int                @default(0)
+  packagesPrepared  Int                @default(0)
+  digestSummary     Json
+  errorMessage      String             @default("")
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status])
 }
 
 model ExtensionSession {

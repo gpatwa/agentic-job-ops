@@ -1,16 +1,21 @@
 import {
   ArrowRight,
   BriefcaseBusiness,
+  CalendarClock,
   ClipboardList,
   DatabaseZap,
   FileUp,
   ListChecks,
+  Play,
+  RefreshCw,
   RotateCcw,
   UserRound
 } from "lucide-react";
 import type {
   ApplicationRecord,
   AuditLog,
+  CareerOpsRun,
+  CareerOpsSettings,
   JobMatch,
   NormalizedJob,
   ProfileCompletion,
@@ -18,6 +23,7 @@ import type {
 } from "../models/domain";
 import { CompletionMeter } from "../components/CompletionMeter";
 import { ResumeStatusCard } from "../components/ResumeStatusCard";
+import { summarizeCareerOps } from "../services/careerOpsService";
 
 interface DashboardHomeProps<RouteId extends string> {
   completion: ProfileCompletion;
@@ -37,7 +43,12 @@ interface DashboardHomeProps<RouteId extends string> {
     ingestion: RouteId;
     jobs: RouteId;
     tracker: RouteId;
+    careerOps: RouteId;
   };
+  careerOpsSettings: CareerOpsSettings;
+  careerOpsRuns: CareerOpsRun[];
+  isCareerOpsRunning: boolean;
+  onRunCareerOpsNow: () => void;
 }
 
 interface RecommendedStep<RouteId extends string> {
@@ -69,6 +80,17 @@ function StatCard({
           <Icon aria-hidden="true" size={22} />
         </div>
       </div>
+    </div>
+  );
+}
+
+function DigestStat({ label, value }: { label: string; value: number }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-panel px-3 py-2">
+      <p className="text-xs font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p className="mt-1 text-lg font-semibold text-slate-900">{value}</p>
     </div>
   );
 }
@@ -234,8 +256,13 @@ export function DashboardHome<RouteId extends string>({
   onScoreJobs,
   onClearWorkspace,
   onNavigate,
-  routes
+  routes,
+  careerOpsSettings,
+  careerOpsRuns,
+  isCareerOpsRunning,
+  onRunCareerOpsNow
 }: DashboardHomeProps<RouteId>) {
+  const careerOpsSummary = summarizeCareerOps(careerOpsRuns, careerOpsSettings);
   const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued").length;
   const applyCount = matches.filter((match) => match.recommendation === "apply").length;
   const maybeCount = matches.filter((match) => match.recommendation === "maybe").length;
@@ -418,6 +445,84 @@ export function DashboardHome<RouteId extends string>({
             )}
           </div>
         </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+              <CalendarClock aria-hidden="true" size={22} />
+            </div>
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">
+                Career Ops
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                Run ingestion, scoring, queue routing, and optional package
+                preparation in one orchestrated pass. Submit always stays a
+                human decision.
+              </p>
+              <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-500">
+                <span>
+                  Latest:{" "}
+                  <strong className="text-slate-800 capitalize">
+                    {careerOpsSummary.latestRun
+                      ? careerOpsSummary.latestRun.status.replace(/_/g, " ")
+                      : "no runs yet"}
+                  </strong>
+                </span>
+                <span>
+                  Next scheduled:{" "}
+                  <strong className="text-slate-800">
+                    {careerOpsSummary.nextScheduledRunAt
+                      ? new Date(
+                          careerOpsSummary.nextScheduledRunAt
+                        ).toLocaleString()
+                      : "Manual only"}
+                  </strong>
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              type="button"
+              disabled={isCareerOpsRunning}
+              onClick={onRunCareerOpsNow}
+            >
+              {isCareerOpsRunning ? (
+                <RefreshCw className="animate-spin" aria-hidden="true" size={17} />
+              ) : (
+                <Play aria-hidden="true" size={17} />
+              )}
+              {isCareerOpsRunning ? "Running…" : "Run Career Ops now"}
+            </button>
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onNavigate(routes.careerOps)}
+            >
+              View run history
+              <ArrowRight aria-hidden="true" size={16} />
+            </button>
+          </div>
+        </div>
+
+        {careerOpsSummary.latestRun && (
+          <div className="mt-4 grid gap-3 md:grid-cols-4">
+            <DigestStat label="Jobs found" value={careerOpsSummary.latestRun.jobsFound} />
+            <DigestStat label="Jobs scored" value={careerOpsSummary.latestRun.jobsScored} />
+            <DigestStat label="High matches" value={careerOpsSummary.latestRun.applyReviewCount} />
+            <DigestStat label="Packages prepared" value={careerOpsSummary.latestRun.packagesPrepared} />
+          </div>
+        )}
+
+        {careerOpsSummary.latestRun && (
+          <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-900">
+            {careerOpsSummary.latestRun.digestSummary.recommendedNextAction}
+          </p>
+        )}
       </section>
 
       {onClearWorkspace && (

@@ -212,7 +212,11 @@ export const feedbackEventTypes = [
   "extension_session_failed",
   "real_site_dry_run_started",
   "real_site_snapshot_saved",
-  "real_site_snapshot_exported"
+  "real_site_snapshot_exported",
+  "career_ops_run_started",
+  "career_ops_run_completed",
+  "career_ops_run_failed",
+  "career_ops_digest_created"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -237,7 +241,11 @@ export const usageMeteringEventTypes = [
   "extension_session_failed",
   "real_site_dry_run_started",
   "real_site_snapshot_saved",
-  "real_site_snapshot_exported"
+  "real_site_snapshot_exported",
+  "career_ops_run_started",
+  "career_ops_jobs_scored",
+  "career_ops_packages_prepared",
+  "career_ops_digest_created"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -246,7 +254,8 @@ export const evalSuites = [
   "match_score",
   "application_package",
   "ats_adapter",
-  "browser_assistant_safety"
+  "browser_assistant_safety",
+  "career_ops"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -680,6 +689,72 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export const careerOpsRunModes = ["manual", "daily", "every_6_hours"] as const;
+export type CareerOpsRunMode = (typeof careerOpsRunModes)[number];
+
+export const careerOpsRunStatuses = [
+  "queued",
+  "running",
+  "completed",
+  "failed",
+  "cancelled"
+] as const;
+export type CareerOpsRunStatus = (typeof careerOpsRunStatuses)[number];
+
+export const careerOpsScheduleModes = [
+  "disabled",
+  "manual_only",
+  "daily",
+  "every_6_hours"
+] as const;
+export type CareerOpsScheduleMode = (typeof careerOpsScheduleModes)[number];
+
+export interface CareerOpsSettings {
+  id: string;
+  tenantId: string;
+  userId: string;
+  scheduleMode: CareerOpsScheduleMode;
+  preparePackagesForHighScoreJobs: boolean;
+  highScoreThreshold: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CareerOpsDigestSummary {
+  jobsFound: number;
+  highMatches: number;
+  mediumMatches: number;
+  lowMatches: number;
+  packagesPrepared: number;
+  recommendedNextAction: string;
+  warnings: string[];
+  lines: string[];
+}
+
+export interface CareerOpsRun {
+  id: string;
+  tenantId: string;
+  userId: string;
+  mode: CareerOpsRunMode;
+  status: CareerOpsRunStatus;
+  startedAt: string;
+  completedAt: string | null;
+  ingestionRunIds: string[];
+  jobsFound: number;
+  jobsInserted: number;
+  jobsUpdated: number;
+  duplicatesFound: number;
+  jobsScored: number;
+  applyReviewCount: number;
+  maybeCount: number;
+  browseCount: number;
+  packagesPrepared: number;
+  digestSummary: CareerOpsDigestSummary;
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface RealSiteValidationSummary {

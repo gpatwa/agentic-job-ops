@@ -19,7 +19,12 @@ import {
   evalResultSchema,
   evalRunSchema
 } from "../models/schemas";
-import { readJson, scopedKey, writeJson } from "../lib/storage";
+import {
+  clearScopedWorkspace,
+  readJson,
+  scopedKey,
+  writeJson
+} from "../lib/storage";
 import {
   DeterministicScoringAdapter,
   queueFromRecommendation
@@ -36,7 +41,7 @@ import {
   startBrowserApplicationSession,
   submitApprovedBrowserApplication
 } from "./browserApplicationAssistant";
-import { saveApplications } from "./applicationService";
+import { loadApplications, saveApplications } from "./applicationService";
 import {
   GreenhouseATSAdapter,
   LeverATSAdapter,
@@ -44,6 +49,16 @@ import {
   leverFixturePage
 } from "./atsAdapters";
 import { createDryRunSnapshot } from "./realSiteDryRunService";
+import {
+  runCareerOps,
+  saveCareerOpsSettings
+} from "./careerOpsService";
+import {
+  loadNormalizedJobs,
+  saveNormalizedJobs
+} from "./jobIngestion";
+import { loadApplicationPackages } from "./applicationPackage";
+import { userProfileSchema } from "../models/schemas";
 
 interface EvalRunBundle {
   run: EvalRun;
@@ -444,6 +459,54 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "Coaches and admins cannot approve on behalf of the job seeker.",
       inputSummary: "Ready-for-review browser session.",
       expectedBehavior: "Approval by another actor throws."
+    },
+    {
+      id: "eval_career_ops_idempotent_jobs",
+      suite: "career_ops",
+      name: "Career Ops run does not duplicate jobs",
+      description: "A second run with no new ingestion sources must not duplicate jobs.",
+      inputSummary: "Two consecutive Career Ops runs with no enabled sources.",
+      expectedBehavior: "Second run records the same job count as the first."
+    },
+    {
+      id: "eval_career_ops_avoided_company_no_package",
+      suite: "career_ops",
+      name: "Career Ops skips packages for avoided companies",
+      description: "Packages must never be prepared for companies on the avoid list.",
+      inputSummary: "High-score job at a company in companiesToAvoid.",
+      expectedBehavior: "No package is created and a warning appears in the digest."
+    },
+    {
+      id: "eval_career_ops_incomplete_profile_warning",
+      suite: "career_ops",
+      name: "Incomplete profile creates a digest warning",
+      description: "When the profile has no name, email, or targets, the digest must warn about confidence.",
+      inputSummary: "Empty profile.",
+      expectedBehavior: "Digest warnings include profile-incomplete messaging."
+    },
+    {
+      id: "eval_career_ops_high_score_routes_to_apply",
+      suite: "career_ops",
+      name: "High-score jobs route to the Apply queue",
+      description: "Strong matches must land in apply_review.",
+      inputSummary: "Profile that strongly matches a job.",
+      expectedBehavior: "applyReviewCount > 0 in the latest run."
+    },
+    {
+      id: "eval_career_ops_low_score_browsable",
+      suite: "career_ops",
+      name: "Low-score jobs remain browsable",
+      description: "Low matches must still appear under browse, not be deleted.",
+      inputSummary: "Job that does not match the profile at all.",
+      expectedBehavior: "browseCount >= 1 in the latest run."
+    },
+    {
+      id: "eval_career_ops_no_submit_actions",
+      suite: "career_ops",
+      name: "Career Ops never submits an application",
+      description: "A run must never create application_submitted audits or move applications to submitted.",
+      inputSummary: "Run with package preparation enabled and avoided list empty.",
+      expectedBehavior: "No application moves to submitted and no submit audit fires."
     }
   ];
 
@@ -1174,6 +1237,196 @@ async function browserEval(
   }
 }
 
+async function careerOpsEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  // Each Career Ops eval gets a fresh sandbox so state from one eval cannot
+  // leak into the next. The browser localStorage mock used in tests does not
+  // expose enumerable keys, so clearScopedWorkspace silently no-ops there;
+  // we explicitly remove the keys we know this eval writes.
+  clearScopedWorkspace(sandbox.tenant.id, sandbox.userId);
+  if (typeof window !== "undefined") {
+    [
+      "profile",
+      "resume",
+      "normalized_jobs",
+      "applications",
+      "application_packages",
+      "application_answers",
+      "job_matches",
+      "job_source_configs",
+      "scan_runs",
+      "career_ops_runs",
+      "career_ops_settings",
+      "audit_logs",
+      "feedback_events",
+      "usage_metering_events"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  function seedProfile(overrides: Partial<UserProfile> = {}) {
+    const merged = userProfileSchema.parse({
+      ...profile(),
+      ...overrides,
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId
+    });
+    writeJson(scopedKey(sandbox.tenant.id, sandbox.userId, "profile"), merged);
+  }
+
+  function seedJobs(jobs: NormalizedJob[]) {
+    const scoped = jobs.map((item) =>
+      ({ ...item, tenantId: sandbox.tenant.id, userId: sandbox.userId })
+    );
+    saveNormalizedJobs(sandbox, scoped);
+  }
+
+  if (evalCase.id === "eval_career_ops_idempotent_jobs") {
+    seedProfile();
+    seedJobs([job({ id: "job_idem_1", scoringStatus: "queued" })]);
+    const first = await runCareerOps(sandbox);
+    const second = await runCareerOps(sandbox);
+    const passed =
+      loadNormalizedJobs(sandbox).length === 1 &&
+      second.run.jobsScored === 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `First run scored ${first.run.jobsScored}; second run scored ${second.run.jobsScored}; total jobs ${loadNormalizedJobs(sandbox).length}.`
+    );
+  }
+
+  if (evalCase.id === "eval_career_ops_avoided_company_no_package") {
+    seedProfile({ companiesToAvoid: ["BlockedCo"] });
+    seedJobs([
+      job({
+        id: "job_blocked",
+        company: "BlockedCo",
+        title: "Staff Product Manager",
+        scoringStatus: "queued"
+      })
+    ]);
+    saveCareerOpsSettings(sandbox, {
+      preparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const result = await runCareerOps(sandbox);
+    const packagesAfter = loadApplicationPackages(sandbox);
+    const passed =
+      result.run.packagesPrepared === 0 &&
+      packagesAfter.length === 0 &&
+      result.run.digestSummary.warnings.some((warning) =>
+        warning.toLowerCase().includes("avoided")
+      );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Packages prepared: ${result.run.packagesPrepared}; warnings: ${result.run.digestSummary.warnings.join(" | ")}`
+    );
+  }
+
+  if (evalCase.id === "eval_career_ops_incomplete_profile_warning") {
+    // Intentionally do not seed a profile.
+    seedJobs([job({ id: "job_incomplete", scoringStatus: "queued" })]);
+    const result = await runCareerOps(sandbox);
+    const passed = result.run.digestSummary.warnings.some((warning) =>
+      warning.toLowerCase().includes("profile is incomplete")
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Warnings: ${result.run.digestSummary.warnings.join(" | ")}`
+    );
+  }
+
+  if (evalCase.id === "eval_career_ops_high_score_routes_to_apply") {
+    seedProfile();
+    seedJobs([
+      job({ id: "job_strong", scoringStatus: "queued" })
+    ]);
+    const result = await runCareerOps(sandbox);
+    const passed = result.run.applyReviewCount >= 1;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Apply: ${result.run.applyReviewCount} / Maybe: ${result.run.maybeCount} / Browse: ${result.run.browseCount}`
+    );
+  }
+
+  if (evalCase.id === "eval_career_ops_low_score_browsable") {
+    seedProfile({ targetTitles: ["Underwater Welder"], targetIndustries: ["Welding"] });
+    seedJobs([
+      job({
+        id: "job_weak",
+        title: "Junior Florist",
+        company: "Bouquets Inc",
+        description: "Floral arrangement.",
+        responsibilities: ["Trim stems"],
+        requirements: ["Floral training"],
+        scoringStatus: "queued"
+      })
+    ]);
+    const result = await runCareerOps(sandbox);
+    const passed = result.run.browseCount >= 1;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Apply: ${result.run.applyReviewCount} / Maybe: ${result.run.maybeCount} / Browse: ${result.run.browseCount}`
+    );
+  }
+
+  if (evalCase.id === "eval_career_ops_no_submit_actions") {
+    seedProfile();
+    seedJobs([job({ id: "job_no_submit", scoringStatus: "queued" })]);
+    saveCareerOpsSettings(sandbox, {
+      preparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const before = loadApplications(sandbox).length;
+    const result = await runCareerOps(sandbox);
+    const after = loadApplications(sandbox);
+    const submittedAfter = after.filter((app) => app.status === "submitted").length;
+    const submitAuditFired = result.auditEvents.some(
+      (event) => event.action === "application_submitted"
+    );
+    const passed =
+      submittedAfter === 0 && !submitAuditFired && after.length >= before;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Submitted apps: ${submittedAfter}; submit audit fired: ${submitAuditFired}.`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown career_ops eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -1190,6 +1443,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "ats_adapter") {
       return await atsEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "career_ops") {
+      return await careerOpsEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

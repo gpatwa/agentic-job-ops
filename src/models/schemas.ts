@@ -12,6 +12,9 @@ import {
   browserFillModes,
   browserApplicationSessionStatuses,
   browserAtsTypes,
+  careerOpsRunModes,
+  careerOpsRunStatuses,
+  careerOpsScheduleModes,
   evalRunStatuses,
   evalRunSuites,
   evalStatuses,
@@ -407,6 +410,52 @@ export const extensionPageStructureSchema = z.object({
   hasCaptcha: z.boolean(),
   hasLoginChallenge: z.boolean(),
   capturedAt: isoDateSchema
+});
+
+export const careerOpsSettingsSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  scheduleMode: z.enum(careerOpsScheduleModes),
+  preparePackagesForHighScoreJobs: z.boolean(),
+  highScoreThreshold: z.number().min(0).max(10),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const careerOpsDigestSummarySchema = z.object({
+  jobsFound: z.number().int().min(0),
+  highMatches: z.number().int().min(0),
+  mediumMatches: z.number().int().min(0),
+  lowMatches: z.number().int().min(0),
+  packagesPrepared: z.number().int().min(0),
+  recommendedNextAction: z.string().trim(),
+  warnings: stringListSchema,
+  lines: stringListSchema
+});
+
+export const careerOpsRunSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  mode: z.enum(careerOpsRunModes),
+  status: z.enum(careerOpsRunStatuses),
+  startedAt: isoDateSchema,
+  completedAt: isoDateSchema.nullable(),
+  ingestionRunIds: z.array(z.string()).default([]),
+  jobsFound: z.number().int().min(0),
+  jobsInserted: z.number().int().min(0),
+  jobsUpdated: z.number().int().min(0),
+  duplicatesFound: z.number().int().min(0),
+  jobsScored: z.number().int().min(0),
+  applyReviewCount: z.number().int().min(0),
+  maybeCount: z.number().int().min(0),
+  browseCount: z.number().int().min(0),
+  packagesPrepared: z.number().int().min(0),
+  digestSummary: careerOpsDigestSummarySchema,
+  errorMessage: z.string().default(""),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
 });
 
 export const realSiteValidationSummarySchema = z.object({
