@@ -241,6 +241,10 @@ import {
   saveResumeImprovementDraft,
   type ResumeImprovementAuditEvent
 } from "./services/resumeImprovementService";
+import {
+  seedRealisticB2cDemo,
+  summarizeDemoSeedWorkspace
+} from "./services/demoSeedService";
 
 export type RouteId =
   | "dashboard"
@@ -2670,6 +2674,32 @@ export default function App() {
     });
   }
 
+  async function handleTryRealisticDemo() {
+    const summary = summarizeDemoSeedWorkspace(currentSession, profile, resume);
+    if (
+      summary.hasNonDemoUserData &&
+      !window.confirm(
+        "Replace the existing local workspace with clearly labeled demo data? This will clear local profile, resume, jobs, applications, packages, and demo workflow data for this workspace."
+      )
+    ) {
+      return;
+    }
+
+    try {
+      await seedRealisticB2cDemo(currentSession, {
+        replaceExisting: summary.hasUserData
+      }, profile);
+      window.location.hash = "action-center";
+      window.location.reload();
+    } catch (error) {
+      window.alert(
+        error instanceof Error
+          ? error.message
+          : "The realistic demo could not be created."
+      );
+    }
+  }
+
   async function handleAnalyzeResumeIntelligence() {
     if (!resume) return;
     setIsAnalyzingResume(true);
@@ -3182,6 +3212,7 @@ export default function App() {
             onRejectImprovement={handleRejectResumeImprovement}
             onPasteResumeText={handlePasteResumeText}
             onTryDemoProfile={handleTryDemoProfile}
+            onTryRealisticDemo={handleTryRealisticDemo}
             onAnalyzeResume={handleAnalyzeResumeIntelligence}
             onConfirmResumeProfile={handleConfirmResumeProfile}
             onConfirmRecommendedTargets={handleConfirmRecommendedTargets}
@@ -3235,6 +3266,8 @@ export default function App() {
             onDismissAction={handleDismissAutopilotAction}
             onSnoozeAction={handleSnoozeAutopilotAction}
             isAutopilotEnabled={autopilotSettings.enabled}
+            onTryRealisticDemo={handleTryRealisticDemo}
+            onClearWorkspace={isDevelopment ? handleClearWorkspace : undefined}
           />
         );
       case "autopilot-settings":

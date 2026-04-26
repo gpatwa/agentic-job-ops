@@ -51,6 +51,7 @@ interface OnboardingPageProps {
   onRejectImprovement: () => void;
   onPasteResumeText: (text: string) => void;
   onTryDemoProfile: () => void;
+  onTryRealisticDemo: () => void;
   onAnalyzeResume: () => void;
   onConfirmResumeProfile: () => void;
   onConfirmRecommendedTargets: (selection: {
@@ -163,6 +164,7 @@ export function OnboardingPage({
   onRejectImprovement,
   onPasteResumeText,
   onTryDemoProfile,
+  onTryRealisticDemo,
   onAnalyzeResume,
   onConfirmResumeProfile,
   onConfirmRecommendedTargets,
@@ -312,6 +314,7 @@ export function OnboardingPage({
           isAnalyzing={isAnalyzingResume}
           onPasteResumeText={onPasteResumeText}
           onTryDemoProfile={onTryDemoProfile}
+          onTryRealisticDemo={onTryRealisticDemo}
           onSkipToManualSetup={onNavigateProfile}
         />
       ) : (
@@ -603,11 +606,13 @@ function ResumeStartCard({
   isAnalyzing,
   onPasteResumeText,
   onTryDemoProfile,
+  onTryRealisticDemo,
   onSkipToManualSetup
 }: {
   isAnalyzing: boolean;
   onPasteResumeText: (text: string) => void;
   onTryDemoProfile: () => void;
+  onTryRealisticDemo: () => void;
   onSkipToManualSetup: () => void;
 }) {
   const [draft, setDraft] = useState("");
@@ -639,7 +644,7 @@ function ResumeStartCard({
           <p className="mt-1 text-sm leading-6 text-slate-600">
             Paste your resume text below — we keep it private, never log it,
             and analyse it locally with a deterministic adapter. Or try a
-            demo profile to see the full flow.
+            realistic demo workspace to see the full flow.
           </p>
           <textarea
             className="mt-3 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-sm leading-6"
@@ -661,10 +666,18 @@ function ResumeStartCard({
             <button
               type="button"
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+              onClick={onTryRealisticDemo}
+              disabled={isAnalyzing}
+            >
+              Try realistic demo
+            </button>
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
               onClick={onTryDemoProfile}
               disabled={isAnalyzing}
             >
-              Try demo profile
+              Add demo resume only
             </button>
             <button
               type="button"

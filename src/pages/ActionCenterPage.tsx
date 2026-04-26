@@ -27,6 +27,8 @@ interface ActionCenterPageProps {
   onDismissAction: (actionId: string) => void;
   onSnoozeAction: (actionId: string) => void;
   isAutopilotEnabled: boolean;
+  onTryRealisticDemo?: () => void;
+  onClearWorkspace?: () => void;
 }
 
 const TYPE_ICON: Record<AutopilotActionType, typeof Bell> = {
@@ -192,7 +194,9 @@ export function ActionCenterPage({
   onCompleteAction,
   onDismissAction,
   onSnoozeAction,
-  isAutopilotEnabled
+  isAutopilotEnabled,
+  onTryRealisticDemo,
+  onClearWorkspace
 }: ActionCenterPageProps) {
   const grouped = useMemo(() => {
     const submit = actions.filter((action) => action.type === "approve_submit");
@@ -237,6 +241,8 @@ export function ActionCenterPage({
           icon={Inbox}
           title="Nothing waiting on you"
           message="Autopilot will surface decisions here when it has high-match jobs, prepared packages, or missing context that blocks an application."
+          actionLabel={onTryRealisticDemo ? "Try realistic demo" : undefined}
+          onAction={onTryRealisticDemo}
         />
       ) : (
         <div className="space-y-6">
@@ -333,6 +339,27 @@ export function ActionCenterPage({
             </section>
           )}
         </div>
+      )}
+      {onClearWorkspace && (
+        <section className="rounded-lg border border-dashed border-slate-300 bg-white p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p className="text-sm font-semibold text-slate-900">
+                Local demo workspace
+              </p>
+              <p className="mt-1 text-sm leading-6 text-slate-500">
+                Clear local data when you want to restart the demo from a clean state.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center rounded-md border border-red-200 bg-red-50 px-3 text-sm font-semibold text-red-700 transition hover:bg-red-100"
+              onClick={onClearWorkspace}
+            >
+              Clear local workspace
+            </button>
+          </div>
+        </section>
       )}
     </div>
   );
