@@ -416,6 +416,20 @@ export const extensionPageStructureSchema = z.object({
   capturedAt: isoDateSchema
 });
 
+export const onboardingStateSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  selectedTargetRoles: stringListSchema,
+  onboardingJobsGenerated: z.boolean().default(false),
+  onboardingJobsScored: z.boolean().default(false),
+  firstApplyReadyJobsShown: z.boolean().default(false),
+  firstJobReviewed: z.boolean().default(false),
+  onboardingCompletedAt: isoDateSchema.nullable(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
 export const companyIntelligenceSchema = z.object({
   id: idSchema,
   tenantId: idSchema,

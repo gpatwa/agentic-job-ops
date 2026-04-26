@@ -220,7 +220,11 @@ export const feedbackEventTypes = [
   "intelligence_helpful",
   "intelligence_not_helpful",
   "risk_signal_dismissed",
-  "recruiter_lead_used"
+  "recruiter_lead_used",
+  "onboarding_target_roles_selected",
+  "onboarding_jobs_recommended",
+  "onboarding_application_prep_started",
+  "onboarding_completed"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -252,7 +256,10 @@ export const usageMeteringEventTypes = [
   "career_ops_digest_created",
   "company_intelligence_generated",
   "job_risk_signal_created",
-  "recruiter_lead_added"
+  "recruiter_lead_added",
+  "onboarding_target_roles_selected",
+  "onboarding_jobs_recommended",
+  "onboarding_application_prep_started"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -263,7 +270,8 @@ export const evalSuites = [
   "ats_adapter",
   "browser_assistant_safety",
   "career_ops",
-  "company_intelligence"
+  "company_intelligence",
+  "onboarding"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -697,6 +705,20 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export interface OnboardingState {
+  id: string;
+  tenantId: string;
+  userId: string;
+  selectedTargetRoles: string[];
+  onboardingJobsGenerated: boolean;
+  onboardingJobsScored: boolean;
+  firstApplyReadyJobsShown: boolean;
+  firstJobReviewed: boolean;
+  onboardingCompletedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const intelligenceSources = [

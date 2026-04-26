@@ -7,6 +7,7 @@ import {
   FileUp,
   LayoutDashboard,
   Plug,
+  Rocket,
   UserCog,
   UserRound
 } from "lucide-react";
@@ -36,6 +37,7 @@ import type {
   FeedbackEvent,
   JobMatch,
   JobRiskSignal,
+  OnboardingState,
   RealSiteDryRunSnapshot,
   RecruiterLead,
   Resume,
@@ -52,6 +54,7 @@ import { DashboardHome } from "./pages/DashboardHome";
 import { ExtensionSetupPage } from "./pages/ExtensionSetupPage";
 import { IngestionAdminPage } from "./pages/IngestionAdminPage";
 import { JobDashboardPage } from "./pages/JobDashboardPage";
+import { OnboardingPage } from "./pages/OnboardingPage";
 import { ProfileSetupPage } from "./pages/ProfileSetupPage";
 import { ResumeUploadPage } from "./pages/ResumeUploadPage";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
@@ -157,9 +160,20 @@ import {
   saveJobRiskSignals,
   type IntelligenceAuditEvent
 } from "./services/intelligenceService";
+import {
+  loadOnboardingState,
+  recommendApplyReadyJobs,
+  recordOnboardingApplicationPrepStarted,
+  recordOnboardingCompleted,
+  recordOnboardingJobReviewed,
+  recordTargetRolesSelected,
+  type OnboardingAuditEvent,
+  type OnboardingRecommendationResult
+} from "./services/onboardingJobRecommendationService";
 
 type RouteId =
   | "dashboard"
+  | "onboarding"
   | "profile-setup"
   | "resume-upload"
   | "career-profile"
@@ -174,6 +188,7 @@ type RouteId =
 
 const navigationItems: NavigationItem<RouteId>[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "onboarding", label: "Onboarding", icon: Rocket },
   { id: "profile-setup", label: "Profile setup", icon: UserRound },
   { id: "resume-upload", label: "Resume upload", icon: FileUp },
   { id: "career-profile", label: "Career profile", icon: UserCog },
@@ -271,6 +286,12 @@ export default function App() {
     () => loadRecruiterLeads(currentSession)
   );
   const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
+    loadOnboardingState(currentSession)
+  );
+  const [isOnboardingRecommending, setIsOnboardingRecommending] = useState(false);
+  const [onboardingResult, setOnboardingResult] =
+    useState<OnboardingRecommendationResult | null>(null);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -1790,6 +1811,121 @@ export default function App() {
     });
   }
 
+  function persistOnboardingAuditEvents(events: OnboardingAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (event.action === "onboarding_target_roles_selected") {
+        recordFeedback({
+          eventType: "onboarding_target_roles_selected",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "onboarding_target_roles_selected",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "onboarding_jobs_recommended") {
+        recordFeedback({
+          eventType: "onboarding_jobs_recommended",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "onboarding_jobs_recommended",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "onboarding_application_prep_started") {
+        recordFeedback({
+          eventType: "onboarding_application_prep_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "onboarding_application_prep_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "onboarding_completed") {
+        recordFeedback({
+          eventType: "onboarding_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  async function handleOnboardingSelectRoles(roles: string[]) {
+    const result = await recordTargetRolesSelected(currentSession, roles);
+    setOnboardingState(result.state);
+    persistOnboardingAuditEvents(result.auditEvents);
+  }
+
+  async function handleOnboardingGenerate(roles: string[]) {
+    setIsOnboardingRecommending(true);
+    try {
+      const result = await recommendApplyReadyJobs(currentSession, {
+        targetRoles: roles,
+        profile,
+        allowDemoJobs: true
+      });
+      setOnboardingState(result.state);
+      setOnboardingResult(result);
+      setNormalizedJobs(loadNormalizedJobs(currentSession));
+      setJobMatches(loadJobMatches(currentSession));
+      persistOnboardingAuditEvents(result.auditEvents);
+    } finally {
+      setIsOnboardingRecommending(false);
+    }
+  }
+
+  async function handleOnboardingReview(jobId: string) {
+    const result = await recordOnboardingJobReviewed(currentSession, jobId);
+    setOnboardingState(result.state);
+    persistOnboardingAuditEvents(result.auditEvents);
+  }
+
+  async function handleOnboardingStartPrep(jobId: string) {
+    const result = await recordOnboardingApplicationPrepStarted(
+      currentSession,
+      jobId
+    );
+    setOnboardingState(result.state);
+    persistOnboardingAuditEvents(result.auditEvents);
+    // Reuse the existing dashboard handler so a draft package gets generated.
+    await handleDashboardJobAction(jobId, "start_application_prep");
+  }
+
+  function handleOnboardingSaveJob(jobId: string) {
+    void handleDashboardJobAction(jobId, "save_for_later");
+  }
+
+  function handleOnboardingDismissJob(jobId: string) {
+    void handleDashboardJobAction(jobId, "mark_not_interested");
+  }
+
+  async function handleOnboardingComplete(
+    reason: "user_chose_dashboard" | "user_started_review" | "user_started_prep"
+  ) {
+    const result = await recordOnboardingCompleted(currentSession, reason);
+    setOnboardingState(result.state);
+    persistOnboardingAuditEvents(result.auditEvents);
+  }
+
   function handleDismissRiskSignal(signalId: string) {
     const remaining = jobRiskSignals.filter((signal) => signal.id !== signalId);
     saveJobRiskSignals(currentSession, remaining);
@@ -1931,6 +2067,28 @@ export default function App() {
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
             onOpenBrowserSession={navigateToBrowserSession}
+          />
+        );
+      case "onboarding":
+        return (
+          <OnboardingPage
+            profile={profile}
+            resume={resume}
+            state={onboardingState}
+            applications={applications}
+            isRecommending={isOnboardingRecommending}
+            lastResult={onboardingResult}
+            onSelectRoles={handleOnboardingSelectRoles}
+            onGenerateRecommendations={handleOnboardingGenerate}
+            onReviewJob={handleOnboardingReview}
+            onStartApplicationPrep={handleOnboardingStartPrep}
+            onSaveJob={handleOnboardingSaveJob}
+            onDismissJob={handleOnboardingDismissJob}
+            onCompleteOnboarding={handleOnboardingComplete}
+            onNavigateProfile={() => navigate("profile-setup")}
+            onNavigateResume={() => navigate("resume-upload")}
+            onNavigateDashboard={() => navigate("dashboard")}
+            onNavigateJobQueue={() => navigate("jobs")}
           />
         );
       case "career-ops":

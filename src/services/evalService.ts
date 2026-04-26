@@ -63,6 +63,13 @@ import {
   detectJobRiskSignals,
   generateCompanyIntelligence
 } from "./intelligenceService";
+import {
+  isDemoJob,
+  loadOnboardingState,
+  recommendApplyReadyJobs,
+  recordOnboardingCompleted,
+  recordOnboardingJobReviewed
+} from "./onboardingJobRecommendationService";
 import { userProfileSchema } from "../models/schemas";
 
 interface EvalRunBundle {
@@ -560,6 +567,62 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "When package prep is enabled and a high-risk signal is present, no package is generated unless overrideHighRiskPackagePrep is true.",
       inputSummary: "Career Ops run with high-risk job and package prep enabled.",
       expectedBehavior: "First run generates 0 packages and warns; second run with override enabled generates the package."
+    },
+    {
+      id: "eval_onboarding_product_role_returns_product_jobs",
+      suite: "onboarding",
+      name: "Selected product role returns product jobs",
+      description: "Picking a product-manager role surfaces product-related demo jobs when no real jobs exist.",
+      inputSummary: "Empty job store, target role 'Senior Product Manager'.",
+      expectedBehavior: "At least one demo job has a product-manager title."
+    },
+    {
+      id: "eval_onboarding_data_role_returns_data_jobs",
+      suite: "onboarding",
+      name: "Selected data role returns data jobs",
+      description: "Picking a data-science role surfaces data-related demo jobs when no real jobs exist.",
+      inputSummary: "Empty job store, target role 'Senior Data Scientist'.",
+      expectedBehavior: "At least one demo job has a data-related title."
+    },
+    {
+      id: "eval_onboarding_demo_jobs_when_empty",
+      suite: "onboarding",
+      name: "No existing jobs creates clearly labeled demo jobs",
+      description: "When the job store is empty, demo jobs are created and clearly marked as demo.",
+      inputSummary: "Empty job store, target role.",
+      expectedBehavior: "Demo banner is shown; every demo job id starts with the demo_job_ prefix."
+    },
+    {
+      id: "eval_onboarding_strong_first",
+      suite: "onboarding",
+      name: "Strong matches are scored and shown first",
+      description: "Strong-fit jobs appear in the strong matches group ahead of possible/browse.",
+      inputSummary: "Profile that strongly matches a product role.",
+      expectedBehavior: "Strong matches group has at least one entry."
+    },
+    {
+      id: "eval_onboarding_no_submit",
+      suite: "onboarding",
+      name: "Onboarding does not submit applications",
+      description: "Recommendation runs do not move applications to submitted or fire submit audits.",
+      inputSummary: "Onboarding recommendation run with profile and demo jobs.",
+      expectedBehavior: "No application_submitted audit and no submitted application records."
+    },
+    {
+      id: "eval_onboarding_completes_after_review",
+      suite: "onboarding",
+      name: "Onboarding completes after job recommendations and a job review",
+      description: "Marking a job reviewed after recommendations are shown completes onboarding.",
+      inputSummary: "Recommendation shown then onboarding marked complete.",
+      expectedBehavior: "onboardingCompletedAt is set."
+    },
+    {
+      id: "eval_onboarding_demo_clearly_marked",
+      suite: "onboarding",
+      name: "Demo jobs are clearly marked as demo",
+      description: "Demo jobs use the demo_job_ id prefix and the description is prefixed with [Demo job].",
+      inputSummary: "Demo jobs created during onboarding.",
+      expectedBehavior: "Every demo job id starts with demo_job_ and description starts with [Demo job]."
     }
   ];
 
@@ -1670,6 +1733,190 @@ async function intelligenceEval(
   );
 }
 
+async function onboardingEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "profile",
+      "resume",
+      "normalized_jobs",
+      "applications",
+      "application_packages",
+      "application_answers",
+      "job_matches",
+      "job_source_configs",
+      "scan_runs",
+      "career_ops_runs",
+      "career_ops_settings",
+      "company_intelligence",
+      "recruiter_leads",
+      "job_risk_signals",
+      "audit_logs",
+      "onboarding_state"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  const sandboxProfile = userProfileSchema.parse({
+    ...profile(),
+    tenantId: sandbox.tenant.id,
+    userId: sandbox.userId
+  });
+
+  if (evalCase.id === "eval_onboarding_product_role_returns_product_jobs") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const passed = result.jobs.some((job) =>
+      job.title.toLowerCase().includes("product")
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Demo jobs: ${result.jobs.map((j) => j.title).join(", ") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_data_role_returns_data_jobs") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Data Scientist"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const passed = result.jobs.some((job) => {
+      const title = job.title.toLowerCase();
+      return title.includes("data") || title.includes("analyt") || title.includes("ml");
+    });
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Demo jobs: ${result.jobs.map((j) => j.title).join(", ") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_demo_jobs_when_empty") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const allDemo = result.jobs.every((job) => isDemoJob(job));
+    const passed =
+      result.showsDemoBanner && result.jobs.length > 0 && allDemo;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `showsDemoBanner=${result.showsDemoBanner} jobs=${result.jobs.length} allDemo=${allDemo}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_strong_first") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const strongGroup = result.groups.find(
+      (group) => group.label === "Strong matches"
+    );
+    const passed = (strongGroup?.matches.length ?? 0) > 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `strongCount=${strongGroup?.matches.length ?? 0}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_no_submit") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const apps = loadApplications(sandbox);
+    const submittedApps = apps.filter((app) => app.status === "submitted").length;
+    const submitAuditFired = result.auditEvents.some(
+      (event) => event.action === "application_submitted"
+    );
+    const passed = submittedApps === 0 && !submitAuditFired;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `submittedApps=${submittedApps} submitAuditFired=${submitAuditFired}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_completes_after_review") {
+    const recommended = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const firstJob = recommended.jobs[0];
+    if (!firstJob) {
+      return resultFor(session, run, evalCase, "failed", "No demo job available");
+    }
+    await recordOnboardingJobReviewed(sandbox, firstJob.id);
+    await recordOnboardingCompleted(sandbox, "user_started_review");
+    const state = loadOnboardingState(sandbox);
+    const passed = Boolean(state.onboardingCompletedAt);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `onboardingCompletedAt=${state.onboardingCompletedAt ?? "null"}`
+    );
+  }
+
+  if (evalCase.id === "eval_onboarding_demo_clearly_marked") {
+    const result = await recommendApplyReadyJobs(sandbox, {
+      targetRoles: ["Senior Product Manager"],
+      profile: sandboxProfile,
+      allowDemoJobs: true
+    });
+    const allMarked = result.jobs.every(
+      (job) =>
+        isDemoJob(job) && job.description.startsWith("[Demo job]")
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      allMarked ? "passed" : "failed",
+      `allMarked=${allMarked} sample=${result.jobs[0]?.id ?? "none"}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown onboarding eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -1694,6 +1941,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "company_intelligence") {
       return await intelligenceEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "onboarding") {
+      return await onboardingEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

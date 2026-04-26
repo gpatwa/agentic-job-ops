@@ -205,6 +205,10 @@ enum FeedbackEventType {
   intelligence_not_helpful
   risk_signal_dismissed
   recruiter_lead_used
+  onboarding_target_roles_selected
+  onboarding_jobs_recommended
+  onboarding_application_prep_started
+  onboarding_completed
 }
 
 enum UsageMeteringEventType {
@@ -235,6 +239,9 @@ enum UsageMeteringEventType {
   company_intelligence_generated
   job_risk_signal_created
   recruiter_lead_added
+  onboarding_target_roles_selected
+  onboarding_jobs_recommended
+  onboarding_application_prep_started
 }
 
 enum IntelligenceSource {
@@ -312,6 +319,7 @@ enum EvalSuite {
   browser_assistant_safety
   career_ops
   company_intelligence
+  onboarding
 }
 
 enum EvalRunSuite {
@@ -322,6 +330,7 @@ enum EvalRunSuite {
   browser_assistant_safety
   career_ops
   company_intelligence
+  onboarding
 }
 
 enum EvalRunStatus {
@@ -793,6 +802,22 @@ model RecruiterLead {
 
   @@index([tenantId, userId])
   @@index([tenantId, jobId])
+}
+
+model OnboardingState {
+  id                       String    @id @default(cuid())
+  tenantId                 String
+  userId                   String
+  selectedTargetRoles      Json
+  onboardingJobsGenerated  Boolean   @default(false)
+  onboardingJobsScored     Boolean   @default(false)
+  firstApplyReadyJobsShown Boolean   @default(false)
+  firstJobReviewed         Boolean   @default(false)
+  onboardingCompletedAt    DateTime?
+  createdAt                DateTime  @default(now())
+  updatedAt                DateTime  @updatedAt
+
+  @@unique([tenantId, userId])
 }
 
 model JobRiskSignal {
