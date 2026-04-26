@@ -13,7 +13,11 @@ import {
 import type {
   CareerOpsRun,
   CareerOpsSettings,
-  CareerOpsScheduleMode
+  CareerOpsScheduleMode,
+  CompanyIntelligence,
+  JobMatch,
+  JobRiskSignal,
+  NormalizedJob
 } from "../models/domain";
 import { summarizeCareerOps } from "../services/careerOpsService";
 
@@ -21,11 +25,16 @@ interface CareerOpsPageProps {
   settings: CareerOpsSettings;
   runs: CareerOpsRun[];
   isRunning: boolean;
+  jobs: NormalizedJob[];
+  matches: JobMatch[];
+  intelligence: CompanyIntelligence[];
+  riskSignals: JobRiskSignal[];
   onRunNow: () => void;
   onSaveSettings: (next: {
     scheduleMode: CareerOpsScheduleMode;
     preparePackagesForHighScoreJobs: boolean;
     highScoreThreshold: number;
+    overrideHighRiskPackagePrep: boolean;
   }) => void;
 }
 
@@ -69,6 +78,10 @@ export function CareerOpsPage({
   settings,
   runs,
   isRunning,
+  jobs,
+  matches,
+  intelligence,
+  riskSignals,
   onRunNow,
   onSaveSettings
 }: CareerOpsPageProps) {
@@ -76,7 +89,8 @@ export function CareerOpsPage({
   const [draft, setDraft] = useState({
     scheduleMode: settings.scheduleMode,
     preparePackagesForHighScoreJobs: settings.preparePackagesForHighScoreJobs,
-    highScoreThreshold: settings.highScoreThreshold
+    highScoreThreshold: settings.highScoreThreshold,
+    overrideHighRiskPackagePrep: settings.overrideHighRiskPackagePrep
   });
 
   function handleSave(e: React.FormEvent<HTMLFormElement>) {
@@ -84,9 +98,22 @@ export function CareerOpsPage({
     onSaveSettings({
       scheduleMode: draft.scheduleMode,
       preparePackagesForHighScoreJobs: draft.preparePackagesForHighScoreJobs,
-      highScoreThreshold: draft.highScoreThreshold
+      highScoreThreshold: draft.highScoreThreshold,
+      overrideHighRiskPackagePrep: draft.overrideHighRiskPackagePrep
     });
   }
+
+  const topHighMatches = matches
+    .filter((match) => match.queue === "apply_review")
+    .sort((a, b) => b.overallScore - a.overallScore)
+    .slice(0, 3);
+  const intelligenceByJobId = new Map(intelligence.map((i) => [i.jobId, i]));
+  const riskSignalsByJobId = new Map<string, JobRiskSignal[]>();
+  riskSignals.forEach((signal) => {
+    const list = riskSignalsByJobId.get(signal.jobId) ?? [];
+    list.push(signal);
+    riskSignalsByJobId.set(signal.jobId, list);
+  });
 
   return (
     <div className="space-y-6">
@@ -306,6 +333,31 @@ export function CareerOpsPage({
               </span>
             </label>
           </div>
+          <div className="md:col-span-2">
+            <label className="flex items-start gap-3 text-sm text-slate-800">
+              <input
+                type="checkbox"
+                className="mt-1 h-4 w-4 rounded border-slate-300"
+                checked={draft.overrideHighRiskPackagePrep}
+                onChange={(e) =>
+                  setDraft((prev) => ({
+                    ...prev,
+                    overrideHighRiskPackagePrep: e.target.checked
+                  }))
+                }
+              />
+              <span>
+                <span className="font-semibold text-slate-900">
+                  Override the high-risk package skip
+                </span>
+                <span className="mt-0.5 block text-xs text-slate-500">
+                  Off by default. When off, jobs flagged with a high-severity
+                  risk signal (suspicious domain, fee request, free-email
+                  contact, etc.) are skipped from automatic package prep.
+                </span>
+              </span>
+            </label>
+          </div>
         </div>
 
         <div className="mt-4 flex justify-end">
@@ -317,6 +369,85 @@ export function CareerOpsPage({
           </button>
         </div>
       </form>
+
+      {topHighMatches.length > 0 && (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <h3 className="text-base font-semibold text-slate-950">
+            Top high-match jobs
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Estimated context for the strongest matches in this run. Always
+            verify before relying on it.
+          </p>
+          <ul className="mt-3 space-y-3">
+            {topHighMatches.map((match) => {
+              const job = jobs.find((item) => item.id === match.jobId);
+              if (!job) return null;
+              const intel = intelligenceByJobId.get(job.id);
+              const signals = riskSignalsByJobId.get(job.id) ?? [];
+              const highRisk = signals.some((signal) => signal.severity === "high");
+              return (
+                <li
+                  key={match.id}
+                  className={`rounded-md border ${
+                    highRisk ? "border-red-200 bg-red-50" : "border-slate-200 bg-panel"
+                  } p-3`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">
+                        {job.title} — {job.company}
+                      </p>
+                      <p className="mt-1 text-xs text-slate-600">
+                        Match {match.overallScore.toFixed(1)} / 10 · Queue{" "}
+                        {match.queue.replace(/_/g, " ")}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2 text-xs">
+                      {intel ? (
+                        <span className="rounded-md bg-emerald-50 px-2 py-1 font-semibold capitalize text-emerald-700">
+                          Intel · {intel.confidence}
+                        </span>
+                      ) : (
+                        <span className="rounded-md bg-slate-100 px-2 py-1 font-semibold text-slate-600">
+                          No intelligence yet
+                        </span>
+                      )}
+                      {signals.length > 0 ? (
+                        <span
+                          className={`rounded-md px-2 py-1 font-semibold capitalize ${
+                            highRisk
+                              ? "bg-red-100 text-red-700"
+                              : "bg-amber-100 text-amber-800"
+                          }`}
+                        >
+                          {signals.length} risk signal
+                          {signals.length === 1 ? "" : "s"}
+                        </span>
+                      ) : (
+                        <span className="rounded-md bg-emerald-50 px-2 py-1 font-semibold text-emerald-700">
+                          No risk signals
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  {intel && (
+                    <p className="mt-2 text-sm leading-6 text-slate-700">
+                      {intel.summary}
+                    </p>
+                  )}
+                  {highRisk && (
+                    <p className="mt-2 text-xs leading-5 text-red-700">
+                      High-severity risk detected. Package preparation skips
+                      this job by default; you can override in settings.
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <h3 className="text-base font-semibold text-slate-950">

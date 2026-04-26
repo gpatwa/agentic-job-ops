@@ -15,6 +15,10 @@ import {
   careerOpsRunModes,
   careerOpsRunStatuses,
   careerOpsScheduleModes,
+  intelligenceConfidences,
+  intelligenceSources,
+  jobRiskSeverities,
+  jobRiskSignalTypes,
   evalRunStatuses,
   evalRunSuites,
   evalStatuses,
@@ -412,6 +416,55 @@ export const extensionPageStructureSchema = z.object({
   capturedAt: isoDateSchema
 });
 
+export const companyIntelligenceSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  company: z.string().trim().min(1),
+  summary: z.string().trim(),
+  businessModel: z.string().trim().default(""),
+  industry: z.string().trim().default(""),
+  companySize: z.string().trim().default(""),
+  fundingStage: z.string().trim().default(""),
+  recentSignals: stringListSchema,
+  whyThisCompany: z.string().trim().default(""),
+  interviewPrepNotes: stringListSchema,
+  compensationSignals: z.string().trim().default(""),
+  referralStrategy: z.string().trim().default(""),
+  source: z.enum(intelligenceSources),
+  confidence: z.enum(intelligenceConfidences),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const recruiterLeadSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  company: z.string().trim().min(1),
+  name: z.string().trim(),
+  title: z.string().trim().default(""),
+  publicProfileUrl: z.string().trim().default(""),
+  source: z.enum(intelligenceSources),
+  confidence: z.enum(intelligenceConfidences),
+  outreachSuggestion: z.string().trim().default(""),
+  createdAt: isoDateSchema
+});
+
+export const jobRiskSignalSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  riskType: z.enum(jobRiskSignalTypes),
+  severity: z.enum(jobRiskSeverities),
+  explanation: z.string().trim().min(1),
+  recommendedAction: z.string().trim().default(""),
+  createdAt: isoDateSchema
+});
+
 export const careerOpsSettingsSchema = z.object({
   id: idSchema,
   tenantId: idSchema,
@@ -419,6 +472,7 @@ export const careerOpsSettingsSchema = z.object({
   scheduleMode: z.enum(careerOpsScheduleModes),
   preparePackagesForHighScoreJobs: z.boolean(),
   highScoreThreshold: z.number().min(0).max(10),
+  overrideHighRiskPackagePrep: z.boolean().default(false),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

@@ -25,6 +25,7 @@ import type {
   CareerOpsRun,
   CareerOpsScheduleMode,
   CareerOpsSettings,
+  CompanyIntelligence,
   DashboardJobAction,
   EvalCase,
   EvalResult,
@@ -34,7 +35,9 @@ import type {
   ExtensionSession,
   FeedbackEvent,
   JobMatch,
+  JobRiskSignal,
   RealSiteDryRunSnapshot,
+  RecruiterLead,
   Resume,
   UsageMeteringEvent,
   UserProfile
@@ -145,6 +148,15 @@ import {
   type CareerOpsAuditEvent,
   type CareerOpsRunResult
 } from "./services/careerOpsService";
+import {
+  generateCompanyIntelligence,
+  intelligenceForJob,
+  loadCompanyIntelligence,
+  loadJobRiskSignals,
+  loadRecruiterLeads,
+  saveJobRiskSignals,
+  type IntelligenceAuditEvent
+} from "./services/intelligenceService";
 
 type RouteId =
   | "dashboard"
@@ -249,6 +261,16 @@ export default function App() {
     loadCareerOpsRuns(currentSession)
   );
   const [isCareerOpsRunning, setIsCareerOpsRunning] = useState(false);
+  const [companyIntelligence, setCompanyIntelligence] = useState<CompanyIntelligence[]>(
+    () => loadCompanyIntelligence(currentSession)
+  );
+  const [jobRiskSignals, setJobRiskSignals] = useState<JobRiskSignal[]>(
+    () => loadJobRiskSignals(currentSession)
+  );
+  const [recruiterLeads, setRecruiterLeads] = useState<RecruiterLead[]>(
+    () => loadRecruiterLeads(currentSession)
+  );
+  const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -1696,6 +1718,94 @@ export default function App() {
     setApplicationAnswers(loadApplicationAnswers(currentSession));
     setScanRuns(loadScanRuns(currentSession));
     setJobSourceConfigs(loadJobSourceConfigs(currentSession));
+    setCompanyIntelligence(loadCompanyIntelligence(currentSession));
+    setJobRiskSignals(loadJobRiskSignals(currentSession));
+  }
+
+  function persistIntelligenceAuditEvents(events: IntelligenceAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (
+        event.action === "company_intelligence_generated" ||
+        event.action === "company_intelligence_refreshed"
+      ) {
+        recordUsage({
+          eventType: "company_intelligence_generated",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "job_risk_signal_created") {
+        recordUsage({
+          eventType: "job_risk_signal_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "recruiter_lead_added") {
+        recordUsage({
+          eventType: "recruiter_lead_added",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  async function handleGenerateIntelligenceForJob(jobId: string) {
+    const job = normalizedJobs.find((item) => item.id === jobId);
+    if (!job) return;
+    setIsGeneratingIntelligence(true);
+    try {
+      const result = await generateCompanyIntelligence(currentSession, job, profile);
+      persistIntelligenceAuditEvents(result.auditEvents);
+      setCompanyIntelligence(loadCompanyIntelligence(currentSession));
+      setJobRiskSignals(loadJobRiskSignals(currentSession));
+    } finally {
+      setIsGeneratingIntelligence(false);
+    }
+  }
+
+  function handleMarkIntelligenceHelpful(intelligenceId: string) {
+    recordFeedback({
+      eventType: "intelligence_helpful",
+      resourceType: "CompanyIntelligence",
+      resourceId: intelligenceId,
+      metadata: {}
+    });
+  }
+
+  function handleMarkIntelligenceNotHelpful(intelligenceId: string) {
+    recordFeedback({
+      eventType: "intelligence_not_helpful",
+      resourceType: "CompanyIntelligence",
+      resourceId: intelligenceId,
+      metadata: {}
+    });
+  }
+
+  function handleDismissRiskSignal(signalId: string) {
+    const remaining = jobRiskSignals.filter((signal) => signal.id !== signalId);
+    saveJobRiskSignals(currentSession, remaining);
+    setJobRiskSignals(remaining);
+    recordAudit({
+      action: "intelligence_warning_acknowledged",
+      resourceType: "JobRiskSignal",
+      resourceId: signalId,
+      metadata: {}
+    });
+    recordFeedback({
+      eventType: "risk_signal_dismissed",
+      resourceType: "JobRiskSignal",
+      resourceId: signalId,
+      metadata: {}
+    });
   }
 
   async function handleRunCareerOpsNow() {
@@ -1715,6 +1825,7 @@ export default function App() {
     scheduleMode: CareerOpsScheduleMode;
     preparePackagesForHighScoreJobs: boolean;
     highScoreThreshold: number;
+    overrideHighRiskPackagePrep: boolean;
   }) {
     const saved = saveCareerOpsSettings(currentSession, next);
     setCareerOpsSettings(saved);
@@ -1725,7 +1836,8 @@ export default function App() {
       metadata: {
         scheduleMode: saved.scheduleMode,
         preparePackagesForHighScoreJobs: saved.preparePackagesForHighScoreJobs,
-        highScoreThreshold: saved.highScoreThreshold
+        highScoreThreshold: saved.highScoreThreshold,
+        overrideHighRiskPackagePrep: saved.overrideHighRiskPackagePrep
       }
     });
   }
@@ -1827,6 +1939,10 @@ export default function App() {
             settings={careerOpsSettings}
             runs={careerOpsRuns}
             isRunning={isCareerOpsRunning}
+            jobs={normalizedJobs}
+            matches={jobMatches}
+            intelligence={companyIntelligence}
+            riskSignals={jobRiskSignals}
             onRunNow={handleRunCareerOpsNow}
             onSaveSettings={handleSaveCareerOpsSettings}
           />
@@ -1883,6 +1999,16 @@ export default function App() {
             )
           : [];
 
+        const jobIntelligence = job
+          ? companyIntelligence.find((item) => item.jobId === job.id) ?? null
+          : null;
+        const jobRiskSignalsForJob = job
+          ? jobRiskSignals.filter((signal) => signal.jobId === job.id)
+          : [];
+        const recruiterLeadsForJob = job
+          ? recruiterLeads.filter((lead) => lead.jobId === job.id)
+          : [];
+
         return (
           <ApplicationPackagePage
             applicationPackage={applicationPackage}
@@ -1895,6 +2021,10 @@ export default function App() {
                 ? latestBrowserSessionForPackage(applicationPackage.id)
                 : null
             }
+            intelligence={jobIntelligence}
+            riskSignals={jobRiskSignalsForJob}
+            recruiterLeads={recruiterLeadsForJob}
+            isGeneratingIntelligence={isGeneratingIntelligence}
             onBack={() => navigate("tracker")}
             onSavePackage={handleSaveApplicationPackageDraft}
             onSaveAnswer={handleSaveApplicationAnswer}
@@ -1902,6 +2032,16 @@ export default function App() {
             onReject={handleRejectApplicationPackage}
             onStartBrowserApply={handleStartBrowserApply}
             onOpenBrowserSession={navigateToBrowserSession}
+            onGenerateIntelligence={() =>
+              job ? handleGenerateIntelligenceForJob(job.id) : undefined
+            }
+            onMarkIntelligenceHelpful={() =>
+              jobIntelligence ? handleMarkIntelligenceHelpful(jobIntelligence.id) : undefined
+            }
+            onMarkIntelligenceNotHelpful={() =>
+              jobIntelligence ? handleMarkIntelligenceNotHelpful(jobIntelligence.id) : undefined
+            }
+            onDismissRiskSignal={handleDismissRiskSignal}
           />
         );
       }

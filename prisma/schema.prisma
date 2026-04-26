@@ -201,6 +201,10 @@ enum FeedbackEventType {
   career_ops_run_completed
   career_ops_run_failed
   career_ops_digest_created
+  intelligence_helpful
+  intelligence_not_helpful
+  risk_signal_dismissed
+  recruiter_lead_used
 }
 
 enum UsageMeteringEventType {
@@ -228,6 +232,40 @@ enum UsageMeteringEventType {
   career_ops_jobs_scored
   career_ops_packages_prepared
   career_ops_digest_created
+  company_intelligence_generated
+  job_risk_signal_created
+  recruiter_lead_added
+}
+
+enum IntelligenceSource {
+  deterministic
+  llm
+  external_api
+  manual
+}
+
+enum IntelligenceConfidence {
+  high
+  medium
+  low
+}
+
+enum JobRiskSignalType {
+  suspicious_domain
+  unrealistic_salary
+  vague_description
+  fee_request
+  non_company_email
+  stale_or_reposted
+  mismatched_ats_domain
+  low_company_confidence
+  unknown
+}
+
+enum JobRiskSeverity {
+  low
+  medium
+  high
 }
 
 enum CareerOpsRunMode {
@@ -273,6 +311,7 @@ enum EvalSuite {
   ats_adapter
   browser_assistant_safety
   career_ops
+  company_intelligence
 }
 
 enum EvalRunSuite {
@@ -282,6 +321,7 @@ enum EvalRunSuite {
   ats_adapter
   browser_assistant_safety
   career_ops
+  company_intelligence
 }
 
 enum EvalRunStatus {
@@ -705,10 +745,70 @@ model CareerOpsSettings {
   scheduleMode                    CareerOpsScheduleMode
   preparePackagesForHighScoreJobs Boolean               @default(false)
   highScoreThreshold              Float                 @default(8.0)
+  overrideHighRiskPackagePrep     Boolean               @default(false)
   createdAt                       DateTime              @default(now())
   updatedAt                       DateTime              @updatedAt
 
   @@unique([tenantId, userId])
+}
+
+model CompanyIntelligence {
+  id                  String                  @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  company             String
+  summary             String
+  businessModel       String                  @default("")
+  industry            String                  @default("")
+  companySize         String                  @default("")
+  fundingStage        String                  @default("")
+  recentSignals       Json
+  whyThisCompany      String                  @default("")
+  interviewPrepNotes  Json
+  compensationSignals String                  @default("")
+  referralStrategy    String                  @default("")
+  source              IntelligenceSource
+  confidence          IntelligenceConfidence
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  @@unique([tenantId, userId, jobId])
+  @@index([tenantId, userId])
+}
+
+model RecruiterLead {
+  id                 String                 @id @default(cuid())
+  tenantId           String
+  userId             String
+  jobId              String
+  company            String
+  name               String
+  title              String                 @default("")
+  publicProfileUrl   String                 @default("")
+  source             IntelligenceSource
+  confidence         IntelligenceConfidence
+  outreachSuggestion String                 @default("")
+  createdAt          DateTime               @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+}
+
+model JobRiskSignal {
+  id                String            @id @default(cuid())
+  tenantId          String
+  userId            String
+  jobId             String
+  riskType          JobRiskSignalType
+  severity          JobRiskSeverity
+  explanation       String
+  recommendedAction String            @default("")
+  createdAt         DateTime          @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, severity])
 }
 
 model CareerOpsRun {

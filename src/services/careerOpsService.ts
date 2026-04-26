@@ -32,6 +32,10 @@ import {
   generateApplicationPackage,
   loadApplicationPackages
 } from "./applicationPackage";
+import {
+  generateCompanyIntelligence,
+  jobHasHighRiskSignal
+} from "./intelligenceService";
 
 type AuditMetadata = AuditLog["metadata"];
 
@@ -77,6 +81,7 @@ export function defaultCareerOpsSettings(session: AppSession): CareerOpsSettings
     scheduleMode: "manual_only",
     preparePackagesForHighScoreJobs: false,
     highScoreThreshold: DEFAULT_HIGH_SCORE_THRESHOLD,
+    overrideHighRiskPackagePrep: false,
     createdAt: timestamp,
     updatedAt: timestamp
   });
@@ -386,6 +391,26 @@ export async function runCareerOps(
         if (!job) continue;
         if (avoidedJobIds.has(job.id) || isAvoidedCompany(job, avoided)) {
           // Already warned above; do not generate a package.
+          continue;
+        }
+        // Generate intelligence + risk signals so the package prep step can
+        // skip jobs flagged as high-risk by default. Intelligence is best-
+        // effort context, never authoritative truth.
+        let highRisk = false;
+        try {
+          const intelResult = await generateCompanyIntelligence(session, job, profile);
+          highRisk = jobHasHighRiskSignal(intelResult.riskSignals);
+        } catch (error) {
+          warnings.push(
+            `Intelligence generation skipped for ${job.title} at ${job.company}: ${
+              error instanceof Error ? error.message : "unknown error"
+            }`
+          );
+        }
+        if (highRisk && !settings.overrideHighRiskPackagePrep) {
+          warnings.push(
+            `Skipped package for high-risk job: ${job.title} at ${job.company}.`
+          );
           continue;
         }
         const application = upsertApplicationRecord(session, job.id, {

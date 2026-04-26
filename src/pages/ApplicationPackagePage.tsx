@@ -9,13 +9,17 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import { IntelligenceCard } from "../components/IntelligenceCard";
 import type {
   ApplicationAnswer,
   BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
+  CompanyIntelligence,
   JobMatch,
-  NormalizedJob
+  JobRiskSignal,
+  NormalizedJob,
+  RecruiterLead
 } from "../models/domain";
 
 interface ApplicationPackagePageProps {
@@ -25,6 +29,10 @@ interface ApplicationPackagePageProps {
   job: NormalizedJob | null;
   match: JobMatch | null;
   browserSession: BrowserApplicationSession | null;
+  intelligence: CompanyIntelligence | null;
+  riskSignals: JobRiskSignal[];
+  recruiterLeads: RecruiterLead[];
+  isGeneratingIntelligence: boolean;
   onBack: () => void;
   onSavePackage: (
     packageId: string,
@@ -35,6 +43,10 @@ interface ApplicationPackagePageProps {
   onReject: (packageId: string) => void;
   onStartBrowserApply: (packageId: string) => void;
   onOpenBrowserSession: (sessionId: string) => void;
+  onGenerateIntelligence: () => void;
+  onMarkIntelligenceHelpful: () => void;
+  onMarkIntelligenceNotHelpful: () => void;
+  onDismissRiskSignal: (signalId: string) => void;
 }
 
 function statusLabel(value: string): string {
@@ -142,13 +154,21 @@ export function ApplicationPackagePage({
   job,
   match,
   browserSession,
+  intelligence,
+  riskSignals,
+  recruiterLeads,
+  isGeneratingIntelligence,
   onBack,
   onSavePackage,
   onSaveAnswer,
   onApprove,
   onReject,
   onStartBrowserApply,
-  onOpenBrowserSession
+  onOpenBrowserSession,
+  onGenerateIntelligence,
+  onMarkIntelligenceHelpful,
+  onMarkIntelligenceNotHelpful,
+  onDismissRiskSignal
 }: ApplicationPackagePageProps) {
   const [resumeDraft, setResumeDraft] = useState(
     applicationPackage?.resumeMarkdown ?? ""
@@ -422,6 +442,18 @@ export function ApplicationPackagePage({
           ))}
         </div>
       </section>
+
+      <IntelligenceCard
+        intelligence={intelligence}
+        riskSignals={riskSignals}
+        recruiterLeads={recruiterLeads}
+        isGenerating={isGeneratingIntelligence}
+        onGenerate={onGenerateIntelligence}
+        onRefresh={onGenerateIntelligence}
+        onMarkHelpful={onMarkIntelligenceHelpful}
+        onMarkNotHelpful={onMarkIntelligenceNotHelpful}
+        onDismissRiskSignal={onDismissRiskSignal}
+      />
     </div>
   );
 }

@@ -58,6 +58,11 @@ import {
   saveNormalizedJobs
 } from "./jobIngestion";
 import { loadApplicationPackages } from "./applicationPackage";
+import {
+  addRecruiterLead,
+  detectJobRiskSignals,
+  generateCompanyIntelligence
+} from "./intelligenceService";
 import { userProfileSchema } from "../models/schemas";
 
 interface EvalRunBundle {
@@ -507,6 +512,54 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "A run must never create application_submitted audits or move applications to submitted.",
       inputSummary: "Run with package preparation enabled and avoided list empty.",
       expectedBehavior: "No application moves to submitted and no submit audit fires."
+    },
+    {
+      id: "eval_intel_suspicious_domain",
+      suite: "company_intelligence",
+      name: "Suspicious domain creates a risk signal",
+      description: "Application URLs on URL shorteners or low-trust TLDs must produce a high-severity suspicious_domain risk signal.",
+      inputSummary: "Job with applicationUrl on bit.ly.",
+      expectedBehavior: "Risk signals include suspicious_domain at high severity."
+    },
+    {
+      id: "eval_intel_fee_request",
+      suite: "company_intelligence",
+      name: "Fee or payment language creates a high-risk signal",
+      description: "Job descriptions asking applicants to pay must produce a high-severity fee_request risk signal.",
+      inputSummary: "Job description with the phrase 'training fee'.",
+      expectedBehavior: "Risk signals include fee_request at high severity."
+    },
+    {
+      id: "eval_intel_vague_description",
+      suite: "company_intelligence",
+      name: "Vague job description creates a risk signal",
+      description: "Very short descriptions with no responsibilities or requirements must produce a vague_description risk signal.",
+      inputSummary: "Job with short description and no requirements.",
+      expectedBehavior: "Risk signals include vague_description."
+    },
+    {
+      id: "eval_intel_marked_estimated",
+      suite: "company_intelligence",
+      name: "Deterministic intelligence is marked estimated",
+      description: "Deterministic intelligence must declare its source as deterministic and confidence as low.",
+      inputSummary: "Standard job and profile.",
+      expectedBehavior: "intelligence.source is 'deterministic' and intelligence.confidence is 'low'."
+    },
+    {
+      id: "eval_intel_no_invented_recruiters",
+      suite: "company_intelligence",
+      name: "Recruiter names are never invented",
+      description: "addRecruiterLead with no name produces an empty-name placeholder, never a fabricated name.",
+      inputSummary: "addRecruiterLead with name omitted.",
+      expectedBehavior: "lead.name is the empty string and source is 'manual'."
+    },
+    {
+      id: "eval_intel_high_risk_blocks_package_prep",
+      suite: "company_intelligence",
+      name: "High-risk job blocks automatic package prep unless user overrides",
+      description: "When package prep is enabled and a high-risk signal is present, no package is generated unless overrideHighRiskPackagePrep is true.",
+      inputSummary: "Career Ops run with high-risk job and package prep enabled.",
+      expectedBehavior: "First run generates 0 packages and warns; second run with override enabled generates the package."
     }
   ];
 
@@ -1427,6 +1480,196 @@ async function careerOpsEval(
   );
 }
 
+async function intelligenceEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "profile",
+      "resume",
+      "normalized_jobs",
+      "applications",
+      "application_packages",
+      "application_answers",
+      "job_matches",
+      "job_source_configs",
+      "scan_runs",
+      "career_ops_runs",
+      "career_ops_settings",
+      "company_intelligence",
+      "recruiter_leads",
+      "job_risk_signals",
+      "audit_logs"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  if (evalCase.id === "eval_intel_suspicious_domain") {
+    const signals = detectJobRiskSignals(
+      job({
+        id: "job_susp",
+        applicationUrl: "https://bit.ly/abc123def",
+        scoringStatus: "queued"
+      })
+    );
+    const passed = signals.some(
+      (signal) =>
+        signal.riskType === "suspicious_domain" && signal.severity === "high"
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Risk signals: ${signals.map((s) => s.riskType).join(", ") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_fee_request") {
+    const signals = detectJobRiskSignals(
+      job({
+        id: "job_fee",
+        description:
+          "Send your resume and a $250 training fee to start onboarding immediately.",
+        scoringStatus: "queued"
+      })
+    );
+    const passed = signals.some(
+      (signal) =>
+        signal.riskType === "fee_request" && signal.severity === "high"
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Risk signals: ${signals.map((s) => s.riskType).join(", ") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_vague_description") {
+    const signals = detectJobRiskSignals(
+      job({
+        id: "job_vague",
+        description: "Hiring now. Apply.",
+        responsibilities: [],
+        requirements: [],
+        scoringStatus: "queued"
+      })
+    );
+    const passed = signals.some((signal) => signal.riskType === "vague_description");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Risk signals: ${signals.map((s) => s.riskType).join(", ") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_marked_estimated") {
+    const result = await generateCompanyIntelligence(
+      sandbox,
+      job({ id: "job_intel" }),
+      profile()
+    );
+    const passed =
+      result.intelligence.source === "deterministic" &&
+      result.intelligence.confidence === "low";
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `source=${result.intelligence.source} confidence=${result.intelligence.confidence}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_no_invented_recruiters") {
+    const result = addRecruiterLead(sandbox, {
+      jobId: "job_recruiter",
+      company: "ExampleCo",
+      name: ""
+    });
+    const passed = result.lead.name === "" && result.lead.source === "manual";
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `lead.name=${JSON.stringify(result.lead.name)} source=${result.lead.source}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_high_risk_blocks_package_prep") {
+    // Reuse the standard strong-fit job content so it scores high enough to
+    // land in apply_review, then swap in a suspicious-domain URL so it also
+    // trips a high-severity risk signal.
+    const highRiskJob = job({
+      id: "job_highrisk",
+      applicationUrl: "https://bit.ly/highrisk",
+      scoringStatus: "queued"
+    });
+    // Seed sandbox profile + job + settings with package prep enabled.
+    const seededProfile = userProfileSchema.parse({
+      ...profile(),
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId
+    });
+    writeJson(
+      scopedKey(sandbox.tenant.id, sandbox.userId, "profile"),
+      seededProfile
+    );
+    saveNormalizedJobs(sandbox, [
+      { ...highRiskJob, tenantId: sandbox.tenant.id, userId: sandbox.userId }
+    ]);
+    saveCareerOpsSettings(sandbox, {
+      preparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0,
+      overrideHighRiskPackagePrep: false
+    });
+    const blockedRun = await runCareerOps(sandbox);
+    const blockedPackages = loadApplicationPackages(sandbox).length;
+    const blockedWarning = blockedRun.run.digestSummary.warnings.some((w) =>
+      w.toLowerCase().includes("high-risk")
+    );
+
+    saveCareerOpsSettings(sandbox, {
+      overrideHighRiskPackagePrep: true
+    });
+    const overrideRun = await runCareerOps(sandbox);
+    const overridePackages = loadApplicationPackages(sandbox).length;
+
+    const passed =
+      blockedPackages === 0 &&
+      blockedWarning &&
+      overridePackages >= blockedPackages &&
+      overrideRun.run.status === "completed";
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `blockedPackages=${blockedPackages} blockedWarning=${blockedWarning} overridePackages=${overridePackages}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown company_intelligence eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -1447,6 +1690,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "career_ops") {
       return await careerOpsEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "company_intelligence") {
+      return await intelligenceEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

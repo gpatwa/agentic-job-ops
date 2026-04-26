@@ -216,7 +216,11 @@ export const feedbackEventTypes = [
   "career_ops_run_started",
   "career_ops_run_completed",
   "career_ops_run_failed",
-  "career_ops_digest_created"
+  "career_ops_digest_created",
+  "intelligence_helpful",
+  "intelligence_not_helpful",
+  "risk_signal_dismissed",
+  "recruiter_lead_used"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -245,7 +249,10 @@ export const usageMeteringEventTypes = [
   "career_ops_run_started",
   "career_ops_jobs_scored",
   "career_ops_packages_prepared",
-  "career_ops_digest_created"
+  "career_ops_digest_created",
+  "company_intelligence_generated",
+  "job_risk_signal_created",
+  "recruiter_lead_added"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -255,7 +262,8 @@ export const evalSuites = [
   "application_package",
   "ats_adapter",
   "browser_assistant_safety",
-  "career_ops"
+  "career_ops",
+  "company_intelligence"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -691,6 +699,82 @@ export interface ExtensionPageStructure {
   capturedAt: string;
 }
 
+export const intelligenceSources = [
+  "deterministic",
+  "llm",
+  "external_api",
+  "manual"
+] as const;
+export type IntelligenceSource = (typeof intelligenceSources)[number];
+
+export const intelligenceConfidences = ["high", "medium", "low"] as const;
+export type IntelligenceConfidence = (typeof intelligenceConfidences)[number];
+
+export const jobRiskSignalTypes = [
+  "suspicious_domain",
+  "unrealistic_salary",
+  "vague_description",
+  "fee_request",
+  "non_company_email",
+  "stale_or_reposted",
+  "mismatched_ats_domain",
+  "low_company_confidence",
+  "unknown"
+] as const;
+export type JobRiskSignalType = (typeof jobRiskSignalTypes)[number];
+
+export const jobRiskSeverities = ["low", "medium", "high"] as const;
+export type JobRiskSeverity = (typeof jobRiskSeverities)[number];
+
+export interface CompanyIntelligence {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  company: string;
+  summary: string;
+  businessModel: string;
+  industry: string;
+  companySize: string;
+  fundingStage: string;
+  recentSignals: string[];
+  whyThisCompany: string;
+  interviewPrepNotes: string[];
+  compensationSignals: string;
+  referralStrategy: string;
+  source: IntelligenceSource;
+  confidence: IntelligenceConfidence;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecruiterLead {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  company: string;
+  name: string;
+  title: string;
+  publicProfileUrl: string;
+  source: IntelligenceSource;
+  confidence: IntelligenceConfidence;
+  outreachSuggestion: string;
+  createdAt: string;
+}
+
+export interface JobRiskSignal {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  riskType: JobRiskSignalType;
+  severity: JobRiskSeverity;
+  explanation: string;
+  recommendedAction: string;
+  createdAt: string;
+}
+
 export const careerOpsRunModes = ["manual", "daily", "every_6_hours"] as const;
 export type CareerOpsRunMode = (typeof careerOpsRunModes)[number];
 
@@ -718,6 +802,7 @@ export interface CareerOpsSettings {
   scheduleMode: CareerOpsScheduleMode;
   preparePackagesForHighScoreJobs: boolean;
   highScoreThreshold: number;
+  overrideHighRiskPackagePrep: boolean;
   createdAt: string;
   updatedAt: string;
 }
