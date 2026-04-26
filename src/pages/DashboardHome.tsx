@@ -1,7 +1,9 @@
 import {
   ArrowRight,
+  Bell,
   BriefcaseBusiness,
   CalendarClock,
+  CheckCircle2,
   ClipboardList,
   DatabaseZap,
   FileUp,
@@ -16,6 +18,7 @@ import type {
   AuditLog,
   CareerOpsRun,
   CareerOpsSettings,
+  FollowUpReminder,
   JobMatch,
   NormalizedJob,
   ProfileCompletion,
@@ -49,6 +52,9 @@ interface DashboardHomeProps<RouteId extends string> {
   careerOpsRuns: CareerOpsRun[];
   isCareerOpsRunning: boolean;
   onRunCareerOpsNow: () => void;
+  dueFollowUpReminders: FollowUpReminder[];
+  onCompleteFollowUpReminder: (reminderId: string) => void;
+  onOpenTracker: () => void;
 }
 
 interface RecommendedStep<RouteId extends string> {
@@ -260,7 +266,10 @@ export function DashboardHome<RouteId extends string>({
   careerOpsSettings,
   careerOpsRuns,
   isCareerOpsRunning,
-  onRunCareerOpsNow
+  onRunCareerOpsNow,
+  dueFollowUpReminders,
+  onCompleteFollowUpReminder,
+  onOpenTracker
 }: DashboardHomeProps<RouteId>) {
   const careerOpsSummary = summarizeCareerOps(careerOpsRuns, careerOpsSettings);
   const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued").length;
@@ -446,6 +455,65 @@ export function DashboardHome<RouteId extends string>({
           </div>
         </div>
       </section>
+
+      {dueFollowUpReminders.length > 0 && (
+        <section className="rounded-lg border border-amber-200 bg-amber-50 p-5 shadow-soft">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-md bg-white text-amber-700">
+                <Bell aria-hidden="true" size={20} />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-amber-900">
+                  Follow-ups due today
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-amber-900/80">
+                  Reminders for recruiter follow-ups and outreach. Review on the
+                  tracker, send manually when ready, then mark complete.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center gap-2 rounded-md border border-amber-300 bg-white px-3 text-xs font-semibold text-amber-900 transition hover:bg-amber-100"
+              onClick={onOpenTracker}
+            >
+              Open tracker
+              <ArrowRight aria-hidden="true" size={14} />
+            </button>
+          </div>
+          <ul className="mt-4 space-y-2">
+            {dueFollowUpReminders.slice(0, 5).map((reminder) => (
+              <li
+                key={reminder.id}
+                className="flex flex-col gap-2 rounded-md border border-amber-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-slate-950">
+                    {reminder.reason}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Due {new Date(reminder.dueAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-emerald-300 bg-white px-2.5 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-50"
+                  onClick={() => onCompleteFollowUpReminder(reminder.id)}
+                >
+                  <CheckCircle2 aria-hidden="true" size={12} />
+                  Mark done
+                </button>
+              </li>
+            ))}
+          </ul>
+          {dueFollowUpReminders.length > 5 && (
+            <p className="mt-3 text-xs text-amber-900/80">
+              + {dueFollowUpReminders.length - 5} more on the tracker.
+            </p>
+          )}
+        </section>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">

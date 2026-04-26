@@ -20,7 +20,13 @@ import {
   intelligenceSources,
   jobRiskSeverities,
   jobRiskSignalTypes,
+  followUpReminderStatuses,
+  interviewStages,
+  outreachDraftStatuses,
+  outreachDraftTypes,
   recommendedRoleFitLevels,
+  recruiterContactConfidences,
+  recruiterContactSources,
   resumeFieldConfidences,
   resumeImprovementStatuses,
   resumeIntelligenceModes,
@@ -527,6 +533,74 @@ export const jobTargetRecommendationSchema = z.object({
   extractionMode: z.enum(resumeIntelligenceModes),
   modelName: z.string().trim().min(1),
   promptVersion: z.string().trim().min(1),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const recruiterContactSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema.nullable(),
+  company: z.string().trim().min(1),
+  name: z.string().trim().default(""),
+  title: z.string().trim().default(""),
+  email: z.string().trim().default(""),
+  publicProfileUrl: z.string().trim().default(""),
+  source: z.enum(recruiterContactSources),
+  confidence: z.enum(recruiterContactConfidences),
+  notes: z.string().default(""),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const outreachDraftSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema.nullable(),
+  recruiterContactId: idSchema.nullable(),
+  type: z.enum(outreachDraftTypes),
+  subject: z.string().trim().default(""),
+  body: z.string().trim().default(""),
+  status: z.enum(outreachDraftStatuses),
+  generationMode: z.enum(resumeIntelligenceModes),
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema,
+  approvedAt: isoDateSchema.nullable(),
+  sentManuallyAt: isoDateSchema.nullable()
+});
+
+export const followUpReminderSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema.nullable(),
+  recruiterContactId: idSchema.nullable(),
+  dueAt: isoDateSchema,
+  reason: z.string().trim().min(1),
+  status: z.enum(followUpReminderStatuses),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const interviewNoteSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  jobId: idSchema,
+  applicationRecordId: idSchema.nullable(),
+  stage: z.enum(interviewStages),
+  scheduledAt: isoDateSchema.nullable(),
+  interviewerNames: stringListSchema,
+  notes: z.string().default(""),
+  questionsAsked: stringListSchema,
+  followUps: stringListSchema,
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

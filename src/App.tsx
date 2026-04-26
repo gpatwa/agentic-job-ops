@@ -35,11 +35,18 @@ import type {
   ExtensionPageStructure,
   ExtensionSession,
   FeedbackEvent,
+  FollowUpReminder,
+  InterviewNote,
+  InterviewStage,
   JobMatch,
   JobRiskSignal,
   JobTargetRecommendation,
   OnboardingState,
+  OutreachDraft,
+  OutreachDraftStatus,
+  OutreachDraftType,
   RealSiteDryRunSnapshot,
+  RecruiterContact,
   RecruiterLead,
   Resume,
   ResumeImprovementDraft,
@@ -169,6 +176,20 @@ import {
   saveJobRiskSignals,
   type IntelligenceAuditEvent
 } from "./services/intelligenceService";
+import {
+  addInterviewNote,
+  addRecruiterContact,
+  createFollowUpReminder,
+  dueRemindersToday,
+  generateOutreachDraft,
+  loadFollowUpReminders,
+  loadInterviewNotes,
+  loadOutreachDrafts,
+  loadRecruiterContacts,
+  updateFollowUpReminder,
+  updateOutreachDraft,
+  type RecruiterCrmAuditEvent
+} from "./services/recruiterCrmService";
 import {
   loadOnboardingState,
   recommendApplyReadyJobs,
@@ -316,6 +337,19 @@ export default function App() {
     () => loadRecruiterLeads(currentSession)
   );
   const [isGeneratingIntelligence, setIsGeneratingIntelligence] = useState(false);
+  const [recruiterContacts, setRecruiterContacts] = useState<RecruiterContact[]>(
+    () => loadRecruiterContacts(currentSession)
+  );
+  const [outreachDrafts, setOutreachDrafts] = useState<OutreachDraft[]>(
+    () => loadOutreachDrafts(currentSession)
+  );
+  const [followUpReminders, setFollowUpReminders] = useState<FollowUpReminder[]>(
+    () => loadFollowUpReminders(currentSession)
+  );
+  const [interviewNotes, setInterviewNotes] = useState<InterviewNote[]>(
+    () => loadInterviewNotes(currentSession)
+  );
+  const [crmDraftErrors, setCrmDraftErrors] = useState<Record<string, string>>({});
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
     loadOnboardingState(currentSession)
   );
@@ -382,6 +416,75 @@ export default function App() {
   }, []);
 
   const completion = useMemo(() => calculateProfileCompletion(profile), [profile]);
+
+  const crmContactsByApplicationId = useMemo(() => {
+    const map = new Map<string, RecruiterContact[]>();
+    applications.forEach((application) => {
+      const matches = recruiterContacts.filter(
+        (contact) =>
+          contact.applicationRecordId === application.id ||
+          (contact.applicationRecordId === null &&
+            contact.jobId === application.jobId)
+      );
+      map.set(application.id, matches);
+    });
+    return map;
+  }, [applications, recruiterContacts]);
+
+  const crmDraftsByApplicationId = useMemo(() => {
+    const map = new Map<string, OutreachDraft[]>();
+    applications.forEach((application) => {
+      const matches = outreachDrafts.filter(
+        (draft) =>
+          draft.applicationRecordId === application.id ||
+          (draft.applicationRecordId === null &&
+            draft.jobId === application.jobId)
+      );
+      map.set(application.id, matches);
+    });
+    return map;
+  }, [applications, outreachDrafts]);
+
+  const crmRemindersByApplicationId = useMemo(() => {
+    const map = new Map<string, FollowUpReminder[]>();
+    applications.forEach((application) => {
+      const matches = followUpReminders.filter(
+        (reminder) =>
+          reminder.applicationRecordId === application.id ||
+          (reminder.applicationRecordId === null &&
+            reminder.jobId === application.jobId)
+      );
+      map.set(application.id, matches);
+    });
+    return map;
+  }, [applications, followUpReminders]);
+
+  const crmInterviewNotesByApplicationId = useMemo(() => {
+    const map = new Map<string, InterviewNote[]>();
+    applications.forEach((application) => {
+      const matches = interviewNotes.filter(
+        (note) =>
+          note.applicationRecordId === application.id ||
+          (note.applicationRecordId === null &&
+            note.jobId === application.jobId)
+      );
+      map.set(application.id, matches);
+    });
+    return map;
+  }, [applications, interviewNotes]);
+
+  const crmDraftErrorByApplicationId = useMemo(() => {
+    const map = new Map<string, string | null>();
+    Object.entries(crmDraftErrors).forEach(([applicationId, message]) => {
+      map.set(applicationId, message);
+    });
+    return map;
+  }, [crmDraftErrors]);
+
+  const dueReminders = useMemo(
+    () => dueRemindersToday(followUpReminders, { daysAhead: 0 }),
+    [followUpReminders]
+  );
 
   function navigate(nextRoute: RouteId) {
     window.location.hash = nextRoute;
@@ -1852,6 +1955,230 @@ export default function App() {
     });
   }
 
+  function persistRecruiterCrmAuditEvents(events: RecruiterCrmAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (event.action === "recruiter_contact_added") {
+        recordUsage({
+          eventType: "recruiter_contact_added",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "outreach_draft_generated") {
+        recordUsage({
+          eventType: "outreach_draft_generated",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "follow_up_reminder_created") {
+        recordUsage({
+          eventType: "follow_up_reminder_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "interview_note_added") {
+        recordUsage({
+          eventType: "interview_note_added",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "follow_up_reminder_completed") {
+        recordFeedback({
+          eventType: "follow_up_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  function handleAddRecruiterContact(
+    application: ApplicationRecord,
+    input: {
+      name: string;
+      title: string;
+      email: string;
+      publicProfileUrl: string;
+      notes: string;
+    }
+  ) {
+    const job = normalizedJobs.find((item) => item.id === application.jobId);
+    const result = addRecruiterContact(currentSession, {
+      jobId: application.jobId,
+      applicationRecordId: application.id,
+      company: job?.company ?? "",
+      name: input.name,
+      title: input.title,
+      email: input.email,
+      publicProfileUrl: input.publicProfileUrl,
+      notes: input.notes,
+      source: "user_entered"
+    });
+    setRecruiterContacts(result.contacts);
+    persistRecruiterCrmAuditEvents(result.auditEvents);
+  }
+
+  async function handleGenerateOutreachDraft(
+    application: ApplicationRecord,
+    input: {
+      type: OutreachDraftType;
+      recruiterContactId: string | null;
+    }
+  ) {
+    const job = normalizedJobs.find((item) => item.id === application.jobId);
+    if (!job) return;
+    const recruiterContact =
+      recruiterContacts.find(
+        (contact) => contact.id === input.recruiterContactId
+      ) ?? null;
+    const intelligence =
+      companyIntelligence.find((item) => item.jobId === application.jobId) ?? null;
+    const relatedNotes = interviewNotes.filter(
+      (note) =>
+        note.applicationRecordId === application.id ||
+        (note.applicationRecordId === null && note.jobId === application.jobId)
+    );
+    try {
+      const result = await generateOutreachDraft(currentSession, {
+        type: input.type,
+        job,
+        application,
+        recruiterContact,
+        profile,
+        intelligence,
+        interviewNotes: relatedNotes
+      });
+      setOutreachDrafts(result.drafts);
+      persistRecruiterCrmAuditEvents(result.auditEvents);
+      setCrmDraftErrors((current) => {
+        const next = { ...current };
+        delete next[application.id];
+        return next;
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not generate outreach draft.";
+      setCrmDraftErrors((current) => ({ ...current, [application.id]: message }));
+    }
+  }
+
+  function handleUpdateOutreachDraft(
+    _application: ApplicationRecord,
+    input: {
+      id: string;
+      subject?: string;
+      body?: string;
+      status?: OutreachDraftStatus;
+    }
+  ) {
+    const result = updateOutreachDraft(currentSession, input);
+    setOutreachDrafts(result.drafts);
+    persistRecruiterCrmAuditEvents(result.auditEvents);
+  }
+
+  function handleMarkOutreachDraftHelpful(draftId: string) {
+    recordFeedback({
+      eventType: "outreach_draft_helpful",
+      resourceType: "OutreachDraft",
+      resourceId: draftId,
+      metadata: {}
+    });
+  }
+
+  function handleMarkOutreachDraftNotHelpful(draftId: string) {
+    recordFeedback({
+      eventType: "outreach_draft_not_helpful",
+      resourceType: "OutreachDraft",
+      resourceId: draftId,
+      metadata: {}
+    });
+  }
+
+  function handleCreateFollowUpReminder(
+    application: ApplicationRecord,
+    input: {
+      dueAt: string;
+      reason: string;
+      recruiterContactId: string | null;
+    }
+  ) {
+    const result = createFollowUpReminder(currentSession, {
+      jobId: application.jobId,
+      applicationRecordId: application.id,
+      recruiterContactId: input.recruiterContactId,
+      dueAt: input.dueAt,
+      reason: input.reason
+    });
+    setFollowUpReminders(result.reminders);
+    persistRecruiterCrmAuditEvents(result.auditEvents);
+  }
+
+  function handleUpdateFollowUpReminderStatus(
+    reminderId: string,
+    status: FollowUpReminder["status"]
+  ) {
+    const result = updateFollowUpReminder(currentSession, {
+      id: reminderId,
+      status
+    });
+    setFollowUpReminders(result.reminders);
+    persistRecruiterCrmAuditEvents(result.auditEvents);
+  }
+
+  function handleAddInterviewNote(
+    application: ApplicationRecord,
+    input: {
+      stage: InterviewStage;
+      scheduledAt: string | null;
+      interviewerNames: string[];
+      notes: string;
+      questionsAsked: string[];
+      followUps: string[];
+    }
+  ) {
+    const result = addInterviewNote(currentSession, {
+      jobId: application.jobId,
+      applicationRecordId: application.id,
+      stage: input.stage,
+      scheduledAt: input.scheduledAt,
+      interviewerNames: input.interviewerNames,
+      notes: input.notes,
+      questionsAsked: input.questionsAsked,
+      followUps: input.followUps
+    });
+    setInterviewNotes(result.notes);
+    persistRecruiterCrmAuditEvents(result.auditEvents);
+  }
+
+  function handleMarkInterviewNoteUsed(noteId: string) {
+    recordFeedback({
+      eventType: "interview_note_used",
+      resourceType: "InterviewNote",
+      resourceId: noteId,
+      metadata: {}
+    });
+  }
+
+  function handleClearCrmDraftError(applicationId: string) {
+    setCrmDraftErrors((current) => {
+      const next = { ...current };
+      delete next[applicationId];
+      return next;
+    });
+  }
+
   function persistOnboardingAuditEvents(events: OnboardingAuditEvent[]) {
     events.forEach((event) => {
       recordAudit({
@@ -2520,6 +2847,23 @@ export default function App() {
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
             onOpenBrowserSession={navigateToBrowserSession}
+            crm={{
+              contactsByApplicationId: crmContactsByApplicationId,
+              draftsByApplicationId: crmDraftsByApplicationId,
+              remindersByApplicationId: crmRemindersByApplicationId,
+              interviewNotesByApplicationId: crmInterviewNotesByApplicationId,
+              draftErrorByApplicationId: crmDraftErrorByApplicationId,
+              onAddContact: handleAddRecruiterContact,
+              onGenerateDraft: handleGenerateOutreachDraft,
+              onUpdateDraft: handleUpdateOutreachDraft,
+              onMarkDraftHelpful: handleMarkOutreachDraftHelpful,
+              onMarkDraftNotHelpful: handleMarkOutreachDraftNotHelpful,
+              onCreateReminder: handleCreateFollowUpReminder,
+              onUpdateReminderStatus: handleUpdateFollowUpReminderStatus,
+              onAddInterviewNote: handleAddInterviewNote,
+              onMarkInterviewNoteUsed: handleMarkInterviewNoteUsed,
+              onClearDraftError: handleClearCrmDraftError
+            }}
           />
         );
       case "onboarding": {
@@ -2775,6 +3119,11 @@ export default function App() {
             careerOpsRuns={careerOpsRuns}
             isCareerOpsRunning={isCareerOpsRunning}
             onRunCareerOpsNow={handleRunCareerOpsNow}
+            dueFollowUpReminders={dueReminders}
+            onCompleteFollowUpReminder={(reminderId) =>
+              handleUpdateFollowUpReminderStatus(reminderId, "completed")
+            }
+            onOpenTracker={() => navigate("tracker")}
           />
         );
     }

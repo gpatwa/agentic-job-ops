@@ -232,7 +232,11 @@ export const feedbackEventTypes = [
   "resume_improvement_edited",
   "resume_improvement_saved",
   "resume_improvement_rejected",
-  "resume_improvement_reanalyzed"
+  "resume_improvement_reanalyzed",
+  "outreach_draft_helpful",
+  "outreach_draft_not_helpful",
+  "follow_up_completed",
+  "interview_note_used"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -275,7 +279,11 @@ export const usageMeteringEventTypes = [
   "job_target_recommendations_confirmed",
   "resume_improvement_generated",
   "resume_improvement_saved",
-  "resume_improvement_reanalyzed"
+  "resume_improvement_reanalyzed",
+  "recruiter_contact_added",
+  "outreach_draft_generated",
+  "follow_up_reminder_created",
+  "interview_note_added"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -289,7 +297,8 @@ export const evalSuites = [
   "company_intelligence",
   "onboarding",
   "resume_intelligence",
-  "resume_improvement"
+  "resume_improvement",
+  "recruiter_crm"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -723,6 +732,125 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export const recruiterContactSources = [
+  "user_entered",
+  "company_intelligence",
+  "manual",
+  "imported"
+] as const;
+export type RecruiterContactSource = (typeof recruiterContactSources)[number];
+
+export const recruiterContactConfidences = ["high", "medium", "low"] as const;
+export type RecruiterContactConfidence =
+  (typeof recruiterContactConfidences)[number];
+
+export const outreachDraftTypes = [
+  "recruiter_intro",
+  "referral_request",
+  "follow_up",
+  "thank_you",
+  "interview_availability",
+  "negotiation",
+  "rejection_response"
+] as const;
+export type OutreachDraftType = (typeof outreachDraftTypes)[number];
+
+export const outreachDraftStatuses = [
+  "draft",
+  "edited",
+  "approved",
+  "sent_manually",
+  "archived"
+] as const;
+export type OutreachDraftStatus = (typeof outreachDraftStatuses)[number];
+
+export const followUpReminderStatuses = [
+  "pending",
+  "completed",
+  "dismissed",
+  "snoozed"
+] as const;
+export type FollowUpReminderStatus = (typeof followUpReminderStatuses)[number];
+
+export const interviewStages = [
+  "recruiter_screen",
+  "hiring_manager",
+  "technical",
+  "behavioral",
+  "onsite",
+  "final",
+  "offer"
+] as const;
+export type InterviewStage = (typeof interviewStages)[number];
+
+export interface RecruiterContact {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string | null;
+  company: string;
+  name: string;
+  title: string;
+  email: string;
+  publicProfileUrl: string;
+  source: RecruiterContactSource;
+  confidence: RecruiterContactConfidence;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutreachDraft {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string | null;
+  recruiterContactId: string | null;
+  type: OutreachDraftType;
+  subject: string;
+  body: string;
+  status: OutreachDraftStatus;
+  generationMode: "deterministic" | "llm";
+  modelName: string;
+  promptVersion: string;
+  createdAt: string;
+  updatedAt: string;
+  approvedAt: string | null;
+  sentManuallyAt: string | null;
+}
+
+export interface FollowUpReminder {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string | null;
+  recruiterContactId: string | null;
+  dueAt: string;
+  reason: string;
+  status: FollowUpReminderStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InterviewNote {
+  id: string;
+  tenantId: string;
+  userId: string;
+  jobId: string;
+  applicationRecordId: string | null;
+  stage: InterviewStage;
+  scheduledAt: string | null;
+  interviewerNames: string[];
+  notes: string;
+  questionsAsked: string[];
+  followUps: string[];
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const resumeImprovementStatuses = [

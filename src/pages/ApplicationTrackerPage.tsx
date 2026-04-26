@@ -1,15 +1,85 @@
 import { Bot, ClipboardList } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import { CrmPanel } from "../components/CrmPanel";
+import type { CrmPanelProps } from "../components/CrmPanel";
 import type {
   BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
+  FollowUpReminder,
+  InterviewNote,
+  InterviewStage,
   JobMatch,
-  NormalizedJob
+  NormalizedJob,
+  OutreachDraft,
+  OutreachDraftStatus,
+  OutreachDraftType,
+  RecruiterContact
 } from "../models/domain";
 import { applicationStatuses } from "../models/domain";
+
+export interface CrmHandlers {
+  contactsByApplicationId: Map<string, RecruiterContact[]>;
+  draftsByApplicationId: Map<string, OutreachDraft[]>;
+  remindersByApplicationId: Map<string, FollowUpReminder[]>;
+  interviewNotesByApplicationId: Map<string, InterviewNote[]>;
+  draftErrorByApplicationId: Map<string, string | null>;
+  onAddContact: (
+    application: ApplicationRecord,
+    input: {
+      name: string;
+      title: string;
+      email: string;
+      publicProfileUrl: string;
+      notes: string;
+    }
+  ) => void;
+  onGenerateDraft: (
+    application: ApplicationRecord,
+    input: {
+      type: OutreachDraftType;
+      recruiterContactId: string | null;
+    }
+  ) => void;
+  onUpdateDraft: (
+    application: ApplicationRecord,
+    input: {
+      id: string;
+      subject?: string;
+      body?: string;
+      status?: OutreachDraftStatus;
+    }
+  ) => void;
+  onMarkDraftHelpful: (draftId: string) => void;
+  onMarkDraftNotHelpful: (draftId: string) => void;
+  onCreateReminder: (
+    application: ApplicationRecord,
+    input: {
+      dueAt: string;
+      reason: string;
+      recruiterContactId: string | null;
+    }
+  ) => void;
+  onUpdateReminderStatus: (
+    reminderId: string,
+    status: FollowUpReminder["status"]
+  ) => void;
+  onAddInterviewNote: (
+    application: ApplicationRecord,
+    input: {
+      stage: InterviewStage;
+      scheduledAt: string | null;
+      interviewerNames: string[];
+      notes: string;
+      questionsAsked: string[];
+      followUps: string[];
+    }
+  ) => void;
+  onMarkInterviewNoteUsed: (noteId: string) => void;
+  onClearDraftError: (applicationId: string) => void;
+}
 
 interface ApplicationTrackerPageProps {
   applications: ApplicationRecord[];
@@ -21,6 +91,7 @@ interface ApplicationTrackerPageProps {
   onNotesChange: (applicationId: string, notes: string) => void;
   onOpenPackage: (packageId: string) => void;
   onOpenBrowserSession: (sessionId: string) => void;
+  crm: CrmHandlers;
 }
 
 function statusLabel(status: string): string {
@@ -102,6 +173,7 @@ function TrackerCard({
   match,
   applicationPackage,
   browserSession,
+  crm,
   onStatusChange,
   onNotesChange,
   onOpenPackage,
@@ -112,6 +184,7 @@ function TrackerCard({
   match: JobMatch | null;
   applicationPackage: ApplicationPackage | null;
   browserSession: BrowserApplicationSession | null;
+  crm: CrmPanelProps;
   onStatusChange: (applicationId: string, status: ApplicationStatus) => void;
   onNotesChange: (applicationId: string, notes: string) => void;
   onOpenPackage: (packageId: string) => void;
@@ -232,6 +305,8 @@ function TrackerCard({
           Save notes
         </button>
       </div>
+
+      <CrmPanel {...crm} />
     </article>
   );
 }
@@ -245,7 +320,8 @@ export function ApplicationTrackerPage({
   onStatusChange,
   onNotesChange,
   onOpenPackage,
-  onOpenBrowserSession
+  onOpenBrowserSession,
+  crm
 }: ApplicationTrackerPageProps) {
   const jobById = useMemo(
     () => new Map(jobs.map((job) => [job.id, job] as const)),
@@ -338,24 +414,57 @@ export function ApplicationTrackerPage({
               </div>
 
               <div className="mt-4 space-y-3">
-                {group.applications.map((application) => (
-                  <TrackerCard
-                    key={application.id}
-                    application={application}
-                    job={jobById.get(application.jobId) ?? null}
-                    match={matchByJobId.get(application.jobId) ?? null}
-                    applicationPackage={
-                      packageByApplicationId.get(application.id) ?? null
-                    }
-                    browserSession={
-                      browserSessionByApplicationId.get(application.id) ?? null
-                    }
-                    onStatusChange={onStatusChange}
-                    onNotesChange={onNotesChange}
-                    onOpenPackage={onOpenPackage}
-                    onOpenBrowserSession={onOpenBrowserSession}
-                  />
-                ))}
+                {group.applications.map((application) => {
+                  const applicationJob = jobById.get(application.jobId) ?? null;
+                  const crmProps: CrmPanelProps = {
+                    application,
+                    job: applicationJob,
+                    contacts:
+                      crm.contactsByApplicationId.get(application.id) ?? [],
+                    drafts:
+                      crm.draftsByApplicationId.get(application.id) ?? [],
+                    reminders:
+                      crm.remindersByApplicationId.get(application.id) ?? [],
+                    interviewNotes:
+                      crm.interviewNotesByApplicationId.get(application.id) ?? [],
+                    draftError:
+                      crm.draftErrorByApplicationId.get(application.id) ?? null,
+                    onAddContact: (input) => crm.onAddContact(application, input),
+                    onGenerateDraft: (input) =>
+                      crm.onGenerateDraft(application, input),
+                    onUpdateDraft: (input) =>
+                      crm.onUpdateDraft(application, input),
+                    onMarkDraftHelpful: crm.onMarkDraftHelpful,
+                    onMarkDraftNotHelpful: crm.onMarkDraftNotHelpful,
+                    onCreateReminder: (input) =>
+                      crm.onCreateReminder(application, input),
+                    onUpdateReminderStatus: crm.onUpdateReminderStatus,
+                    onAddInterviewNote: (input) =>
+                      crm.onAddInterviewNote(application, input),
+                    onMarkInterviewNoteUsed: crm.onMarkInterviewNoteUsed,
+                    onClearDraftError: () =>
+                      crm.onClearDraftError(application.id)
+                  };
+                  return (
+                    <TrackerCard
+                      key={application.id}
+                      application={application}
+                      job={applicationJob}
+                      match={matchByJobId.get(application.jobId) ?? null}
+                      applicationPackage={
+                        packageByApplicationId.get(application.id) ?? null
+                      }
+                      browserSession={
+                        browserSessionByApplicationId.get(application.id) ?? null
+                      }
+                      crm={crmProps}
+                      onStatusChange={onStatusChange}
+                      onNotesChange={onNotesChange}
+                      onOpenPackage={onOpenPackage}
+                      onOpenBrowserSession={onOpenBrowserSession}
+                    />
+                  );
+                })}
               </div>
             </section>
           ))}

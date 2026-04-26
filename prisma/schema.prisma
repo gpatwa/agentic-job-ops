@@ -217,6 +217,10 @@ enum FeedbackEventType {
   resume_improvement_saved
   resume_improvement_rejected
   resume_improvement_reanalyzed
+  outreach_draft_helpful
+  outreach_draft_not_helpful
+  follow_up_completed
+  interview_note_used
 }
 
 enum UsageMeteringEventType {
@@ -258,6 +262,58 @@ enum UsageMeteringEventType {
   resume_improvement_generated
   resume_improvement_saved
   resume_improvement_reanalyzed
+  recruiter_contact_added
+  outreach_draft_generated
+  follow_up_reminder_created
+  interview_note_added
+}
+
+enum RecruiterContactSource {
+  user_entered
+  company_intelligence
+  manual
+  imported
+}
+
+enum RecruiterContactConfidence {
+  high
+  medium
+  low
+}
+
+enum OutreachDraftType {
+  recruiter_intro
+  referral_request
+  follow_up
+  thank_you
+  interview_availability
+  negotiation
+  rejection_response
+}
+
+enum OutreachDraftStatus {
+  draft
+  edited
+  approved
+  sent_manually
+  archived
+}
+
+enum FollowUpReminderStatus {
+  pending
+  completed
+  dismissed
+  snoozed
+}
+
+enum InterviewStage {
+  recruiter_screen
+  hiring_manager
+  technical
+  behavioral
+  onsite
+  final
+  offer
 }
 
 enum ResumeImprovementStatus {
@@ -375,6 +431,7 @@ enum EvalSuite {
   onboarding
   resume_intelligence
   resume_improvement
+  recruiter_crm
 }
 
 enum EvalRunSuite {
@@ -388,6 +445,7 @@ enum EvalRunSuite {
   onboarding
   resume_intelligence
   resume_improvement
+  recruiter_crm
 }
 
 enum EvalRunStatus {
@@ -859,6 +917,92 @@ model RecruiterLead {
 
   @@index([tenantId, userId])
   @@index([tenantId, jobId])
+}
+
+model RecruiterContact {
+  id                  String                     @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  applicationRecordId String?
+  company             String
+  name                String                     @default("")
+  title               String                     @default("")
+  email               String                     @default("")
+  publicProfileUrl    String                     @default("")
+  source              RecruiterContactSource
+  confidence          RecruiterContactConfidence
+  notes               String                     @default("")
+  createdAt           DateTime                   @default(now())
+  updatedAt           DateTime                   @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, applicationRecordId])
+}
+
+model OutreachDraft {
+  id                  String              @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  applicationRecordId String?
+  recruiterContactId  String?
+  type                OutreachDraftType
+  subject             String              @default("")
+  body                String              @default("")
+  status              OutreachDraftStatus
+  generationMode      GenerationMode
+  modelName           String
+  promptVersion       String
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  approvedAt          DateTime?
+  sentManuallyAt      DateTime?
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, applicationRecordId])
+  @@index([tenantId, recruiterContactId])
+}
+
+model FollowUpReminder {
+  id                  String                 @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  applicationRecordId String?
+  recruiterContactId  String?
+  dueAt               DateTime
+  reason              String
+  status              FollowUpReminderStatus
+  createdAt           DateTime               @default(now())
+  updatedAt           DateTime               @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status, dueAt])
+  @@index([tenantId, jobId])
+  @@index([tenantId, applicationRecordId])
+}
+
+model InterviewNote {
+  id                  String         @id @default(cuid())
+  tenantId            String
+  userId              String
+  jobId               String
+  applicationRecordId String?
+  stage               InterviewStage
+  scheduledAt         DateTime?
+  interviewerNames    Json
+  notes               String         @default("")
+  questionsAsked      Json
+  followUps           Json
+  createdAt           DateTime       @default(now())
+  updatedAt           DateTime       @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, jobId])
+  @@index([tenantId, applicationRecordId])
 }
 
 model ResumeImprovementDraft {

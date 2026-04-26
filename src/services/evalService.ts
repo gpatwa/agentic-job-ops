@@ -65,6 +65,15 @@ import {
   intelligenceForJob
 } from "./intelligenceService";
 import {
+  PlaceholderLlmOutreachAdapter,
+  createFollowUpReminder,
+  dueRemindersToday,
+  generateOutreachDraft,
+  loadFollowUpReminders,
+  loadOutreachDrafts,
+  updateFollowUpReminder
+} from "./recruiterCrmService";
+import {
   isDemoJob,
   loadOnboardingState,
   recommendApplyReadyJobs,
@@ -822,6 +831,70 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "An ATS-friendly draft should reduce the risk score below the original.",
       inputSummary: "Resume with multi-column layout + missing skills section.",
       expectedBehavior: "improvedRiskScore <= originalRiskScore after re-analysis."
+    },
+    {
+      id: "eval_crm_intro_no_invented_recruiter",
+      suite: "recruiter_crm",
+      name: "Intro draft uses generic salutation when no contact",
+      description: "Recruiter intro generated without a contact must fall back to 'Hi team' and never invent a recruiter name.",
+      inputSummary: "Application + job, no recruiter contact provided.",
+      expectedBehavior: "Body includes 'Hi team' and never includes an invented first name."
+    },
+    {
+      id: "eval_crm_thank_you_requires_interview",
+      suite: "recruiter_crm",
+      name: "Thank-you draft refuses without interview note or status",
+      description: "Thank-you drafts require an interview note or interviewing/offer status to prevent fake gratitude.",
+      inputSummary: "Application status is submitted with no interview notes.",
+      expectedBehavior: "generateOutreachDraft throws an error mentioning interview note."
+    },
+    {
+      id: "eval_crm_negotiation_requires_offer",
+      suite: "recruiter_crm",
+      name: "Negotiation draft refuses without offer status",
+      description: "Negotiation outreach must only generate when the application is in offer status.",
+      inputSummary: "Application status is interviewing.",
+      expectedBehavior: "generateOutreachDraft throws an error referencing the application status."
+    },
+    {
+      id: "eval_crm_no_auto_send",
+      suite: "recruiter_crm",
+      name: "Newly generated drafts are never auto-sent",
+      description: "New drafts must start in status 'draft' with no approvedAt or sentManuallyAt timestamps.",
+      inputSummary: "Generate any allowed outreach type.",
+      expectedBehavior: "draft.status === 'draft' and approvedAt === null and sentManuallyAt === null."
+    },
+    {
+      id: "eval_crm_follow_up_requires_active_application",
+      suite: "recruiter_crm",
+      name: "Follow-up draft refuses while application is still saved",
+      description: "Follow-up outreach must require submitted, recruiter-contacted, or interviewing status.",
+      inputSummary: "Application status is saved.",
+      expectedBehavior: "generateOutreachDraft throws an error referencing the application status."
+    },
+    {
+      id: "eval_crm_due_today_returns_pending_only",
+      suite: "recruiter_crm",
+      name: "dueRemindersToday returns only pending reminders within window",
+      description: "Completed and snoozed reminders should never appear in the due-today bucket.",
+      inputSummary: "Mix of pending, completed, and future-dated reminders.",
+      expectedBehavior: "Only pending reminders with dueAt <= today are returned."
+    },
+    {
+      id: "eval_crm_safety_override_recorded",
+      suite: "recruiter_crm",
+      name: "Safety override is recorded in audit metadata",
+      description: "When the caller passes overrideSafetyGate=true, the audit event must record the override.",
+      inputSummary: "Generate a thank-you draft with override on a submitted application.",
+      expectedBehavior: "Audit metadata includes safetyOverride='true'."
+    },
+    {
+      id: "eval_crm_llm_adapter_not_invoked",
+      suite: "recruiter_crm",
+      name: "Placeholder LLM adapter throws and is not silently used",
+      description: "PlaceholderLlmOutreachAdapter must throw so this build never silently calls a model.",
+      inputSummary: "Generate a draft with the placeholder LLM adapter.",
+      expectedBehavior: "Promise rejects with 'not configured' message."
     }
   ];
 
@@ -2664,6 +2737,286 @@ Product Management, Roadmap, SQL`;
   );
 }
 
+async function recruiterCrmEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "recruiter_contacts",
+      "outreach_drafts",
+      "follow_up_reminders",
+      "interview_notes",
+      "audit_logs",
+      "feedback_events",
+      "usage_metering_events"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  const baseJob = job({ id: "job_crm" });
+  const baseApplication = (status: ApplicationRecord["status"]) =>
+    applicationRecord({
+      id: "app_crm",
+      jobId: baseJob.id,
+      status,
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId
+    });
+
+  if (evalCase.id === "eval_crm_intro_no_invented_recruiter") {
+    const result = await generateOutreachDraft(sandbox, {
+      type: "recruiter_intro",
+      job: baseJob,
+      application: baseApplication("approved"),
+      recruiterContact: null,
+      profile: profile(),
+      intelligence: null,
+      interviewNotes: []
+    });
+    const passed =
+      result.draft.body.includes("Hi team") &&
+      !/Hi [A-Z][a-z]+,/.test(result.draft.body);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `salutation matched=${passed} excerpt=${result.draft.body.split("\n")[0]}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_thank_you_requires_interview") {
+    let threw = false;
+    let message = "";
+    try {
+      await generateOutreachDraft(sandbox, {
+        type: "thank_you",
+        job: baseJob,
+        application: baseApplication("submitted"),
+        recruiterContact: null,
+        profile: profile(),
+        intelligence: null,
+        interviewNotes: []
+      });
+    } catch (error) {
+      threw = true;
+      message = error instanceof Error ? error.message : "";
+    }
+    const passed = threw && /interview/i.test(message);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `threw=${threw} message=${message}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_negotiation_requires_offer") {
+    let threw = false;
+    let message = "";
+    try {
+      await generateOutreachDraft(sandbox, {
+        type: "negotiation",
+        job: baseJob,
+        application: baseApplication("interviewing"),
+        recruiterContact: null,
+        profile: profile(),
+        intelligence: null,
+        interviewNotes: []
+      });
+    } catch (error) {
+      threw = true;
+      message = error instanceof Error ? error.message : "";
+    }
+    const passed = threw && /interviewing/.test(message);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `threw=${threw} message=${message}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_no_auto_send") {
+    const result = await generateOutreachDraft(sandbox, {
+      type: "recruiter_intro",
+      job: baseJob,
+      application: baseApplication("approved"),
+      recruiterContact: null,
+      profile: profile(),
+      intelligence: null,
+      interviewNotes: []
+    });
+    const passed =
+      result.draft.status === "draft" &&
+      result.draft.approvedAt === null &&
+      result.draft.sentManuallyAt === null;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `status=${result.draft.status} approvedAt=${result.draft.approvedAt} sentManuallyAt=${result.draft.sentManuallyAt}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_follow_up_requires_active_application") {
+    let threw = false;
+    let message = "";
+    try {
+      await generateOutreachDraft(sandbox, {
+        type: "follow_up",
+        job: baseJob,
+        application: baseApplication("saved"),
+        recruiterContact: null,
+        profile: profile(),
+        intelligence: null,
+        interviewNotes: []
+      });
+    } catch (error) {
+      threw = true;
+      message = error instanceof Error ? error.message : "";
+    }
+    const passed = threw && /saved/.test(message);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `threw=${threw} message=${message}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_due_today_returns_pending_only") {
+    const today = new Date("2026-04-25T12:00:00Z");
+    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
+    const tomorrow = new Date(today.getTime() + 24 * 60 * 60 * 1000);
+    const pendingDueToday = await createFollowUpReminder(sandbox, {
+      jobId: baseJob.id,
+      applicationRecordId: "app_crm_due",
+      recruiterContactId: null,
+      dueAt: today.toISOString(),
+      reason: "Pending due today"
+    });
+    const pendingPastDue = await createFollowUpReminder(sandbox, {
+      jobId: baseJob.id,
+      applicationRecordId: "app_crm_due",
+      recruiterContactId: null,
+      dueAt: yesterday.toISOString(),
+      reason: "Pending past due"
+    });
+    const completed = await createFollowUpReminder(sandbox, {
+      jobId: baseJob.id,
+      applicationRecordId: "app_crm_done",
+      recruiterContactId: null,
+      dueAt: today.toISOString(),
+      reason: "Completed today"
+    });
+    updateFollowUpReminder(sandbox, {
+      id: completed.reminder.id,
+      status: "completed"
+    });
+    await createFollowUpReminder(sandbox, {
+      jobId: baseJob.id,
+      applicationRecordId: "app_crm_future",
+      recruiterContactId: null,
+      dueAt: tomorrow.toISOString(),
+      reason: "Pending future"
+    });
+    const all = loadFollowUpReminders(sandbox);
+    const due = dueRemindersToday(all, { now: today, daysAhead: 0 });
+    const ids = new Set(due.map((reminder) => reminder.id));
+    const passed =
+      due.length === 2 &&
+      ids.has(pendingDueToday.reminder.id) &&
+      ids.has(pendingPastDue.reminder.id);
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `dueCount=${due.length} reasons=${due.map((r) => r.reason).join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_safety_override_recorded") {
+    const result = await generateOutreachDraft(sandbox, {
+      type: "thank_you",
+      job: baseJob,
+      application: baseApplication("submitted"),
+      recruiterContact: null,
+      profile: profile(),
+      intelligence: null,
+      interviewNotes: [],
+      overrideSafetyGate: true
+    });
+    const generatedEvent = result.auditEvents.find(
+      (event) => event.action === "outreach_draft_generated"
+    );
+    const passed =
+      generatedEvent !== undefined &&
+      generatedEvent.metadata.safetyOverride === "true";
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `override=${generatedEvent?.metadata.safetyOverride}`
+    );
+  }
+
+  if (evalCase.id === "eval_crm_llm_adapter_not_invoked") {
+    const placeholder = new PlaceholderLlmOutreachAdapter();
+    let threw = false;
+    let message = "";
+    try {
+      await generateOutreachDraft(
+        sandbox,
+        {
+          type: "recruiter_intro",
+          job: baseJob,
+          application: baseApplication("approved"),
+          recruiterContact: null,
+          profile: profile(),
+          intelligence: null,
+          interviewNotes: []
+        },
+        placeholder
+      );
+    } catch (error) {
+      threw = true;
+      message = error instanceof Error ? error.message : "";
+    }
+    const drafts = loadOutreachDrafts(sandbox);
+    const passed =
+      threw && /not configured/i.test(message) && drafts.length === 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `threw=${threw} message=${message} drafts=${drafts.length}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown recruiter_crm eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -2700,6 +3053,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "resume_improvement") {
       return await resumeImprovementEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "recruiter_crm") {
+      return await recruiterCrmEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);
