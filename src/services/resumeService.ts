@@ -43,6 +43,51 @@ export function createResumeUpload(
   return resumeSchema.parse(resume);
 }
 
+export function createResumeFromText(
+  session: AppSession,
+  text: string,
+  fileName = "pasted-resume.txt"
+): Resume {
+  const id = createId("resume");
+  const trimmed = text.trim();
+  const resume: Resume = {
+    id,
+    tenantId: session.tenant.id,
+    userId: session.userId,
+    originalFileName: fileName.trim() || "pasted-resume.txt",
+    fileUrl: `local-paste://resume/${id}.txt`,
+    parsedText: trimmed,
+    status: "parsed",
+    createdAt: new Date().toISOString()
+  };
+  return resumeSchema.parse(resume);
+}
+
+export const DEMO_RESUME_TEXT = `Jane Doe
+Senior Product Manager
+Remote
+jane.doe@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+https://github.com/janedoe
+
+Experience
+Senior Product Manager — DemoLabs — 2022 - 2026
+Led B2B SaaS workflow automation roadmap; partnered with engineering and design.
+Shipped major roadmap; +20% activation, +12% retention.
+Customer discovery interviews; led cross-functional team of 4 engineers.
+
+Skills
+Product Management, Roadmap, Customer Discovery, SQL, Figma`;
+
+export function createDemoResume(session: AppSession): Resume {
+  return createResumeFromText(
+    session,
+    DEMO_RESUME_TEXT,
+    "demo-resume.txt"
+  );
+}
+
 export function loadResume(session: AppSession): Resume | null {
   const resume = readJson<Resume | null>(resumeKey(session), null);
   if (!resume) {

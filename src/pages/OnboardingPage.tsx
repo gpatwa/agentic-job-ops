@@ -41,6 +41,8 @@ interface OnboardingPageProps {
   resumeIntelligenceReport: ResumeIntelligenceReport | null;
   jobTargetRecommendation: JobTargetRecommendation | null;
   isAnalyzingResume: boolean;
+  onPasteResumeText: (text: string) => void;
+  onTryDemoProfile: () => void;
   onAnalyzeResume: () => void;
   onConfirmResumeProfile: () => void;
   onConfirmRecommendedTargets: (selection: {
@@ -61,6 +63,39 @@ interface OnboardingPageProps {
   onNavigateResume: () => void;
   onNavigateDashboard: () => void;
   onNavigateJobQueue: () => void;
+}
+
+export type OnboardingStepId = "resume" | "intelligence" | "targets" | "jobs";
+
+export function computeOnboardingStep(input: {
+  resume: Resume | null;
+  report: ResumeIntelligenceReport | null;
+  state: OnboardingState;
+  hasJobsShown: boolean;
+}): OnboardingStepId {
+  if (!input.resume) return "resume";
+  if (!input.report) return "intelligence";
+  if (input.state.selectedTargetRoles.length === 0) return "targets";
+  if (input.hasJobsShown || input.state.firstApplyReadyJobsShown) return "jobs";
+  return "targets";
+}
+
+const STEP_ORDER: OnboardingStepId[] = ["resume", "intelligence", "targets", "jobs"];
+
+function isStepCompleted(
+  step: OnboardingStepId,
+  current: OnboardingStepId,
+  state: OnboardingState,
+  resume: Resume | null,
+  report: ResumeIntelligenceReport | null
+): boolean {
+  if (step === "resume") return Boolean(resume);
+  if (step === "intelligence") return Boolean(report);
+  if (step === "targets") return state.selectedTargetRoles.length > 0;
+  if (step === "jobs") {
+    return Boolean(state.onboardingCompletedAt) || state.firstJobReviewed;
+  }
+  return false;
 }
 
 const SUGGESTED_ROLES = [
@@ -111,6 +146,8 @@ export function OnboardingPage({
   resumeIntelligenceReport,
   jobTargetRecommendation,
   isAnalyzingResume,
+  onPasteResumeText,
+  onTryDemoProfile,
   onAnalyzeResume,
   onConfirmResumeProfile,
   onConfirmRecommendedTargets,
@@ -126,6 +163,27 @@ export function OnboardingPage({
   onNavigateDashboard,
   onNavigateJobQueue
 }: OnboardingPageProps) {
+  const currentStep = computeOnboardingStep({
+    resume,
+    report: resumeIntelligenceReport,
+    state,
+    hasJobsShown: Boolean(lastResult)
+  });
+  const completedSteps = useMemo(
+    () => ({
+      resume: isStepCompleted("resume", currentStep, state, resume, resumeIntelligenceReport),
+      intelligence: isStepCompleted(
+        "intelligence",
+        currentStep,
+        state,
+        resume,
+        resumeIntelligenceReport
+      ),
+      targets: isStepCompleted("targets", currentStep, state, resume, resumeIntelligenceReport),
+      jobs: isStepCompleted("jobs", currentStep, state, resume, resumeIntelligenceReport)
+    }),
+    [currentStep, state, resume, resumeIntelligenceReport]
+  );
   const profileTargetTitles = useMemo(
     () => profile?.targetTitles ?? [],
     [profile?.targetTitles]
@@ -190,6 +248,15 @@ export function OnboardingPage({
 
   const onboardingComplete = Boolean(state.onboardingCompletedAt);
 
+  const headlineCopy = headlineForStep(currentStep, Boolean(lastResult));
+  const showResumeStep = currentStep === "resume";
+  const showIntelligenceStep =
+    currentStep === "intelligence" ||
+    currentStep === "targets" ||
+    currentStep === "jobs";
+  const showTargetsStep = currentStep === "targets" || currentStep === "jobs";
+  const showJobsStep = currentStep === "jobs";
+
   return (
     <div className="space-y-6">
       <header className="max-w-3xl">
@@ -197,154 +264,156 @@ export function OnboardingPage({
           Onboarding
         </p>
         <h2 className="mt-2 text-3xl font-semibold text-slate-950">
-          Get to your first apply-ready job
+          {headlineCopy.title}
         </h2>
         <p className="mt-3 text-sm leading-6 text-slate-600">
-          Confirm a couple of target roles and we'll show jobs you can act on
-          right away. Demo jobs are clearly labeled when no real jobs are
-          ingested yet. The assistant never submits an application during
-          onboarding.
+          {headlineCopy.subtitle}
         </p>
       </header>
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <ReadinessCard
-          title="Resume"
-          status={resume ? "Uploaded" : "Not uploaded"}
-          tone={resume ? "good" : "warn"}
-          actionLabel={resume ? "Manage resume" : "Upload resume"}
-          onAction={onNavigateResume}
-        />
-        <ReadinessCard
-          title="Profile"
-          status={profile?.fullName ? "Saved" : "Not saved"}
-          tone={profile?.fullName ? "good" : "warn"}
-          actionLabel="Edit profile"
-          onAction={onNavigateProfile}
-        />
-        <ReadinessCard
-          title="Onboarding"
-          status={
-            onboardingComplete
-              ? "Completed"
-              : state.firstApplyReadyJobsShown
-                ? "Recommendations ready"
-                : "In progress"
-          }
-          tone={onboardingComplete ? "good" : "neutral"}
-          actionLabel="Go to dashboard"
-          onAction={() => {
+      <Stepper currentStep={currentStep} completed={completedSteps} />
+
+      {showJobsStep && lastResult && (
+        <RecommendedNextActionHero
+          result={lastResult}
+          onReviewJob={(jobId) => {
+            onReviewJob(jobId);
+            onCompleteOnboarding("user_started_review");
+            onNavigateJobQueue();
+          }}
+          onStartApplicationPrep={(jobId) => {
+            onStartApplicationPrep(jobId);
+            onCompleteOnboarding("user_started_prep");
+          }}
+          onGoToDashboard={() => {
             onCompleteOnboarding("user_chose_dashboard");
             onNavigateDashboard();
           }}
         />
-      </section>
+      )}
 
-      <ResumeIntelligenceSection
-        resume={resume}
-        report={resumeIntelligenceReport}
-        recommendation={jobTargetRecommendation}
-        isAnalyzing={isAnalyzingResume}
-        onAnalyzeResume={onAnalyzeResume}
-        onConfirmResumeProfile={onConfirmResumeProfile}
-        onConfirmRecommendedTargets={(selection) => {
-          onConfirmRecommendedTargets(selection);
-          setSelectedRoles(selection.selectedRoles);
-        }}
-        onNavigateResume={onNavigateResume}
-      />
+      {showResumeStep ? (
+        <ResumeStartCard
+          isAnalyzing={isAnalyzingResume}
+          onPasteResumeText={onPasteResumeText}
+          onTryDemoProfile={onTryDemoProfile}
+          onSkipToManualSetup={onNavigateProfile}
+        />
+      ) : (
+        resume && (
+          <CompletedStepBanner
+            label="Resume"
+            value={resume.originalFileName}
+            actionLabel="Manage resume"
+            onAction={onNavigateResume}
+          />
+        )
+      )}
 
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="flex items-start gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
-            <Target aria-hidden="true" size={18} />
-          </div>
-          <div className="flex-1">
-            <h3 className="text-base font-semibold text-slate-950">
-              Choose your target roles
-            </h3>
-            <p className="mt-1 text-sm leading-6 text-slate-600">
-              Pick one or more roles you'd be excited to apply for. Saved
-              profile target titles appear first; you can also add your own.
-            </p>
+      {showIntelligenceStep && (
+        <ResumeIntelligenceSection
+          resume={resume}
+          report={resumeIntelligenceReport}
+          recommendation={jobTargetRecommendation}
+          isAnalyzing={isAnalyzingResume}
+          onAnalyzeResume={onAnalyzeResume}
+          onConfirmResumeProfile={onConfirmResumeProfile}
+          onConfirmRecommendedTargets={(selection) => {
+            onConfirmRecommendedTargets(selection);
+            setSelectedRoles(selection.selectedRoles);
+          }}
+          onNavigateResume={onNavigateResume}
+        />
+      )}
 
-            {profileTargetTitles.length > 0 && (
-              <p className="mt-3 text-xs uppercase tracking-wide text-slate-500">
-                From your profile
+      {showTargetsStep && (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <div className="flex items-start gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+              <Target aria-hidden="true" size={18} />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-base font-semibold text-slate-950">
+                Confirm your target roles
+              </h3>
+              <p className="mt-1 text-sm leading-6 text-slate-600">
+                We pre-selected from your resume. Add or remove roles, then
+                show jobs you can act on now.
               </p>
-            )}
-            <div className="mt-2 flex flex-wrap gap-2">
-              {allSuggestedAndProfile.map((role) => {
-                const checked = selectedRoles.includes(role);
-                return (
-                  <button
-                    key={role}
-                    type="button"
-                    className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
-                      checked
-                        ? "border-emerald-700 bg-emerald-50 text-emerald-800"
-                        : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                    }`}
-                    onClick={() => toggleRole(role)}
-                  >
-                    {checked ? "✓ " : ""}
-                    {role}
-                  </button>
-                );
-              })}
-            </div>
 
-            <div className="mt-4 flex flex-wrap items-center gap-2">
-              <input
-                type="text"
-                placeholder="Add a custom role (e.g. Senior PM, Workflow Automation)"
-                className="min-w-[260px] flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
-                value={customRoleDraft}
-                onChange={(e) => setCustomRoleDraft(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    addCustomRole();
-                  }
-                }}
-              />
-              <button
-                type="button"
-                className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-                onClick={addCustomRole}
-              >
-                Add role
-              </button>
-            </div>
+              {profileTargetTitles.length > 0 && (
+                <p className="mt-3 text-xs uppercase tracking-wide text-slate-500">
+                  From your profile
+                </p>
+              )}
+              <div className="mt-2 flex flex-wrap gap-2">
+                {allSuggestedAndProfile.map((role) => {
+                  const checked = selectedRoles.includes(role);
+                  return (
+                    <button
+                      key={role}
+                      type="button"
+                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                        checked
+                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                      onClick={() => toggleRole(role)}
+                    >
+                      {checked ? "✓ " : ""}
+                      {role}
+                    </button>
+                  );
+                })}
+              </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
-                onClick={handleSaveSelection}
-                disabled={selectedRoles.length === 0}
-              >
-                Save selection
-              </button>
-              <button
-                type="button"
-                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-                onClick={handleGenerate}
-                disabled={selectedRoles.length === 0 || isRecommending}
-              >
-                {isRecommending ? (
-                  <RefreshCw className="animate-spin" aria-hidden="true" size={16} />
-                ) : (
-                  <Sparkles aria-hidden="true" size={16} />
-                )}
-                {isRecommending ? "Finding jobs…" : "Show apply-ready jobs"}
-              </button>
+              <div className="mt-4 flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="Add a custom role (e.g. Senior PM, Workflow Automation)"
+                  className="min-w-[260px] flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+                  value={customRoleDraft}
+                  onChange={(e) => setCustomRoleDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      addCustomRole();
+                    }
+                  }}
+                />
+                <button
+                  type="button"
+                  className="inline-flex min-h-10 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                  onClick={addCustomRole}
+                >
+                  Add role
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  onClick={() => {
+                    handleSaveSelection();
+                    handleGenerate();
+                  }}
+                  disabled={selectedRoles.length === 0 || isRecommending}
+                >
+                  {isRecommending ? (
+                    <RefreshCw className="animate-spin" aria-hidden="true" size={16} />
+                  ) : (
+                    <Sparkles aria-hidden="true" size={16} />
+                  )}
+                  {isRecommending ? "Finding jobs…" : "Show apply-ready jobs"}
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
+      )}
 
-      {lastResult && (
+      {showJobsStep && lastResult && (
         <RecommendationsSection
           result={lastResult}
           dismissedJobIds={dismissedJobIds}
@@ -363,22 +432,30 @@ export function OnboardingPage({
         />
       )}
 
-      {!lastResult && state.firstApplyReadyJobsShown && (
+      {showJobsStep && !lastResult && state.firstApplyReadyJobsShown && (
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-          Recommendations were already shown earlier. Generate again to refresh
-          the list.
+          Recommendations were shown earlier in another session. Generate again
+          to refresh the list.
         </section>
       )}
 
-      {state.firstApplyReadyJobsShown && (
-        <footer className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-4 shadow-soft">
-          <span className="text-sm text-slate-600">
-            Done for now? You can come back to onboarding any time from the
-            sidebar.
-          </span>
+      <footer className="flex flex-wrap items-center gap-2 rounded-lg border border-line bg-white p-4 shadow-soft">
+        <span className="text-sm text-slate-600">
+          {onboardingComplete
+            ? "You can come back to onboarding any time from the sidebar."
+            : "Prefer to fill things in by hand? Skip to manual setup."}
+        </span>
+        <div className="ml-auto flex flex-wrap gap-2">
           <button
             type="button"
-            className="ml-auto inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            onClick={onNavigateProfile}
+          >
+            Skip to manual setup
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
             onClick={() => {
               onCompleteOnboarding("user_chose_dashboard");
               onNavigateDashboard();
@@ -387,9 +464,273 @@ export function OnboardingPage({
             Go to dashboard
             <ArrowRight aria-hidden="true" size={16} />
           </button>
-        </footer>
-      )}
+        </div>
+      </footer>
     </div>
+  );
+}
+
+function headlineForStep(
+  step: OnboardingStepId,
+  hasJobs: boolean
+): { title: string; subtitle: string } {
+  if (step === "resume") {
+    return {
+      title: "Start with your resume",
+      subtitle:
+        "Upload, paste, or try a demo profile. We use it to recommend roles you can act on right away."
+    };
+  }
+  if (step === "intelligence") {
+    return {
+      title: "Let's see what your resume says",
+      subtitle:
+        "We analyze your resume locally to spot ATS issues and recommend realistic target roles. Output is estimated — you stay in control."
+    };
+  }
+  if (step === "targets") {
+    return {
+      title: "Confirm a couple of target roles",
+      subtitle:
+        "We pre-selected roles based on your resume. Adjust the picks, then we'll show jobs you can apply to now."
+    };
+  }
+  if (hasJobs) {
+    return {
+      title: "We found jobs you can apply to now.",
+      subtitle:
+        "Strong matches first. Review one, save it for later, or start a draft application package."
+    };
+  }
+  return {
+    title: "We're lining up jobs to show you",
+    subtitle: "Confirm targets above and we'll show jobs in seconds."
+  };
+}
+
+function Stepper({
+  currentStep,
+  completed
+}: {
+  currentStep: OnboardingStepId;
+  completed: Record<OnboardingStepId, boolean>;
+}) {
+  const steps: { id: OnboardingStepId; label: string }[] = [
+    { id: "resume", label: "Resume" },
+    { id: "intelligence", label: "Intelligence" },
+    { id: "targets", label: "Targets" },
+    { id: "jobs", label: "Jobs" }
+  ];
+  return (
+    <ol className="flex flex-wrap gap-2 rounded-lg border border-line bg-white p-3 shadow-soft">
+      {steps.map((step, index) => {
+        const isCurrent = step.id === currentStep;
+        const isComplete = completed[step.id];
+        const tone = isComplete
+          ? "border-emerald-300 bg-emerald-50 text-emerald-800"
+          : isCurrent
+            ? "border-ink bg-ink text-white"
+            : "border-slate-200 bg-white text-slate-500";
+        return (
+          <li
+            key={step.id}
+            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold ${tone}`}
+          >
+            <span className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-current text-[10px]">
+              {index + 1}
+            </span>
+            {step.label}
+            {isComplete && !isCurrent && (
+              <CheckCircle2 aria-hidden="true" size={13} />
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
+function CompletedStepBanner({
+  label,
+  value,
+  actionLabel,
+  onAction
+}: {
+  label: string;
+  value: string;
+  actionLabel: string;
+  onAction: () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-900">
+      <CheckCircle2 aria-hidden="true" size={14} />
+      <span className="font-semibold uppercase tracking-wide">{label}</span>
+      <span className="truncate text-emerald-800">{value}</span>
+      <button
+        type="button"
+        className="ml-auto text-xs font-semibold text-emerald-800 underline-offset-2 hover:underline"
+        onClick={onAction}
+      >
+        {actionLabel}
+      </button>
+    </div>
+  );
+}
+
+function ResumeStartCard({
+  isAnalyzing,
+  onPasteResumeText,
+  onTryDemoProfile,
+  onSkipToManualSetup
+}: {
+  isAnalyzing: boolean;
+  onPasteResumeText: (text: string) => void;
+  onTryDemoProfile: () => void;
+  onSkipToManualSetup: () => void;
+}) {
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+
+  function handlePaste() {
+    const trimmed = draft.trim();
+    if (trimmed.length < 50) {
+      setError(
+        "Paste at least a few lines of resume text so the analyzer has something to work with."
+      );
+      return;
+    }
+    setError(null);
+    onPasteResumeText(trimmed);
+    setDraft("");
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+          <FileText aria-hidden="true" size={18} />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-base font-semibold text-slate-950">
+            Add your resume
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Paste your resume text below — we keep it private, never log it,
+            and analyse it locally with a deterministic adapter. Or try a
+            demo profile to see the full flow.
+          </p>
+          <textarea
+            className="mt-3 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-sm leading-6"
+            placeholder="Paste resume text here…"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+          />
+          {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              onClick={handlePaste}
+              disabled={isAnalyzing || draft.trim().length === 0}
+            >
+              <Sparkles aria-hidden="true" size={15} />
+              Save resume and continue
+            </button>
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+              onClick={onTryDemoProfile}
+              disabled={isAnalyzing}
+            >
+              Try demo profile
+            </button>
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+              onClick={onSkipToManualSetup}
+            >
+              Skip to manual setup
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function RecommendedNextActionHero({
+  result,
+  onReviewJob,
+  onStartApplicationPrep,
+  onGoToDashboard
+}: {
+  result: OnboardingRecommendationResult;
+  onReviewJob: (jobId: string) => void;
+  onStartApplicationPrep: (jobId: string) => void;
+  onGoToDashboard: () => void;
+}) {
+  const strong = result.groups.find(
+    (group) => group.label === "Strong matches"
+  );
+  const possible = result.groups.find(
+    (group) => group.label === "Possible matches"
+  );
+  const top = strong?.matches[0] ?? possible?.matches[0] ?? null;
+
+  if (!top) {
+    return (
+      <section className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
+        We couldn't find a great match this run. Add a job source on the
+        Ingestion page or try a different target role.
+      </section>
+    );
+  }
+
+  const isStrong = strong?.matches.includes(top);
+  return (
+    <section className="rounded-lg border border-emerald-200 bg-emerald-50 p-5 shadow-soft">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            Recommended next action
+          </p>
+          <h3 className="mt-1 text-lg font-semibold text-emerald-950">
+            {isStrong
+              ? "Start a draft application for your strongest match."
+              : "Review your top possible match."}
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-emerald-900">
+            {top.job.title} — {top.job.company} · Match{" "}
+            <strong>{top.match.overallScore.toFixed(1)}</strong> / 10
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center gap-2 rounded-md border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+            onClick={() => onReviewJob(top.job.id)}
+          >
+            <Eye aria-hidden="true" size={15} />
+            Review job
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white hover:bg-emerald-800"
+            onClick={() => onStartApplicationPrep(top.job.id)}
+          >
+            <Rocket aria-hidden="true" size={15} />
+            Start application prep
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            onClick={onGoToDashboard}
+          >
+            Go to dashboard
+          </button>
+        </div>
+      </div>
+    </section>
   );
 }
 

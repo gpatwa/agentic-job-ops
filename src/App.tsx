@@ -93,7 +93,13 @@ import {
   saveUserProfile,
   type UserProfileDraft
 } from "./services/profileService";
-import { createResumeUpload, loadResume, saveResume } from "./services/resumeService";
+import {
+  createDemoResume,
+  createResumeFromText,
+  createResumeUpload,
+  loadResume,
+  saveResume
+} from "./services/resumeService";
 import {
   loadAIOutputMetadata,
   recordAIOutputMetadata
@@ -2015,6 +2021,40 @@ export default function App() {
     });
   }
 
+  function handlePasteResumeText(text: string) {
+    const next = saveResume(currentSession, createResumeFromText(currentSession, text));
+    setResume(next);
+    recordAudit({
+      action: "resume.pasted",
+      resourceType: "Resume",
+      resourceId: next.id,
+      metadata: { textLength: text.length, source: "onboarding_paste" }
+    });
+    recordUsage({
+      eventType: "resume_uploaded",
+      resourceType: "Resume",
+      resourceId: next.id,
+      metadata: { source: "onboarding_paste" }
+    });
+  }
+
+  function handleTryDemoProfile() {
+    const next = saveResume(currentSession, createDemoResume(currentSession));
+    setResume(next);
+    recordAudit({
+      action: "resume.demo_seeded",
+      resourceType: "Resume",
+      resourceId: next.id,
+      metadata: { source: "onboarding_demo" }
+    });
+    recordUsage({
+      eventType: "resume_uploaded",
+      resourceType: "Resume",
+      resourceId: next.id,
+      metadata: { source: "onboarding_demo" }
+    });
+  }
+
   async function handleAnalyzeResumeIntelligence() {
     if (!resume) return;
     setIsAnalyzingResume(true);
@@ -2311,6 +2351,8 @@ export default function App() {
             resumeIntelligenceReport={currentReport}
             jobTargetRecommendation={currentRecommendation}
             isAnalyzingResume={isAnalyzingResume}
+            onPasteResumeText={handlePasteResumeText}
+            onTryDemoProfile={handleTryDemoProfile}
             onAnalyzeResume={handleAnalyzeResumeIntelligence}
             onConfirmResumeProfile={handleConfirmResumeProfile}
             onConfirmRecommendedTargets={handleConfirmRecommendedTargets}
