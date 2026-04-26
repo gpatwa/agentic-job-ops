@@ -2495,9 +2495,17 @@ export default function App() {
             packages={applicationPackages}
             profileCompletion={completion}
             isScoring={isScoring}
+            intelligence={companyIntelligence}
+            riskSignals={jobRiskSignals}
+            recruiterLeads={recruiterLeads}
+            isGeneratingIntelligence={isGeneratingIntelligence}
             onScoreJobs={handleScoreJobsNow}
             onJobAction={handleDashboardJobAction}
             onOpenPackage={navigateToPackage}
+            onGenerateIntelligence={handleGenerateIntelligenceForJob}
+            onMarkIntelligenceHelpful={handleMarkIntelligenceHelpful}
+            onMarkIntelligenceNotHelpful={handleMarkIntelligenceNotHelpful}
+            onDismissRiskSignal={handleDismissRiskSignal}
           />
         );
       case "tracker":

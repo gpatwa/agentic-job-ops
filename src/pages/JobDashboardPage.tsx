@@ -4,17 +4,22 @@ import {
   Layers3,
   RefreshCw,
   Search,
+  ShieldAlert,
   Sparkles
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "../components/EmptyState";
+import { IntelligenceCard } from "../components/IntelligenceCard";
 import type {
   ApplicationPackage,
   ApplicationRecord,
+  CompanyIntelligence,
   DashboardJobAction,
   JobMatch,
+  JobRiskSignal,
   NormalizedJob,
-  ProfileCompletion
+  ProfileCompletion,
+  RecruiterLead
 } from "../models/domain";
 
 type QueueTab = "apply_review" | "maybe" | "browse";
@@ -26,9 +31,17 @@ interface JobDashboardPageProps {
   packages: ApplicationPackage[];
   profileCompletion: ProfileCompletion;
   isScoring: boolean;
+  intelligence: CompanyIntelligence[];
+  riskSignals: JobRiskSignal[];
+  recruiterLeads: RecruiterLead[];
+  isGeneratingIntelligence: boolean;
   onScoreJobs: () => void;
   onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
   onOpenPackage: (packageId: string) => void;
+  onGenerateIntelligence: (jobId: string) => void;
+  onMarkIntelligenceHelpful: (intelligenceId: string) => void;
+  onMarkIntelligenceNotHelpful: (intelligenceId: string) => void;
+  onDismissRiskSignal: (signalId: string) => void;
 }
 
 interface JobCardData {
@@ -36,6 +49,9 @@ interface JobCardData {
   match: JobMatch | null;
   application: ApplicationRecord | null;
   applicationPackage: ApplicationPackage | null;
+  intelligence: CompanyIntelligence | null;
+  riskSignals: JobRiskSignal[];
+  recruiterLeads: RecruiterLead[];
 }
 
 const tabs: Array<{
@@ -172,19 +188,34 @@ function ActionButton({
 
 function JobMatchCard({
   item,
+  isGeneratingIntelligence,
   onJobAction,
-  onOpenPackage
+  onOpenPackage,
+  onGenerateIntelligence,
+  onMarkIntelligenceHelpful,
+  onMarkIntelligenceNotHelpful,
+  onDismissRiskSignal
 }: {
   item: JobCardData;
+  isGeneratingIntelligence: boolean;
   onJobAction: (jobId: string, action: DashboardJobAction, notes?: string) => void;
   onOpenPackage: (packageId: string) => void;
+  onGenerateIntelligence: (jobId: string) => void;
+  onMarkIntelligenceHelpful: (intelligenceId: string) => void;
+  onMarkIntelligenceNotHelpful: (intelligenceId: string) => void;
+  onDismissRiskSignal: (signalId: string) => void;
 }) {
-  const { job, match, application, applicationPackage } = item;
+  const { job, match, application, applicationPackage, intelligence, riskSignals, recruiterLeads } = item;
   const [notesDraft, setNotesDraft] = useState(application?.notes ?? "");
+  const [intelligenceOpen, setIntelligenceOpen] = useState(false);
 
   useEffect(() => {
     setNotesDraft(application?.notes ?? "");
   }, [application?.notes]);
+
+  const highRiskCount = riskSignals.filter((signal) => signal.severity === "high").length;
+  const otherRiskCount = riskSignals.length - highRiskCount;
+  const hasIntelligence = Boolean(intelligence);
 
   if (!match) {
     return (
@@ -305,6 +336,61 @@ function JobMatchCard({
         </p>
       </div>
 
+      <div className="mt-4">
+        <button
+          type="button"
+          className={`inline-flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs font-semibold transition ${
+            highRiskCount > 0
+              ? "border-red-200 bg-red-50 text-red-800 hover:bg-red-100"
+              : otherRiskCount > 0
+                ? "border-amber-200 bg-amber-50 text-amber-900 hover:bg-amber-100"
+                : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+          }`}
+          onClick={() => setIntelligenceOpen((open) => !open)}
+        >
+          <span className="flex items-center gap-2">
+            {highRiskCount > 0 ? (
+              <ShieldAlert aria-hidden="true" size={14} />
+            ) : (
+              <Sparkles aria-hidden="true" size={14} />
+            )}
+            {highRiskCount > 0
+              ? `High-risk signal · ${highRiskCount} flagged`
+              : otherRiskCount > 0
+                ? `${otherRiskCount} risk signal${otherRiskCount === 1 ? "" : "s"}`
+                : hasIntelligence
+                  ? "Estimated company intelligence available"
+                  : "Generate company intelligence"}
+          </span>
+          <span className="text-[11px] font-semibold uppercase tracking-wide">
+            {intelligenceOpen ? "Hide" : "Open"}
+          </span>
+        </button>
+        {intelligenceOpen && (
+          <div className="mt-3">
+            <IntelligenceCard
+              intelligence={intelligence}
+              riskSignals={riskSignals}
+              recruiterLeads={recruiterLeads}
+              isGenerating={isGeneratingIntelligence}
+              onGenerate={() => onGenerateIntelligence(job.id)}
+              onRefresh={() => onGenerateIntelligence(job.id)}
+              onMarkHelpful={
+                intelligence
+                  ? () => onMarkIntelligenceHelpful(intelligence.id)
+                  : undefined
+              }
+              onMarkNotHelpful={
+                intelligence
+                  ? () => onMarkIntelligenceNotHelpful(intelligence.id)
+                  : undefined
+              }
+              onDismissRiskSignal={onDismissRiskSignal}
+            />
+          </div>
+        )}
+      </div>
+
       <div className="mt-4 rounded-md border border-slate-200 p-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
           Actions
@@ -403,9 +489,17 @@ export function JobDashboardPage({
   packages,
   profileCompletion,
   isScoring,
+  intelligence,
+  riskSignals,
+  recruiterLeads,
+  isGeneratingIntelligence,
   onScoreJobs,
   onJobAction,
-  onOpenPackage
+  onOpenPackage,
+  onGenerateIntelligence,
+  onMarkIntelligenceHelpful,
+  onMarkIntelligenceNotHelpful,
+  onDismissRiskSignal
 }: JobDashboardPageProps) {
   const [activeTab, setActiveTab] = useState<QueueTab>("apply_review");
   const selected = tabs.find((tab) => tab.id === activeTab) ?? tabs[0];
@@ -431,31 +525,68 @@ export function JobDashboardPage({
     [packages]
   );
   const queuedJobs = jobs.filter((job) => !matchByJobId.has(job.id));
+  const intelligenceByJobId = useMemo(
+    () => new Map(intelligence.map((record) => [record.jobId, record] as const)),
+    [intelligence]
+  );
+  const riskSignalsByJobId = useMemo(() => {
+    const map = new Map<string, JobRiskSignal[]>();
+    riskSignals.forEach((signal) => {
+      const existing = map.get(signal.jobId);
+      if (existing) {
+        existing.push(signal);
+      } else {
+        map.set(signal.jobId, [signal]);
+      }
+    });
+    return map;
+  }, [riskSignals]);
+  const recruiterLeadsByJobId = useMemo(() => {
+    const map = new Map<string, RecruiterLead[]>();
+    recruiterLeads.forEach((lead) => {
+      const existing = map.get(lead.jobId);
+      if (existing) {
+        existing.push(lead);
+      } else {
+        map.set(lead.jobId, [lead]);
+      }
+    });
+    return map;
+  }, [recruiterLeads]);
   const cards = useMemo<JobCardData[]>(() => {
+    const baseFor = (job: NormalizedJob) => ({
+      job,
+      match: matchByJobId.get(job.id) ?? null,
+      application: applicationByJobId.get(job.id) ?? null,
+      applicationPackage: packageByJobId.get(job.id) ?? null,
+      intelligence: intelligenceByJobId.get(job.id) ?? null,
+      riskSignals: riskSignalsByJobId.get(job.id) ?? [],
+      recruiterLeads: recruiterLeadsByJobId.get(job.id) ?? []
+    });
     const matchedCards = jobs
-      .map((job) => ({
-        job,
-        match: matchByJobId.get(job.id) ?? null,
-        application: applicationByJobId.get(job.id) ?? null,
-        applicationPackage: packageByJobId.get(job.id) ?? null
-      }))
+      .map(baseFor)
       .filter((item) => item.match !== null)
       .sort((a, b) => (b.match?.overallScore ?? 0) - (a.match?.overallScore ?? 0));
 
     if (activeTab === "browse") {
       return [
         ...matchedCards.filter((item) => item.match?.queue === "browse"),
-        ...queuedJobs.map((job) => ({
-          job,
-          match: null,
-          application: applicationByJobId.get(job.id) ?? null,
-          applicationPackage: packageByJobId.get(job.id) ?? null
-        }))
+        ...queuedJobs.map(baseFor)
       ];
     }
 
     return matchedCards.filter((item) => item.match?.queue === activeTab);
-  }, [activeTab, applicationByJobId, jobs, matchByJobId, packageByJobId, queuedJobs]);
+  }, [
+    activeTab,
+    applicationByJobId,
+    intelligenceByJobId,
+    jobs,
+    matchByJobId,
+    packageByJobId,
+    queuedJobs,
+    recruiterLeadsByJobId,
+    riskSignalsByJobId
+  ]);
 
   return (
     <div className="space-y-6">
@@ -540,8 +671,13 @@ export function JobDashboardPage({
                 <JobMatchCard
                   key={item.job.id}
                   item={item}
+                  isGeneratingIntelligence={isGeneratingIntelligence}
                   onJobAction={onJobAction}
                   onOpenPackage={onOpenPackage}
+                  onGenerateIntelligence={onGenerateIntelligence}
+                  onMarkIntelligenceHelpful={onMarkIntelligenceHelpful}
+                  onMarkIntelligenceNotHelpful={onMarkIntelligenceNotHelpful}
+                  onDismissRiskSignal={onDismissRiskSignal}
                 />
               ))}
             </div>

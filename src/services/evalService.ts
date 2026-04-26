@@ -61,7 +61,8 @@ import { loadApplicationPackages } from "./applicationPackage";
 import {
   addRecruiterLead,
   detectJobRiskSignals,
-  generateCompanyIntelligence
+  generateCompanyIntelligence,
+  intelligenceForJob
 } from "./intelligenceService";
 import {
   isDemoJob,
@@ -581,6 +582,22 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "When package prep is enabled and a high-risk signal is present, no package is generated unless overrideHighRiskPackagePrep is true.",
       inputSummary: "Career Ops run with high-risk job and package prep enabled.",
       expectedBehavior: "First run generates 0 packages and warns; second run with override enabled generates the package."
+    },
+    {
+      id: "eval_intel_unrealistic_salary_creates_risk",
+      suite: "company_intelligence",
+      name: "Salary outside normal bounds creates a risk warning",
+      description: "An unusually high or low salary band on the posting must produce an unrealistic_salary risk signal so the user is warned before acting.",
+      inputSummary: "Job with a salary maximum well above industry norms.",
+      expectedBehavior: "detectJobRiskSignals returns an unrealistic_salary signal at high severity for an extreme maximum."
+    },
+    {
+      id: "eval_intel_application_package_surfaces_intelligence",
+      suite: "company_intelligence",
+      name: "Application package can surface intelligence if present",
+      description: "After intelligence is generated for a job, intelligenceForJob exposes the same record to the application package page lookup.",
+      inputSummary: "Job with generated intelligence and risk signals.",
+      expectedBehavior: "intelligenceForJob returns the persisted intelligence and at least one risk signal record for the job id."
     },
     {
       id: "eval_onboarding_product_role_returns_product_jobs",
@@ -1902,6 +1919,50 @@ async function intelligenceEval(
       evalCase,
       passed ? "passed" : "failed",
       `blockedPackages=${blockedPackages} blockedWarning=${blockedWarning} overridePackages=${overridePackages}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_unrealistic_salary_creates_risk") {
+    const signals = detectJobRiskSignals(
+      job({ id: "job_salary_high", salaryMax: 5_000_000, scoringStatus: "queued" })
+    );
+    const salarySignal = signals.find(
+      (signal) => signal.riskType === "unrealistic_salary"
+    );
+    const passed = Boolean(
+      salarySignal && salarySignal.severity === "high"
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `signals=${signals.map((s) => `${s.riskType}/${s.severity}`).join(",") || "none"}`
+    );
+  }
+
+  if (evalCase.id === "eval_intel_application_package_surfaces_intelligence") {
+    const seedJob = job({
+      id: "job_pkg_intel",
+      applicationUrl: "https://bit.ly/highrisk_pkg",
+      scoringStatus: "queued"
+    });
+    const generated = await generateCompanyIntelligence(
+      sandbox,
+      seedJob,
+      profile()
+    );
+    const view = intelligenceForJob(sandbox, seedJob.id);
+    const passed =
+      view.intelligence?.id === generated.intelligence.id &&
+      view.riskSignals.length === generated.riskSignals.length &&
+      view.riskSignals.length > 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `intelligenceMatch=${view.intelligence?.id === generated.intelligence.id} riskSignals=${view.riskSignals.length}`
     );
   }
 
