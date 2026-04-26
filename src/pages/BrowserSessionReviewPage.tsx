@@ -128,6 +128,15 @@ export function BrowserSessionReviewPage({
             <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
               ATS {browserSession.atsType}
             </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+              Adapter {browserSession.atsType}
+            </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              Confidence {Math.round(browserSession.adapterConfidence * 100)}%
+            </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+              Mode {statusLabel(browserSession.fillMode)}
+            </span>
             {application && (
               <span className="rounded-md bg-blue-50 px-2 py-1 text-xs font-semibold capitalize text-blue-700">
                 Tracker {statusLabel(application.status)}
@@ -212,7 +221,15 @@ export function BrowserSessionReviewPage({
         </div>
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-3">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Adapter confidence
+          </p>
+          <p className="mt-2 text-3xl font-semibold text-slate-950">
+            {Math.round(browserSession.adapterConfidence * 100)}%
+          </p>
+        </div>
         <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Fields detected
@@ -236,6 +253,58 @@ export function BrowserSessionReviewPage({
           <p className="mt-2 text-3xl font-semibold text-slate-950">
             {browserSession.uncertainFields.length}
           </p>
+        </div>
+      </section>
+
+      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-950">
+              Fill plan preview
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              Mode is {statusLabel(browserSession.fillMode)}. This preview shows
+              what the adapter can fill safely and what still needs user input.
+            </p>
+          </div>
+          <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+            {browserSession.adapterName}
+          </span>
+        </div>
+        <div className="mt-4 space-y-3">
+          {browserSession.fillPlan.length === 0 ? (
+            <p className="text-sm text-slate-500">
+              No fill plan was generated for this session.
+            </p>
+          ) : (
+            browserSession.fillPlan.map((item) => (
+              <div
+                key={`${item.fieldId}-${item.action}`}
+                className="rounded-md border border-slate-200 bg-panel p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {item.label}
+                  </p>
+                  <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+                    {statusLabel(item.action)}
+                  </span>
+                </div>
+                <p className="mt-1 text-sm leading-6 text-slate-600">
+                  {item.valuePreview}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  Source: {statusLabel(item.source)} · Confidence{" "}
+                  {Math.round(item.confidence * 100)}%
+                </p>
+                {item.reason && (
+                  <p className="mt-2 text-xs leading-5 text-amber-800">
+                    {item.reason}
+                  </p>
+                )}
+              </div>
+            ))
+          )}
         </div>
       </section>
 
@@ -270,7 +339,9 @@ export function BrowserSessionReviewPage({
         <div className="space-y-5">
           <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
             <h3 className="text-base font-semibold text-slate-950">
-              Filled fields
+              {browserSession.fillMode === "dry_run"
+                ? "Fields that will be filled"
+                : "Filled fields"}
             </h3>
             <div className="mt-4 space-y-3">
               {browserSession.fieldsFilled.length === 0 ? (

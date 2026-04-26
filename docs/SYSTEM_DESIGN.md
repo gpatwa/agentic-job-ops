@@ -14,7 +14,8 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/applicationPackage.ts`: Phase 5 application package generation, deterministic fallback, LLM adapter boundary, safety checks, package persistence, answer persistence, and approval workflow.
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
 - `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
-- `src/services/browserApplicationAssistant.ts`: Browser application session state machine, deterministic adapter, Playwright adapter boundary, safe field mapping, approval guardrails, and manual-required fallback.
+- `src/services/atsAdapters.ts`: Phase 8 ATS adapter interface, Greenhouse and Lever adapters, DOM-form fixture analysis, safe fill-plan generation, adapter confidence, and default dry-run execution.
+- `src/services/browserApplicationAssistant.ts`: Browser application session state machine, ATS adapter orchestration, Playwright adapter boundary, approval guardrails, and manual-required fallback.
 - `src/services/feedbackService.ts`: Tenant-scoped product feedback event capture and summaries.
 - `src/services/usageMetering.ts`: Tenant-scoped usage metering events and aggregate counters.
 - `src/services/evalService.ts`: Deterministic eval cases, runs, results, and safety checks for match scoring, package generation, and browser assistant guardrails.
@@ -69,12 +70,31 @@ The LLM package generator is represented by `ApplicationPackageGenerator`. It is
 
 1. A user opens an approved application package and starts browser apply.
 2. The browser assistant creates a `BrowserApplicationSession` scoped to the tenant and user.
-3. The deterministic adapter detects the ATS, form fields, safely fillable fields, and pause items.
-4. Safe fields are mapped from profile data, resume/package drafts, and approved application answers without storing private answer text in audit logs.
-5. CAPTCHA, login challenges, demographic questions, missing salary expectations, low-confidence required fields, and final submit always pause for human control.
-6. The browser session page shows detected fields, filled-field provenance, pause items, and a screenshot placeholder.
-7. The job seeker must move the session to review, explicitly approve submit, and then choose the assistant submit action.
-8. The tracker updates to submitted only after confirmed submission or an explicit manual application action.
+3. The ATS adapter layer selects Greenhouse, Lever, or unknown based on the application URL and application-form structure.
+4. The selected adapter detects labels, inputs, selects, textareas, upload controls, custom questions, and pause-only controls.
+5. Safe fields are mapped from profile data, resume/package drafts, and approved application answers without storing private answer text in audit logs.
+6. The adapter creates a dry-run fill plan with adapter confidence, fields that can be filled, upload actions, skipped fields, and user-input pauses.
+7. CAPTCHA, login challenges, demographic questions, missing salary expectations, low-confidence required fields, and final submit always pause for human control.
+8. The browser session page shows adapter type, adapter confidence, fill mode, fill plan, detected fields, filled-field provenance, pause items, and a screenshot placeholder.
+9. The job seeker must move the session to review, explicitly approve submit, and then choose the assistant submit action.
+10. The tracker updates to submitted only after confirmed submission or an explicit manual application action.
+
+The Phase 8 default adapter mode is `dry_run`. `fill_only` is available as an interface mode for future controlled automation. `submit_after_approval` is blocked unless the service approval gate has passed and a safe fixture or future production adapter returns an explicit submit confirmation.
+
+## ATS Adapter Interface
+
+Each ATS adapter supports:
+
+- `detect(page)`: identify adapter type and confidence from URL and form structure.
+- `analyzeForm(page)`: detect form fields and pause-only controls.
+- `createFillPlan(profile, package, detectedForm)`: map safe fields from approved user-controlled sources and identify user-required fields.
+- `executeFillPlan(page, fillPlan, mode)`: produce dry-run or fill-only results without submitting.
+- `prepareForReview(page)`: prepare the session for human review.
+- `submitAfterApproval(page, session)`: submit only when the service-level approval gate has already passed and the adapter can detect submit confirmation.
+
+Greenhouse detection covers `greenhouse.io`, `boards.greenhouse.io`, common Greenhouse form markers, first name, last name, email, phone, resume upload, cover letter upload, and custom questions. Lever detection covers `jobs.lever.co`, common Lever posting forms, name, email, phone, resume upload, links, and additional information fields.
+
+Adapter events log only counts, confidence, mode, adapter name, and resource identifiers. Resume content, profile values, credentials, and application-answer text are not copied into audit, feedback, usage, or AI metadata records.
 
 The Playwright adapter is represented by `BrowserAutomationAdapter` and `PlaywrightBrowserAutomationAdapterBoundary`. It is intentionally a boundary until real browser automation is configured.
 
@@ -92,7 +112,7 @@ Before any submit adapter can run, the service verifies that the application pac
 
 Phase 7 adds a local quality-control layer before any real browser automation is connected. Feedback events record major user decisions and workflow milestones, including job saves, rejections, scoring overrides, package edits, browser-session starts, submit approvals, and outcomes. Usage metering events record operational counters such as resume uploads, scan runs, jobs ingested, jobs scored, packages generated, browser sessions, submit approvals, confirmed submissions, and placeholder token usage.
 
-The eval runner stores deterministic `EvalCase`, `EvalRun`, and `EvalResult` records. Current suites cover match score calibration, application package truthfulness, and browser assistant safety guardrails. These evals verify that strong matches score high, weak matches score low, avoid-list companies are skipped, low-score jobs remain browsable, unsupported claims are flagged, browser sessions require approved packages, submit cannot happen before approval, sensitive fields pause, manual fallback works, and only the job seeker can approve submit.
+The eval runner stores deterministic `EvalCase`, `EvalRun`, and `EvalResult` records. Current suites cover match score calibration, application package truthfulness, ATS adapter behavior, and browser assistant safety guardrails. These evals verify that strong matches score high, weak matches score low, avoid-list companies are skipped, low-score jobs remain browsable, unsupported claims are flagged, Greenhouse and Lever fixtures are detected, safe fill plans are generated, uncertain and sensitive fields pause, browser sessions require approved packages, submit cannot happen before approval, manual fallback works, and only the job seeker can approve submit.
 
 `AIOutputMetadata` centralizes model and prompt metadata for match scores, package drafts, application answers, and browser field detection. It stores identifiers, versions, hashes, and generation mode only; generated resume text, application answers, and other sensitive content are not copied into metadata, usage, feedback, or audit records.
 

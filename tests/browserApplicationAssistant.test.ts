@@ -225,8 +225,11 @@ describe("browser application assistant", () => {
     expect(result.session.status).toBe("needs_user_input");
     expect(result.session.fieldsDetected.length).toBeGreaterThan(0);
     expect(result.session.fieldsFilled.map((field) => field.fieldId)).toContain(
-      "full_name"
+      "greenhouse_first_name"
     );
+    expect(result.session.fillMode).toBe("dry_run");
+    expect(result.session.adapterName).toBe("greenhouse-ats-adapter");
+    expect(result.session.fillPlan.length).toBeGreaterThan(0);
     expect(result.session.uncertainFields.map((field) => field.reason)).toContain(
       "captcha"
     );
@@ -304,10 +307,11 @@ describe("browser application assistant", () => {
     expect(approved.session.status).toBe("approved_for_submit");
     persistAuditEvents(approved.auditEvents);
 
-    const submitted = await submitApprovedBrowserApplication(
-      currentSession,
-      approved.session.id
-    );
+    const submitted = await submitApprovedBrowserApplication(currentSession, approved.session.id, {
+      name: "safe-fixture-submit-adapter",
+      runDetection: vi.fn(),
+      submit: vi.fn(async () => ({ submitted: true, confirmationDetected: true }))
+    });
     expect(submitted.session.status).toBe("submitted");
     expect(loadApplications(currentSession)[0].status).toBe("submitted");
   });

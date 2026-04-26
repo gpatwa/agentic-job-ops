@@ -83,6 +83,20 @@ Build quality, safety, and enterprise visibility foundations with:
 - Admin/system dashboard with audit, feedback, usage, eval, outcome, and failure summaries.
 - Score calibration basics and safety eval checks for match scoring, application package truthfulness, and browser assistant approval guardrails.
 
+## Phase 8 Scope
+
+Build real ATS adapter infrastructure with:
+
+- `ATSAdapter` interface for detection, form analysis, fill-plan creation, dry-run/fill-only execution, review prep, and submit-after-approval.
+- Greenhouse adapter for `greenhouse.io`, `boards.greenhouse.io`, common Greenhouse form structure, first name, last name, email, phone, resume upload, cover letter upload, and custom questions.
+- Lever adapter for `jobs.lever.co`, Lever form structure, name, email, phone, resume upload, links, and additional information fields.
+- Adapter selection from application URL and form structure with adapter confidence.
+- DOM-based fixture analysis for labels, inputs, selects, textareas, and upload controls.
+- Redacted dry-run fill plan preview showing safe fields, upload actions, skipped fields, and user-required fields.
+- Pause handling for CAPTCHA, login, demographic fields, veteran/disability/race/gender fields, missing salary expectations, unclear required questions, and final submit.
+- Audit, feedback, usage, and eval events for adapter runs.
+- Greenhouse-like and Lever-like fixtures for deterministic tests and evals.
+
 ## Functional Requirements
 
 - Users can create and edit a career profile.
@@ -106,11 +120,14 @@ Build quality, safety, and enterprise visibility foundations with:
 - Unsupported-claim warnings are visible when generated or edited text mentions risky unsupported claims.
 - Users can start browser apply only from an approved application package.
 - Browser sessions show detected fields, filled fields, uncertain fields, status, and manual fallback controls.
+- Browser sessions show adapter type, adapter confidence, fill mode, and redacted fill plan preview.
 - Assistant submission remains blocked until the same session has an approved package, ready-for-review status, explicit job-seeker approval, and a matching submit-approval audit event.
 - Application records move to submitted only after confirmed assistant submission or an explicit manual submitted action.
 - Feedback and usage events are recorded for major workflow actions.
 - Admin users can run deterministic evals and review pass/fail summaries.
 - Admin users can review usage, feedback, outcomes, recent audit events, and recent failures.
+- Greenhouse-like and Lever-like fixtures can be detected and converted into fill plans.
+- Default ATS adapter execution is dry-run or fill-only; no live external submit runs by default.
 
 ## Non-Functional Requirements
 

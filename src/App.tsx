@@ -382,12 +382,25 @@ export default function App() {
           outputType: "browser_field_mapping",
           resourceType: event.resourceType,
           resourceId: event.resourceId,
-          modelName: "mock-browser-application-adapter",
-          promptVersion: "browser-field-mapping-v1",
+          modelName: result.session.adapterName || "ats-adapter-orchestrator",
+          promptVersion: "ats-fill-plan-v1",
           provider: "local",
           mode: "deterministic",
           inputHash: String(event.metadata.applicationPackageId ?? "not_recorded"),
           outputHash: String(event.metadata.fieldCount ?? 0)
+        });
+      } else if (event.action === "ats_adapter_run_completed") {
+        recordFeedback({
+          eventType: "ats_adapter_run",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "ats_adapter_run",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
         });
       }
     });

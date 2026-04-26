@@ -28,6 +28,10 @@ Browser application assistant with a deterministic development flow, ATS detecti
 
 Evals, feedback events, model and prompt metadata, usage metering, outcome tracking, score calibration basics, admin visibility, audit summaries, and safety checks for application packages and browser assistant workflows. Keep optimization focused on strong-fit, truthful, human-approved applications rather than raw submission volume.
 
+## Phase 8
+
+Real ATS adapter infrastructure for Greenhouse and Lever: adapter interface, URL and form-structure detection, DOM-based field analysis for labels/inputs/selects/textareas/uploads, safe field mapping from approved user-controlled sources, dry-run fill plan previews, adapter confidence, pause handling for uncertain and sensitive fields, fixture-backed evals, and audit/feedback/usage events for adapter runs. Default behavior remains dry-run or fill-only; no live external submit runs by default.
+
 ## Future Enterprise Controls
 
 Backend tenant isolation, RBAC, delegated approval rules, usage billing, and production-grade tenant administration.

@@ -116,6 +116,14 @@ export const browserApplicationSessionStatuses = [
 export type BrowserApplicationSessionStatus =
   (typeof browserApplicationSessionStatuses)[number];
 
+export const browserFillModes = [
+  "dry_run",
+  "fill_only",
+  "submit_after_approval"
+] as const;
+
+export type BrowserFillMode = (typeof browserFillModes)[number];
+
 export const applicationFieldTypes = [
   "text",
   "email",
@@ -141,6 +149,9 @@ export const applicationFieldSources = [
 ] as const;
 
 export type ApplicationFieldSource = (typeof applicationFieldSources)[number];
+
+export const fillPlanActions = ["fill", "upload", "pause", "skip"] as const;
+export type FillPlanAction = (typeof fillPlanActions)[number];
 
 export const uncertainFieldReasons = [
   "captcha",
@@ -183,6 +194,7 @@ export const feedbackEventTypes = [
   "application_package_approved",
   "application_package_rejected",
   "browser_session_created",
+  "ats_adapter_run",
   "browser_submit_approved",
   "application_submitted",
   "manually_applied",
@@ -202,6 +214,7 @@ export const usageMeteringEventTypes = [
   "job_scored",
   "application_package_generated",
   "browser_session_started",
+  "ats_adapter_run",
   "browser_submit_approved",
   "application_submitted",
   "llm_tokens_used"
@@ -212,6 +225,7 @@ export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
 export const evalSuites = [
   "match_score",
   "application_package",
+  "ats_adapter",
   "browser_assistant_safety"
 ] as const;
 
@@ -458,6 +472,17 @@ export interface UncertainApplicationField {
   guidance: string;
 }
 
+export interface BrowserFillPlanItem {
+  fieldId: string;
+  label: string;
+  action: FillPlanAction;
+  source: ApplicationFieldSource;
+  sourceField: string;
+  valuePreview: string;
+  confidence: number;
+  reason: string;
+}
+
 export interface BrowserApplicationSession {
   id: string;
   tenantId: string;
@@ -466,10 +491,14 @@ export interface BrowserApplicationSession {
   applicationRecordId: string;
   applicationPackageId: string;
   atsType: BrowserAtsType;
+  adapterName: string;
+  adapterConfidence: number;
+  fillMode: BrowserFillMode;
   status: BrowserApplicationSessionStatus;
   fieldsDetected: DetectedApplicationField[];
   fieldsFilled: FilledApplicationField[];
   uncertainFields: UncertainApplicationField[];
+  fillPlan: BrowserFillPlanItem[];
   screenshotUrl: string | null;
   errorMessage: string;
   createdAt: string;

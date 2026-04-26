@@ -71,6 +71,17 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Admin visibility summarizes jobs ingested, jobs scored, packages generated, browser sessions, applications submitted, feedback, usage, evals, audit activity, and recent failures.
 - Product optimization stays focused on strong-fit, truthful, human-approved applications rather than raw application volume.
 
+## Phase 8 Outcomes
+
+- Greenhouse and Lever ATS adapter infrastructure replaces the earlier deterministic browser assistant internals.
+- Adapter selection uses application URL and form structure with confidence scoring.
+- Adapters detect labels, inputs, selects, textareas, upload controls, links, custom questions, and pause-only controls.
+- The browser session review page shows adapter type, confidence, dry-run/fill-only mode, a redacted fill plan, fields that can be filled, and fields needing user input.
+- CAPTCHA, login, demographic, veteran/disability/race/gender, missing salary, unclear required, and final submit fields remain human-controlled.
+- Default adapter execution is dry-run or fill-only; no live external submit runs by default.
+- Application records move to submitted only after confirmed submit or an explicit manual submitted action.
+- Fixture-backed evals verify Greenhouse detection, Lever detection, safe field mapping, uncertain field pauses, approval guardrails, and sensitive-field handling.
+
 ## Users
 
 - Individual job seekers.
@@ -82,4 +93,4 @@ The AI does the work. The human makes the decision. The product must not submit 
 - Backend tenant isolation and persistence.
 - RBAC and delegated-approval policy for coaches and admins.
 - Production billing and plan-based usage controls.
-- Real browser automation behind the existing approval gate and safety checks.
+- Production browser automation behind the existing adapter interface, approval gate, and safety checks.

@@ -29,12 +29,19 @@ import {
 } from "./applicationPackage";
 import {
   approveBrowserSubmit,
+  createATSBrowserAutomationAdapter,
   markBrowserSessionManualRequired,
   markBrowserSessionReadyForReview,
   startBrowserApplicationSession,
   submitApprovedBrowserApplication
 } from "./browserApplicationAssistant";
 import { saveApplications } from "./applicationService";
+import {
+  GreenhouseATSAdapter,
+  LeverATSAdapter,
+  greenhouseFixturePage,
+  leverFixturePage
+} from "./atsAdapters";
 
 interface EvalRunBundle {
   run: EvalRun;
@@ -291,6 +298,54 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "Missing profile and resume evidence should produce low-confidence answers.",
       inputSummary: "No profile facts and no parsed resume evidence.",
       expectedBehavior: "At least one answer is low confidence and needs review."
+    },
+    {
+      id: "eval_ats_greenhouse_fixture_detection",
+      suite: "ats_adapter",
+      name: "Greenhouse fixture detection",
+      description: "Greenhouse-like application forms should select the Greenhouse adapter.",
+      inputSummary: "Greenhouse fixture URL and form structure.",
+      expectedBehavior: "Adapter type is greenhouse with high confidence."
+    },
+    {
+      id: "eval_ats_lever_fixture_detection",
+      suite: "ats_adapter",
+      name: "Lever fixture detection",
+      description: "Lever-like application forms should select the Lever adapter.",
+      inputSummary: "Lever fixture URL and form structure.",
+      expectedBehavior: "Adapter type is lever with high confidence."
+    },
+    {
+      id: "eval_ats_safe_field_mapping",
+      suite: "ats_adapter",
+      name: "Safe field mapping",
+      description: "ATS fill plans should map profile, resume, package, and approved answer fields without exposing raw values.",
+      inputSummary: "Approved profile, package, and Greenhouse fixture.",
+      expectedBehavior: "Safe first name, email, resume, and answer fields are fillable."
+    },
+    {
+      id: "eval_ats_uncertain_field_pause",
+      suite: "ats_adapter",
+      name: "Uncertain field pause",
+      description: "Required custom fields without approved evidence should pause for user input.",
+      inputSummary: "Greenhouse fixture without application answers.",
+      expectedBehavior: "Required or low-confidence fields require review."
+    },
+    {
+      id: "eval_ats_no_submit_without_approval",
+      suite: "ats_adapter",
+      name: "No submit without approval",
+      description: "ATS adapters should not submit when the browser session is not explicitly approved.",
+      inputSummary: "Dry-run browser session.",
+      expectedBehavior: "Submit result is not confirmed."
+    },
+    {
+      id: "eval_ats_no_sensitive_demographic_default",
+      suite: "ats_adapter",
+      name: "No sensitive demographic answer by default",
+      description: "Demographic, veteran, disability, race, and gender fields should pause unless user defaults exist.",
+      inputSummary: "Greenhouse and Lever fixtures with demographic fields.",
+      expectedBehavior: "Demographic fields are pause items, not filled fields."
     },
     {
       id: "eval_browser_approved_package_required",
@@ -608,6 +663,145 @@ async function packageEval(
   );
 }
 
+async function atsEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const greenhouseAdapter = new GreenhouseATSAdapter();
+  const leverAdapter = new LeverATSAdapter();
+  const baseProfile = profile();
+  const basePackage = applicationPackage("approved");
+  const baseAnswers = applicationAnswers();
+
+  if (evalCase.id === "eval_ats_greenhouse_fixture_detection") {
+    const detection = greenhouseAdapter.detect(greenhouseFixturePage());
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      detection.adapterType === "greenhouse" && detection.confidence >= 0.8
+        ? "passed"
+        : "failed",
+      `Detected ${detection.adapterType} at ${Math.round(detection.confidence * 100)}% confidence.`
+    );
+  }
+
+  if (evalCase.id === "eval_ats_lever_fixture_detection") {
+    const detection = leverAdapter.detect(leverFixturePage());
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      detection.adapterType === "lever" && detection.confidence >= 0.8
+        ? "passed"
+        : "failed",
+      `Detected ${detection.adapterType} at ${Math.round(detection.confidence * 100)}% confidence.`
+    );
+  }
+
+  if (evalCase.id === "eval_ats_safe_field_mapping") {
+    const form = greenhouseAdapter.analyzeForm(greenhouseFixturePage());
+    const plan = greenhouseAdapter.createFillPlan(baseProfile, basePackage, form, {
+      answers: baseAnswers,
+      resume: resume(),
+      mode: "dry_run"
+    });
+    const filled = new Set(plan.fieldsFilled.map((field) => field.fieldId));
+    const passed =
+      [...filled].some((fieldId) => fieldId.includes("first_name")) &&
+      [...filled].some((fieldId) => fieldId.includes("email")) &&
+      [...filled].some((fieldId) => fieldId.includes("resume")) &&
+      plan.fieldsFilled.some((field) => field.source === "application_answer");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Fill plan mapped ${plan.fieldsFilled.length} safe fields.`
+    );
+  }
+
+  if (evalCase.id === "eval_ats_uncertain_field_pause") {
+    const form = greenhouseAdapter.analyzeForm(greenhouseFixturePage());
+    const plan = greenhouseAdapter.createFillPlan(baseProfile, basePackage, form, {
+      answers: [],
+      resume: resume(),
+      mode: "dry_run"
+    });
+    const reasons = plan.uncertainFields.map((field) => field.reason);
+    const passed =
+      reasons.includes("low_confidence") ||
+      reasons.includes("unclear_required") ||
+      reasons.includes("final_submit");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Pause reasons: ${reasons.join(", ")}.`
+    );
+  }
+
+  if (evalCase.id === "eval_ats_no_submit_without_approval") {
+    const adapter = createATSBrowserAutomationAdapter();
+    const submit = await adapter.submit({
+      id: "browser_eval",
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      jobId: "job_eval",
+      applicationRecordId: "app_eval",
+      applicationPackageId: "pkg_eval",
+      atsType: "greenhouse",
+      adapterName: "greenhouse-ats-adapter",
+      adapterConfidence: 0.95,
+      fillMode: "dry_run",
+      status: "ready_for_review",
+      fieldsDetected: [],
+      fieldsFilled: [],
+      uncertainFields: [],
+      fillPlan: [],
+      screenshotUrl: null,
+      errorMessage: "",
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    });
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      !submit.submitted && !submit.confirmationDetected ? "passed" : "failed",
+      submit.message ?? "Submit result did not include a message."
+    );
+  }
+
+  const greenhousePlan = greenhouseAdapter.createFillPlan(
+    baseProfile,
+    basePackage,
+    greenhouseAdapter.analyzeForm(greenhouseFixturePage()),
+    { answers: baseAnswers, resume: resume(), mode: "dry_run" }
+  );
+  const leverPlan = leverAdapter.createFillPlan(
+    baseProfile,
+    basePackage,
+    leverAdapter.analyzeForm(leverFixturePage()),
+    { answers: baseAnswers, resume: resume(), mode: "dry_run" }
+  );
+  const demographicFilled = [...greenhousePlan.fieldsFilled, ...leverPlan.fieldsFilled]
+    .some((field) => field.sourceField === "demographic defaults");
+  const demographicPaused = [...greenhousePlan.uncertainFields, ...leverPlan.uncertainFields]
+    .some((field) => field.reason === "demographic");
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    !demographicFilled && demographicPaused ? "passed" : "failed",
+    demographicPaused
+      ? "Demographic fields paused without default answers."
+      : "Demographic pause was missing."
+  );
+}
+
 async function browserEval(
   evalCase: EvalCase,
   session: AppSession,
@@ -727,6 +921,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "application_package") {
       return await packageEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "ats_adapter") {
+      return await atsEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

@@ -9,6 +9,7 @@ import {
   applicationStatuses,
   atsTypes,
   aiOutputTypes,
+  browserFillModes,
   browserApplicationSessionStatuses,
   browserAtsTypes,
   evalRunStatuses,
@@ -16,6 +17,7 @@ import {
   evalStatuses,
   evalSuites,
   feedbackEventTypes,
+  fillPlanActions,
   generationModes,
   jobRemoteTypes,
   jobSources,
@@ -246,6 +248,17 @@ export const uncertainApplicationFieldSchema = z.object({
   guidance: z.string().trim().min(1)
 });
 
+export const browserFillPlanItemSchema = z.object({
+  fieldId: idSchema,
+  label: z.string().trim().min(1),
+  action: z.enum(fillPlanActions),
+  source: z.enum(applicationFieldSources),
+  sourceField: z.string().trim(),
+  valuePreview: z.string().trim(),
+  confidence: z.number().min(0).max(1),
+  reason: z.string().trim()
+});
+
 export const browserApplicationSessionSchema = z.object({
   id: idSchema,
   tenantId: idSchema,
@@ -254,10 +267,14 @@ export const browserApplicationSessionSchema = z.object({
   applicationRecordId: idSchema,
   applicationPackageId: idSchema,
   atsType: z.enum(browserAtsTypes),
+  adapterName: z.string().trim().default("unknown"),
+  adapterConfidence: z.number().min(0).max(1).default(0),
+  fillMode: z.enum(browserFillModes).default("dry_run"),
   status: z.enum(browserApplicationSessionStatuses),
   fieldsDetected: z.array(detectedApplicationFieldSchema),
   fieldsFilled: z.array(filledApplicationFieldSchema),
   uncertainFields: z.array(uncertainApplicationFieldSchema),
+  fillPlan: z.array(browserFillPlanItemSchema).default([]),
   screenshotUrl: z.string().trim().url().nullable(),
   errorMessage: z.string(),
   createdAt: isoDateSchema,

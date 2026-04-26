@@ -7,6 +7,7 @@ import type {
   BrowserApplicationSession,
   BrowserApplicationSessionStatus,
   BrowserAtsType,
+  BrowserFillMode,
   DetectedApplicationField,
   FilledApplicationField,
   NormalizedJob,
@@ -19,6 +20,14 @@ import { readJson, scopedKey, writeJson } from "../lib/storage";
 import { loadApplicationPackages } from "./applicationPackage";
 import { loadApplications, updateApplicationStatus } from "./applicationService";
 import { loadAuditLogs } from "./auditLog";
+import {
+  defaultATSAdapters,
+  greenhouseFixturePage,
+  leverFixturePage,
+  selectATSAdapter,
+  type ATSAdapter,
+  type ATSPageSnapshot
+} from "./atsAdapters";
 
 type AuditMetadata = Record<string, string | number | boolean | null>;
 
@@ -50,16 +59,22 @@ export interface BrowserApplicationResult {
 
 export interface BrowserAutomationDetectionResult {
   atsType: BrowserAtsType;
+  adapterName: string;
+  adapterConfidence: number;
+  fillMode: BrowserFillMode;
   fieldsDetected: DetectedApplicationField[];
   fieldsFilled: FilledApplicationField[];
   uncertainFields: UncertainApplicationField[];
+  fillPlan: BrowserApplicationSession["fillPlan"];
   screenshotUrl: string | null;
 }
 
 export interface BrowserAutomationAdapter {
   name: string;
   runDetection(context: BrowserApplicationContext): Promise<BrowserAutomationDetectionResult>;
-  submit(session: BrowserApplicationSession): Promise<{ submitted: boolean }>;
+  submit(
+    session: BrowserApplicationSession
+  ): Promise<{ submitted: boolean; confirmationDetected?: boolean; message?: string }>;
 }
 
 function createId(prefix: string): string {
@@ -559,48 +574,107 @@ function buildUncertainFields(
     .filter((fieldItem): fieldItem is UncertainApplicationField => Boolean(fieldItem));
 }
 
-export class MockBrowserAutomationAdapter implements BrowserAutomationAdapter {
-  name = "mock-browser-application-adapter";
+function pageSnapshotForContext(context: BrowserApplicationContext): ATSPageSnapshot {
+  const url = context.job.applicationUrl;
+  const atsType = detectAtsType(context.job);
+  if (atsType === "greenhouse") {
+    return greenhouseFixturePage(url);
+  }
+  if (atsType === "lever") {
+    return leverFixturePage(url);
+  }
+  if (atsType === "linkedin") {
+    return {
+      url,
+      html: `
+        <form class="application-form">
+          <label for="email">Email</label>
+          <input id="email" name="email" type="email" required />
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" required />
+          <div class="g-recaptcha">CAPTCHA</div>
+        </form>
+      `,
+      title: "LinkedIn application checkpoint",
+      safeFixture: false
+    };
+  }
+  return {
+    url,
+    html: `
+      <form class="application-form">
+        <label for="name">Full name</label>
+        <input id="name" name="name" required />
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required />
+        <label for="resume">Resume</label>
+        <input id="resume" name="resume" type="file" required />
+      </form>
+    `,
+    title: "Unknown application form",
+    safeFixture: false
+  };
+}
+
+function pageSnapshotForSession(session: BrowserApplicationSession): ATSPageSnapshot {
+  if (session.atsType === "greenhouse") {
+    return greenhouseFixturePage();
+  }
+  if (session.atsType === "lever") {
+    return leverFixturePage();
+  }
+  return {
+    url: "",
+    html: "<form></form>",
+    title: "Unknown application form",
+    safeFixture: false
+  };
+}
+
+export class ATSBrowserAutomationAdapter implements BrowserAutomationAdapter {
+  name = "ats-adapter-orchestrator";
+
+  constructor(
+    private readonly mode: BrowserFillMode = "dry_run",
+    private readonly adapters: ATSAdapter[] = defaultATSAdapters()
+  ) {}
 
   async runDetection(
     context: BrowserApplicationContext
   ): Promise<BrowserAutomationDetectionResult> {
-    const atsType = detectAtsType(context.job);
-    const baseFields = detectFields(context);
-    const fieldsDetected =
-      atsType === "linkedin"
-        ? [
-            ...baseFields,
-            field({
-              id: "login_challenge",
-              label: "Login challenge",
-              fieldType: "unknown",
-              required: true,
-              sensitive: true,
-              confidence: 0.2,
-              source: "user_required",
-              sourceField: "login"
-            })
-          ]
-        : baseFields;
-    const fieldsFilled = fillFields(fieldsDetected, context);
-    const uncertainFields = buildUncertainFields(
-      fieldsDetected,
-      fieldsFilled,
-      context
+    const page = pageSnapshotForContext(context);
+    const { adapter } = selectATSAdapter(page, this.adapters);
+    const detectedForm = adapter.analyzeForm(page);
+    const fillPlan = adapter.createFillPlan(
+      context.profile,
+      context.applicationPackage,
+      detectedForm,
+      {
+        answers: context.answers,
+        resume: context.resume,
+        mode: this.mode
+      }
     );
+    const fillResult = adapter.executeFillPlan(page, fillPlan, this.mode);
+    const review = adapter.prepareForReview(page);
 
     return {
-      atsType,
-      fieldsDetected,
-      fieldsFilled,
-      uncertainFields,
-      screenshotUrl: null
+      atsType: fillPlan.adapterType,
+      adapterName: fillPlan.adapterName,
+      adapterConfidence: fillPlan.confidence,
+      fillMode: fillResult.mode,
+      fieldsDetected: fillPlan.fieldsDetected,
+      fieldsFilled: fillResult.fieldsFilled,
+      uncertainFields: fillPlan.uncertainFields,
+      fillPlan: fillPlan.items,
+      screenshotUrl: review.screenshotUrl
     };
   }
 
-  async submit() {
-    return { submitted: true };
+  async submit(session: BrowserApplicationSession) {
+    const page = pageSnapshotForSession(session);
+    const { adapter } = selectATSAdapter(page, this.adapters);
+    return adapter.submitAfterApproval(page, session);
   }
 }
 
@@ -619,7 +693,13 @@ export class PlaywrightBrowserAutomationAdapterBoundary
 }
 
 export function createMockBrowserAutomationAdapter(): BrowserAutomationAdapter {
-  return new MockBrowserAutomationAdapter();
+  return new ATSBrowserAutomationAdapter("dry_run");
+}
+
+export function createATSBrowserAutomationAdapter(
+  mode: BrowserFillMode = "dry_run"
+): BrowserAutomationAdapter {
+  return new ATSBrowserAutomationAdapter(mode);
 }
 
 export function createPlaywrightAdapterBoundary(): BrowserAutomationAdapter {
@@ -656,7 +736,7 @@ export function getBrowserSessionForPackage(
 
 export async function startBrowserApplicationSession(
   context: BrowserApplicationContext,
-  adapter: BrowserAutomationAdapter = createMockBrowserAutomationAdapter()
+  adapter: BrowserAutomationAdapter = createATSBrowserAutomationAdapter()
 ): Promise<BrowserApplicationResult> {
   assertJobSeekerApproval(context.session, context.actorUserId);
 
@@ -673,10 +753,14 @@ export async function startBrowserApplicationSession(
     applicationRecordId: context.application.id,
     applicationPackageId: context.applicationPackage.id,
     atsType: "unknown",
+    adapterName: "unknown",
+    adapterConfidence: 0,
+    fillMode: "dry_run",
     status: "queued",
     fieldsDetected: [],
     fieldsFilled: [],
     uncertainFields: [],
+    fillPlan: [],
     screenshotUrl: null,
     errorMessage: "",
     createdAt: timestamp,
@@ -691,10 +775,14 @@ export async function startBrowserApplicationSession(
   const readySession = browserApplicationSessionSchema.parse({
     ...queued,
     atsType: detection.atsType,
+    adapterName: detection.adapterName,
+    adapterConfidence: detection.adapterConfidence,
+    fillMode: detection.fillMode,
     status,
     fieldsDetected: detection.fieldsDetected,
     fieldsFilled: detection.fieldsFilled,
     uncertainFields: detection.uncertainFields,
+    fillPlan: detection.fillPlan,
     screenshotUrl: detection.screenshotUrl,
     updatedAt: nowIso()
   });
@@ -705,11 +793,32 @@ export async function startBrowserApplicationSession(
       applicationUrlPresent: Boolean(context.job.applicationUrl)
     }),
     createEvent("ats_detected", readySession, { atsType: detection.atsType }),
+    createEvent("ats_adapter_selected", readySession, {
+      adapterName: detection.adapterName,
+      adapterType: detection.atsType,
+      adapterConfidence: Math.round(detection.adapterConfidence * 100),
+      fillMode: detection.fillMode
+    }),
     createEvent("form_fields_detected", readySession, {
       fieldCount: detection.fieldsDetected.length
     }),
     createEvent("form_field_filled", readySession, {
       fieldCount: detection.fieldsFilled.length
+    }),
+    createEvent("fill_plan_created", readySession, {
+      itemCount: detection.fillPlan.length,
+      fillMode: detection.fillMode,
+      fillCount: detection.fieldsFilled.length,
+      pauseCount: detection.uncertainFields.length
+    }),
+    createEvent("ats_adapter_run_completed", readySession, {
+      adapterName: detection.adapterName,
+      adapterType: detection.atsType,
+      adapterConfidence: Math.round(detection.adapterConfidence * 100),
+      fillMode: detection.fillMode,
+      fieldCount: detection.fieldsDetected.length,
+      fillCount: detection.fieldsFilled.length,
+      pauseCount: detection.uncertainFields.length
     })
   ];
 
@@ -813,7 +922,7 @@ export function approveBrowserSubmit(
 export async function submitApprovedBrowserApplication(
   session: AppSession,
   browserSessionId: string,
-  adapter: BrowserAutomationAdapter = createMockBrowserAutomationAdapter()
+  adapter: BrowserAutomationAdapter = createATSBrowserAutomationAdapter()
 ): Promise<BrowserApplicationResult> {
   const existing = loadBrowserApplicationSessions(session).find(
     (item) => item.id === browserSessionId
