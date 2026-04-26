@@ -166,6 +166,57 @@ enum BrowserFillMode {
   submit_after_approval
 }
 
+enum AutopilotRunFrequency {
+  manual
+  daily
+  every_6_hours
+}
+
+enum AutopilotPreferredWorkStyle {
+  remote
+  hybrid
+  onsite
+  any
+}
+
+enum AutopilotRunStatus {
+  running
+  completed
+  failed
+}
+
+enum AutopilotRunTrigger {
+  manual
+  scheduled
+  onboarding
+}
+
+enum AutopilotActionType {
+  review_high_match_job
+  review_application_package
+  approve_browser_fill
+  approve_submit
+  add_missing_work_authorization
+  add_salary_preference
+  add_linkedin_url
+  review_resume_warning
+  follow_up_due
+  interview_note_needed
+}
+
+enum AutopilotActionUrgency {
+  low
+  medium
+  high
+}
+
+enum AutopilotActionStatus {
+  pending
+  completed
+  dismissed
+  snoozed
+}
+
 enum FeedbackEventType {
   job_viewed
   job_saved
@@ -221,6 +272,18 @@ enum FeedbackEventType {
   outreach_draft_not_helpful
   follow_up_completed
   interview_note_used
+  autopilot_enabled
+  autopilot_disabled
+  autopilot_settings_updated
+  autopilot_run_started
+  autopilot_run_completed
+  autopilot_action_created
+  autopilot_action_completed
+  autopilot_action_dismissed
+  autopilot_package_prepared
+  autopilot_missing_info_requested
+  autopilot_blocked_by_risk_signal
+  autopilot_blocked_by_avoid_company
 }
 
 enum UsageMeteringEventType {
@@ -266,6 +329,10 @@ enum UsageMeteringEventType {
   outreach_draft_generated
   follow_up_reminder_created
   interview_note_added
+  autopilot_enabled
+  autopilot_run_completed
+  autopilot_action_created
+  autopilot_package_prepared
 }
 
 enum RecruiterContactSource {
@@ -432,6 +499,7 @@ enum EvalSuite {
   resume_intelligence
   resume_improvement
   recruiter_crm
+  autopilot_safety
 }
 
 enum EvalRunSuite {
@@ -446,6 +514,7 @@ enum EvalRunSuite {
   resume_intelligence
   resume_improvement
   recruiter_crm
+  autopilot_safety
 }
 
 enum EvalRunStatus {
@@ -1172,4 +1241,80 @@ model ExtensionSession {
   @@index([tenantId, userId])
   @@index([tenantId, status])
   @@index([tenantId, browserApplicationSessionId])
+}
+
+model AutopilotSettings {
+  id                                   String                     @id @default(cuid())
+  tenantId                             String
+  userId                               String
+  enabled                              Boolean                    @default(false)
+  runFrequency                         AutopilotRunFrequency      @default(manual)
+  autoScoreJobs                        Boolean                    @default(true)
+  autoPreparePackagesForHighScoreJobs  Boolean                    @default(false)
+  highScoreThreshold                   Float                      @default(8.0)
+  maxPackagesPerRun                    Int                        @default(3)
+  requireReviewBeforePackageGeneration Boolean                    @default(false)
+  // Hard safety invariant. Always true. The application service rejects
+  // any attempt to set this to false.
+  requireApprovalBeforeSubmit          Boolean                    @default(true)
+  excludedCompanies                    Json
+  preferredWorkStyle                   AutopilotPreferredWorkStyle @default(any)
+  targetRoles                          Json
+  createdAt                            DateTime                   @default(now())
+  updatedAt                            DateTime                   @updatedAt
+
+  @@unique([tenantId, userId])
+  @@index([tenantId, userId])
+}
+
+model AutopilotRun {
+  id              String              @id @default(cuid())
+  tenantId        String
+  userId          String
+  triggeredBy     AutopilotRunTrigger
+  status          AutopilotRunStatus
+  startedAt       DateTime
+  finishedAt      DateTime?
+  careerOpsRunId  String?
+  jobsScored      Int                 @default(0)
+  highScoreJobs   Int                 @default(0)
+  packagesPrepared Int                @default(0)
+  actionsCreated  Int                 @default(0)
+  blockedReasons  Json
+  errorMessage    String              @default("")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status, startedAt])
+  @@index([tenantId, careerOpsRunId])
+}
+
+model AutopilotAction {
+  id                   String                  @id @default(cuid())
+  tenantId             String
+  userId               String
+  type                 AutopilotActionType
+  title                String
+  reason               String
+  urgency              AutopilotActionUrgency
+  jobId                String?
+  applicationRecordId  String?
+  applicationPackageId String?
+  primaryCtaLabel      String
+  primaryCtaRoute      String
+  secondaryCtaLabel    String                  @default("")
+  secondaryCtaRoute    String                  @default("")
+  status               AutopilotActionStatus   @default(pending)
+  createdAt            DateTime                @default(now())
+  updatedAt            DateTime                @updatedAt
+  completedAt          DateTime?
+  dismissedAt          DateTime?
+  snoozedUntil         DateTime?
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status, urgency])
+  @@index([tenantId, type])
+  @@index([tenantId, applicationRecordId])
+  @@index([tenantId, jobId])
 }

@@ -13,6 +13,7 @@ import {
   RotateCcw,
   UserRound
 } from "lucide-react";
+import type { ReactNode } from "react";
 import type {
   ApplicationRecord,
   AuditLog,
@@ -55,6 +56,7 @@ interface DashboardHomeProps<RouteId extends string> {
   dueFollowUpReminders: FollowUpReminder[];
   onCompleteFollowUpReminder: (reminderId: string) => void;
   onOpenTracker: () => void;
+  autopilotSlot?: ReactNode;
 }
 
 interface RecommendedStep<RouteId extends string> {
@@ -269,7 +271,8 @@ export function DashboardHome<RouteId extends string>({
   onRunCareerOpsNow,
   dueFollowUpReminders,
   onCompleteFollowUpReminder,
-  onOpenTracker
+  onOpenTracker,
+  autopilotSlot
 }: DashboardHomeProps<RouteId>) {
   const careerOpsSummary = summarizeCareerOps(careerOpsRuns, careerOpsSettings);
   const queuedJobs = jobs.filter((job) => job.scoringStatus === "queued").length;
@@ -324,6 +327,8 @@ export function DashboardHome<RouteId extends string>({
           </button>
         </div>
       </header>
+
+      {autopilotSlot}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <StatCard

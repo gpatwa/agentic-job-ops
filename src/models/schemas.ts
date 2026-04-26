@@ -9,6 +9,13 @@ import {
   applicationStatuses,
   atsTypes,
   aiOutputTypes,
+  autopilotActionStatuses,
+  autopilotActionTypes,
+  autopilotActionUrgencies,
+  autopilotPreferredWorkStyles,
+  autopilotRunFrequencies,
+  autopilotRunStatuses,
+  autopilotRunTriggers,
   browserFillModes,
   browserApplicationSessionStatuses,
   browserAtsTypes,
@@ -799,4 +806,67 @@ export const extensionSessionSchema = z.object({
   errorMessage: z.string().default(""),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
+});
+
+export const autopilotSettingsSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  enabled: z.boolean().default(false),
+  runFrequency: z.enum(autopilotRunFrequencies).default("manual"),
+  autoScoreJobs: z.boolean().default(true),
+  autoPreparePackagesForHighScoreJobs: z.boolean().default(false),
+  highScoreThreshold: z.number().min(0).max(10).default(8.0),
+  maxPackagesPerRun: z.number().int().min(1).max(20).default(3),
+  requireReviewBeforePackageGeneration: z.boolean().default(false),
+  // Hard safety invariant. Always literal `true`. The setter rejects any
+  // attempt to change it; the schema ensures persisted state cannot drift.
+  requireApprovalBeforeSubmit: z.literal(true).default(true),
+  excludedCompanies: z.array(z.string().trim().min(1)).default([]),
+  preferredWorkStyle: z.enum(autopilotPreferredWorkStyles).default("any"),
+  targetRoles: z.array(z.string().trim().min(1)).default([]),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const autopilotRunSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  triggeredBy: z.enum(autopilotRunTriggers),
+  status: z.enum(autopilotRunStatuses),
+  startedAt: isoDateSchema,
+  finishedAt: isoDateSchema.nullable(),
+  careerOpsRunId: idSchema.nullable(),
+  jobsScored: z.number().int().min(0).default(0),
+  highScoreJobs: z.number().int().min(0).default(0),
+  packagesPrepared: z.number().int().min(0).default(0),
+  actionsCreated: z.number().int().min(0).default(0),
+  blockedReasons: z.array(z.string()).default([]),
+  errorMessage: z.string().default(""),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const autopilotActionSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  type: z.enum(autopilotActionTypes),
+  title: z.string().trim().min(1),
+  reason: z.string().trim().min(1),
+  urgency: z.enum(autopilotActionUrgencies),
+  jobId: idSchema.nullable(),
+  applicationRecordId: idSchema.nullable(),
+  applicationPackageId: idSchema.nullable(),
+  primaryCtaLabel: z.string().trim().min(1),
+  primaryCtaRoute: z.string().trim().min(1),
+  secondaryCtaLabel: z.string().trim().default(""),
+  secondaryCtaRoute: z.string().trim().default(""),
+  status: z.enum(autopilotActionStatuses).default("pending"),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema,
+  completedAt: isoDateSchema.nullable(),
+  dismissedAt: isoDateSchema.nullable(),
+  snoozedUntil: isoDateSchema.nullable()
 });

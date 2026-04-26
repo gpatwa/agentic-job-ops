@@ -5,9 +5,11 @@ import {
   ClipboardList,
   DatabaseZap,
   FileUp,
+  Inbox,
   LayoutDashboard,
   Plug,
   Rocket,
+  Sparkles,
   UserCog,
   UserRound
 } from "lucide-react";
@@ -28,6 +30,9 @@ import type {
   CareerOpsSettings,
   CompanyIntelligence,
   DashboardJobAction,
+  AutopilotAction,
+  AutopilotRun,
+  AutopilotSettings,
   EvalCase,
   EvalResult,
   EvalRun,
@@ -54,9 +59,11 @@ import type {
   UsageMeteringEvent,
   UserProfile
 } from "./models/domain";
+import { ActionCenterPage } from "./pages/ActionCenterPage";
 import { AdminSystemPage } from "./pages/AdminSystemPage";
 import { ApplicationPackagePage } from "./pages/ApplicationPackagePage";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
+import { AutopilotSettingsPage } from "./pages/AutopilotSettingsPage";
 import { BrowserSessionReviewPage } from "./pages/BrowserSessionReviewPage";
 import { CareerOpsPage } from "./pages/CareerOpsPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
@@ -67,6 +74,7 @@ import { JobDashboardPage } from "./pages/JobDashboardPage";
 import { OnboardingPage } from "./pages/OnboardingPage";
 import { ProfileSetupPage } from "./pages/ProfileSetupPage";
 import { ResumeUploadPage } from "./pages/ResumeUploadPage";
+import { AutopilotStatusCard } from "./components/AutopilotStatusCard";
 import { calculateProfileCompletion } from "./lib/profileCompletion";
 import { clearScopedWorkspace } from "./lib/storage";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
@@ -191,6 +199,19 @@ import {
   type RecruiterCrmAuditEvent
 } from "./services/recruiterCrmService";
 import {
+  completeAutopilotAction,
+  dismissAutopilotAction,
+  loadAutopilotActions,
+  loadAutopilotRuns,
+  loadAutopilotSettings,
+  prioritizedAutopilotActions,
+  runAutopilot,
+  saveAutopilotSettings,
+  snoozeAutopilotAction,
+  summarizeAutopilot,
+  type AutopilotAuditEvent
+} from "./services/autopilotService";
+import {
   loadOnboardingState,
   recommendApplyReadyJobs,
   recordOnboardingApplicationPrepStarted,
@@ -224,6 +245,8 @@ import {
 
 type RouteId =
   | "dashboard"
+  | "action-center"
+  | "autopilot-settings"
   | "onboarding"
   | "profile-setup"
   | "resume-upload"
@@ -239,6 +262,8 @@ type RouteId =
 
 const navigationItems: NavigationItem<RouteId>[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+  { id: "action-center", label: "Action Center", icon: Inbox },
+  { id: "autopilot-settings", label: "Autopilot", icon: Sparkles },
   { id: "onboarding", label: "Onboarding", icon: Rocket },
   { id: "profile-setup", label: "Profile setup", icon: UserRound },
   { id: "resume-upload", label: "Resume upload", icon: FileUp },
@@ -350,6 +375,16 @@ export default function App() {
     () => loadInterviewNotes(currentSession)
   );
   const [crmDraftErrors, setCrmDraftErrors] = useState<Record<string, string>>({});
+  const [autopilotSettings, setAutopilotSettings] = useState<AutopilotSettings>(
+    () => loadAutopilotSettings(currentSession)
+  );
+  const [autopilotRuns, setAutopilotRuns] = useState<AutopilotRun[]>(() =>
+    loadAutopilotRuns(currentSession)
+  );
+  const [autopilotActions, setAutopilotActions] = useState<AutopilotAction[]>(
+    () => loadAutopilotActions(currentSession)
+  );
+  const [isAutopilotRunning, setIsAutopilotRunning] = useState(false);
   const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
     loadOnboardingState(currentSession)
   );
@@ -484,6 +519,16 @@ export default function App() {
   const dueReminders = useMemo(
     () => dueRemindersToday(followUpReminders, { daysAhead: 0 }),
     [followUpReminders]
+  );
+
+  const autopilotSummary = useMemo(
+    () => summarizeAutopilot(autopilotSettings, autopilotRuns, autopilotActions),
+    [autopilotSettings, autopilotRuns, autopilotActions]
+  );
+
+  const orderedAutopilotActions = useMemo(
+    () => prioritizedAutopilotActions(autopilotActions),
+    [autopilotActions]
   );
 
   function navigate(nextRoute: RouteId) {
@@ -2179,6 +2224,161 @@ export default function App() {
     });
   }
 
+  function persistAutopilotAuditEvents(events: AutopilotAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (
+        event.action === "autopilot_enabled" ||
+        event.action === "autopilot_disabled" ||
+        event.action === "autopilot_settings_updated" ||
+        event.action === "autopilot_run_started" ||
+        event.action === "autopilot_run_completed" ||
+        event.action === "autopilot_action_created" ||
+        event.action === "autopilot_action_completed" ||
+        event.action === "autopilot_action_dismissed" ||
+        event.action === "autopilot_package_prepared" ||
+        event.action === "autopilot_missing_info_requested" ||
+        event.action === "autopilot_blocked_by_risk_signal" ||
+        event.action === "autopilot_blocked_by_avoid_company"
+      ) {
+        recordFeedback({
+          eventType: event.action,
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+      if (event.action === "autopilot_enabled") {
+        recordUsage({
+          eventType: "autopilot_enabled",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "autopilot_run_completed") {
+        recordUsage({
+          eventType: "autopilot_run_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "autopilot_action_created") {
+        recordUsage({
+          eventType: "autopilot_action_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "autopilot_package_prepared") {
+        recordUsage({
+          eventType: "autopilot_package_prepared",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  function handleUpdateAutopilotSettings(
+    update: Parameters<typeof saveAutopilotSettings>[1]
+  ) {
+    const result = saveAutopilotSettings(currentSession, update);
+    setAutopilotSettings(result.settings);
+    persistAutopilotAuditEvents(result.auditEvents);
+  }
+
+  function handleToggleAutopilot() {
+    handleUpdateAutopilotSettings({ enabled: !autopilotSettings.enabled });
+  }
+
+  async function handleRunAutopilotNow(
+    triggeredBy: "manual" | "scheduled" | "onboarding" = "manual"
+  ) {
+    if (isAutopilotRunning) return;
+    setIsAutopilotRunning(true);
+    try {
+      const result = await runAutopilot(currentSession, { triggeredBy });
+      setAutopilotRuns(result.runs);
+      setAutopilotActions(result.actions);
+      persistAutopilotAuditEvents(result.auditEvents);
+      // The underlying Career Ops run already routed audit events through its
+      // own persistence helper, so reuse it here.
+      persistCareerOpsAuditEvents(result.careerOpsAuditEvents);
+      // Refresh derived collections that may have changed during the run.
+      setNormalizedJobs(loadNormalizedJobs(currentSession));
+      setJobMatches(loadJobMatches(currentSession));
+      setApplications(loadApplications(currentSession));
+      setApplicationPackages(loadApplicationPackages(currentSession));
+      setApplicationAnswers(loadApplicationAnswers(currentSession));
+      setCareerOpsRuns(loadCareerOpsRuns(currentSession));
+      setCareerOpsSettings(loadCareerOpsSettings(currentSession));
+    } finally {
+      setIsAutopilotRunning(false);
+    }
+  }
+
+  function handleAutopilotPrimaryCta(action: AutopilotAction) {
+    const route = action.primaryCtaRoute;
+    if (route.startsWith("package-review:")) {
+      const packageId = route.replace("package-review:", "");
+      navigateToPackage(packageId);
+      return;
+    }
+    if (route.startsWith("browser-session:")) {
+      const sessionId = route.replace("browser-session:", "");
+      navigateToBrowserSession(sessionId);
+      return;
+    }
+    navigate(route as RouteId);
+  }
+
+  function handleAutopilotSecondaryCta(action: AutopilotAction) {
+    if (!action.secondaryCtaRoute) return;
+    const route = action.secondaryCtaRoute;
+    if (route.startsWith("package-review:")) {
+      const packageId = route.replace("package-review:", "");
+      navigateToPackage(packageId);
+      return;
+    }
+    if (route.startsWith("browser-session:")) {
+      const sessionId = route.replace("browser-session:", "");
+      navigateToBrowserSession(sessionId);
+      return;
+    }
+    navigate(route as RouteId);
+  }
+
+  function handleCompleteAutopilotAction(actionId: string) {
+    const result = completeAutopilotAction(currentSession, actionId);
+    setAutopilotActions(result.actions);
+    persistAutopilotAuditEvents(result.auditEvents);
+  }
+
+  function handleDismissAutopilotAction(actionId: string) {
+    const result = dismissAutopilotAction(currentSession, actionId);
+    setAutopilotActions(result.actions);
+    persistAutopilotAuditEvents(result.auditEvents);
+  }
+
+  function handleSnoozeAutopilotAction(actionId: string) {
+    const snoozedUntil = new Date(
+      Date.now() + 24 * 60 * 60 * 1000
+    ).toISOString();
+    const result = snoozeAutopilotAction(
+      currentSession,
+      actionId,
+      snoozedUntil
+    );
+    setAutopilotActions(result.actions);
+    persistAutopilotAuditEvents(result.auditEvents);
+  }
+
   function persistOnboardingAuditEvents(events: OnboardingAuditEvent[]) {
     events.forEach((event) => {
       recordAudit({
@@ -2241,6 +2441,16 @@ export default function App() {
     const result = await recordTargetRolesSelected(currentSession, roles);
     setOnboardingState(result.state);
     persistOnboardingAuditEvents(result.auditEvents);
+    // Mirror the user's confirmed roles into Autopilot so a follow-up run
+    // uses the same targets without forcing the user to re-enter them.
+    if (roles.length > 0) {
+      handleUpdateAutopilotSettings({ targetRoles: roles });
+    }
+    // If Autopilot is enabled, trigger it now so the user sees high-match
+    // jobs and (optionally) prepared packages without an extra manual step.
+    if (autopilotSettings.enabled) {
+      void handleRunAutopilotNow("onboarding");
+    }
   }
 
   async function handleOnboardingGenerate(roles: string[]) {
@@ -2952,6 +3162,28 @@ export default function App() {
             onExportRealSiteSnapshot={handleExportRealSiteSnapshot}
           />
         );
+      case "action-center":
+        return (
+          <ActionCenterPage
+            actions={orderedAutopilotActions}
+            onPrimaryCta={handleAutopilotPrimaryCta}
+            onSecondaryCta={handleAutopilotSecondaryCta}
+            onCompleteAction={handleCompleteAutopilotAction}
+            onDismissAction={handleDismissAutopilotAction}
+            onSnoozeAction={handleSnoozeAutopilotAction}
+            isAutopilotEnabled={autopilotSettings.enabled}
+          />
+        );
+      case "autopilot-settings":
+        return (
+          <AutopilotSettingsPage
+            settings={autopilotSettings}
+            isAutopilotRunning={isAutopilotRunning}
+            onUpdateSettings={handleUpdateAutopilotSettings}
+            onRunAutopilotNow={() => handleRunAutopilotNow("manual")}
+            onOpenActionCenter={() => navigate("action-center")}
+          />
+        );
       case "admin":
         return (
           <AdminSystemPage
@@ -3124,6 +3356,16 @@ export default function App() {
               handleUpdateFollowUpReminderStatus(reminderId, "completed")
             }
             onOpenTracker={() => navigate("tracker")}
+            autopilotSlot={
+              <AutopilotStatusCard
+                summary={autopilotSummary}
+                isAutopilotRunning={isAutopilotRunning}
+                onRunAutopilotNow={() => handleRunAutopilotNow("manual")}
+                onOpenActionCenter={() => navigate("action-center")}
+                onOpenSettings={() => navigate("autopilot-settings")}
+                onToggleEnabled={handleToggleAutopilot}
+              />
+            }
           />
         );
     }

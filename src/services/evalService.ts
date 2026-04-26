@@ -15,6 +15,7 @@ import type {
   UserProfile
 } from "../models/domain";
 import {
+  autopilotActionSchema,
   evalCaseSchema,
   evalResultSchema,
   evalRunSchema
@@ -73,6 +74,14 @@ import {
   loadOutreachDrafts,
   updateFollowUpReminder
 } from "./recruiterCrmService";
+import {
+  autopilotCanSubmit,
+  loadAutopilotActions,
+  loadAutopilotSettings,
+  prioritizedAutopilotActions,
+  runAutopilot,
+  saveAutopilotSettings
+} from "./autopilotService";
 import {
   isDemoJob,
   loadOnboardingState,
@@ -895,6 +904,78 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "PlaceholderLlmOutreachAdapter must throw so this build never silently calls a model.",
       inputSummary: "Generate a draft with the placeholder LLM adapter.",
       expectedBehavior: "Promise rejects with 'not configured' message."
+    },
+    {
+      id: "eval_autopilot_cannot_submit",
+      suite: "autopilot_safety",
+      name: "Autopilot cannot submit applications",
+      description: "autopilotCanSubmit() must always return false. Autopilot has no submit code path.",
+      inputSummary: "Call autopilotCanSubmit() and inspect the AutopilotAction types.",
+      expectedBehavior: "autopilotCanSubmit() === false and no autopilot path produces a submitted application."
+    },
+    {
+      id: "eval_autopilot_submit_approval_cannot_be_disabled",
+      suite: "autopilot_safety",
+      name: "Submit approval cannot be disabled",
+      description: "saveAutopilotSettings must reject any attempt to set requireApprovalBeforeSubmit to false.",
+      inputSummary: "Call saveAutopilotSettings({ requireApprovalBeforeSubmit: false } as any).",
+      expectedBehavior: "Throws and the persisted setting remains true."
+    },
+    {
+      id: "eval_autopilot_avoided_company_blocks_package_prep",
+      suite: "autopilot_safety",
+      name: "Avoided company blocks package preparation",
+      description: "Companies on the user's avoid list must never produce a prepared package.",
+      inputSummary: "Run autopilot with a high-score job at an avoided company.",
+      expectedBehavior: "No package is prepared; blockedReasons mention the avoided company."
+    },
+    {
+      id: "eval_autopilot_high_risk_blocks_package_prep",
+      suite: "autopilot_safety",
+      name: "High-risk job blocks package preparation",
+      description: "Jobs with a high-severity risk signal must not produce automatic packages unless the user overrides.",
+      inputSummary: "Run autopilot with a high-score job that also has a suspicious URL.",
+      expectedBehavior: "No package is prepared and blockedReasons mention high risk."
+    },
+    {
+      id: "eval_autopilot_missing_work_auth_creates_action_only_when_needed",
+      suite: "autopilot_safety",
+      name: "Missing work authorization creates a contextual prompt only when needed",
+      description: "An add_missing_work_authorization action should be created when a high-match job exists and the profile is missing the field.",
+      inputSummary: "Profile without workAuthorization + high-match job available.",
+      expectedBehavior: "A pending add_missing_work_authorization action exists."
+    },
+    {
+      id: "eval_autopilot_high_score_creates_review_action",
+      suite: "autopilot_safety",
+      name: "High-score job creates a review action",
+      description: "Each high-score job that is not yet tracked must produce a review_high_match_job action.",
+      inputSummary: "High-score job above the threshold and no application yet.",
+      expectedBehavior: "A pending review_high_match_job action is created for that job."
+    },
+    {
+      id: "eval_autopilot_prepared_package_creates_review_action",
+      suite: "autopilot_safety",
+      name: "Prepared package creates a review action",
+      description: "Each ready-for-review package must produce a review_application_package action.",
+      inputSummary: "Run autopilot with package preparation enabled.",
+      expectedBehavior: "A pending review_application_package action is created for the package."
+    },
+    {
+      id: "eval_autopilot_action_center_prioritizes_submit",
+      suite: "autopilot_safety",
+      name: "Action Center prioritises submit approvals above low-urgency prompts",
+      description: "prioritizedAutopilotActions must order approve_submit ahead of low-urgency missing-info actions.",
+      inputSummary: "Mix of approve_submit and add_linkedin_url actions.",
+      expectedBehavior: "approve_submit appears before add_linkedin_url in the prioritised list."
+    },
+    {
+      id: "eval_autopilot_run_is_idempotent",
+      suite: "autopilot_safety",
+      name: "Autopilot run is idempotent and does not duplicate packages or actions",
+      description: "Running autopilot twice in a row must not produce duplicate packages or duplicate Action Center items.",
+      inputSummary: "Call runAutopilot twice with identical input state.",
+      expectedBehavior: "Package count is unchanged and review_application_package action count is unchanged."
     }
   ];
 
@@ -3017,6 +3098,343 @@ async function recruiterCrmEval(
   );
 }
 
+async function autopilotSafetyEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "profile",
+      "resume",
+      "normalized_jobs",
+      "applications",
+      "application_packages",
+      "application_answers",
+      "job_matches",
+      "job_source_configs",
+      "scan_runs",
+      "career_ops_runs",
+      "career_ops_settings",
+      "company_intelligence",
+      "recruiter_leads",
+      "job_risk_signals",
+      "autopilot_settings",
+      "autopilot_runs",
+      "autopilot_actions",
+      "audit_logs",
+      "feedback_events",
+      "usage_metering_events"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  function seedHighScoreJob(
+    overrides: Partial<NormalizedJob> = {}
+  ): NormalizedJob {
+    const seedJob = job({
+      ...overrides,
+      id: overrides.id ?? "job_autopilot",
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId
+    });
+    saveNormalizedJobs(sandbox, [
+      ...loadNormalizedJobs(sandbox).filter((item) => item.id !== seedJob.id),
+      seedJob
+    ]);
+    return seedJob;
+  }
+
+  function seedProfile(overrides: Partial<UserProfile> = {}): UserProfile {
+    const seeded = userProfileSchema.parse({
+      ...profile(),
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId,
+      ...overrides
+    });
+    writeJson(scopedKey(sandbox.tenant.id, sandbox.userId, "profile"), seeded);
+    return seeded;
+  }
+
+  if (evalCase.id === "eval_autopilot_cannot_submit") {
+    const passed = autopilotCanSubmit() === false;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `autopilotCanSubmit=${autopilotCanSubmit()}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_submit_approval_cannot_be_disabled") {
+    let threw = false;
+    try {
+      // The literal-true type makes this normally unreachable; cast to test
+      // the runtime safety check.
+      saveAutopilotSettings(sandbox, {
+        requireApprovalBeforeSubmit: false as unknown as true
+      });
+    } catch {
+      threw = true;
+    }
+    const persisted = loadAutopilotSettings(sandbox);
+    const passed = threw && persisted.requireApprovalBeforeSubmit === true;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `threw=${threw} requireApprovalBeforeSubmit=${persisted.requireApprovalBeforeSubmit}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_avoided_company_blocks_package_prep") {
+    seedProfile({ companiesToAvoid: ["ExampleCo"] });
+    seedHighScoreJob({ id: "job_autopilot_avoid", company: "ExampleCo" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const result = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const packages = loadApplicationPackages(sandbox);
+    const blockedReason = result.blockedReasons.some((reason) =>
+      reason.toLowerCase().includes("avoid")
+    );
+    const passed = packages.length === 0 && blockedReason;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `packages=${packages.length} blockedReasons=${result.blockedReasons.join("|")}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_high_risk_blocks_package_prep") {
+    seedProfile();
+    seedHighScoreJob({
+      id: "job_autopilot_risk",
+      applicationUrl: "https://bit.ly/highrisk_autopilot"
+    });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const result = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const packages = loadApplicationPackages(sandbox);
+    const blockedReason = result.blockedReasons.some((reason) =>
+      reason.toLowerCase().includes("high-risk")
+    );
+    const passed = packages.length === 0 && blockedReason;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `packages=${packages.length} blockedReasons=${result.blockedReasons.join("|")}`
+    );
+  }
+
+  if (
+    evalCase.id ===
+    "eval_autopilot_missing_work_auth_creates_action_only_when_needed"
+  ) {
+    seedProfile({ workAuthorization: "" });
+    seedHighScoreJob({ id: "job_autopilot_missing_auth" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: false,
+      highScoreThreshold: 0
+    });
+    const result = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const action = result.actions.find(
+      (item) =>
+        item.type === "add_missing_work_authorization" &&
+        item.status === "pending"
+    );
+    const passed = action !== undefined;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `actionExists=${passed} totalActions=${result.actions.length}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_high_score_creates_review_action") {
+    seedProfile();
+    const job = seedHighScoreJob({ id: "job_autopilot_review" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: false,
+      highScoreThreshold: 0
+    });
+    const result = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const action = result.actions.find(
+      (item) =>
+        item.type === "review_high_match_job" &&
+        item.jobId === job.id &&
+        item.status === "pending"
+    );
+    const passed = action !== undefined;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `actionExists=${passed}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_prepared_package_creates_review_action") {
+    seedProfile();
+    seedHighScoreJob({ id: "job_autopilot_pkg" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const result = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const action = result.actions.find(
+      (item) =>
+        item.type === "review_application_package" && item.status === "pending"
+    );
+    const passed = action !== undefined && result.run.packagesPrepared > 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `actionExists=${action !== undefined} packagesPrepared=${result.run.packagesPrepared}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_action_center_prioritizes_submit") {
+    seedProfile();
+    seedHighScoreJob({ id: "job_autopilot_priority" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: false,
+      highScoreThreshold: 0
+    });
+    await runAutopilot(sandbox, { triggeredBy: "manual" });
+    // Also push a fake approve_submit action so we can test ordering.
+    const baseActions = loadAutopilotActions(sandbox);
+    const submitAction = autopilotActionSchema.parse({
+      id: "action_test_submit",
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId,
+      type: "approve_submit",
+      title: "Submit approval",
+      reason: "Test submit",
+      urgency: "high",
+      jobId: null,
+      applicationRecordId: null,
+      applicationPackageId: null,
+      primaryCtaLabel: "Approve",
+      primaryCtaRoute: "tracker",
+      secondaryCtaLabel: "",
+      secondaryCtaRoute: "",
+      status: "pending",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      completedAt: null,
+      dismissedAt: null,
+      snoozedUntil: null
+    });
+    const linkedinAction = autopilotActionSchema.parse({
+      id: "action_test_linkedin",
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId,
+      type: "add_linkedin_url",
+      title: "Add LinkedIn",
+      reason: "Optional",
+      urgency: "low",
+      jobId: null,
+      applicationRecordId: null,
+      applicationPackageId: null,
+      primaryCtaLabel: "Update",
+      primaryCtaRoute: "career-profile",
+      secondaryCtaLabel: "",
+      secondaryCtaRoute: "",
+      status: "pending",
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+      completedAt: null,
+      dismissedAt: null,
+      snoozedUntil: null
+    });
+    const merged = [submitAction, linkedinAction, ...baseActions];
+    writeJson(
+      scopedKey(sandbox.tenant.id, sandbox.userId, "autopilot_actions"),
+      merged
+    );
+    const ordered = prioritizedAutopilotActions(loadAutopilotActions(sandbox));
+    const submitIndex = ordered.findIndex(
+      (action) => action.type === "approve_submit"
+    );
+    const linkedinIndex = ordered.findIndex(
+      (action) => action.type === "add_linkedin_url"
+    );
+    const passed =
+      submitIndex >= 0 && linkedinIndex >= 0 && submitIndex < linkedinIndex;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `submitIndex=${submitIndex} linkedinIndex=${linkedinIndex}`
+    );
+  }
+
+  if (evalCase.id === "eval_autopilot_run_is_idempotent") {
+    seedProfile();
+    seedHighScoreJob({ id: "job_autopilot_idem" });
+    saveAutopilotSettings(sandbox, {
+      enabled: true,
+      autoPreparePackagesForHighScoreJobs: true,
+      highScoreThreshold: 0
+    });
+    const first = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const firstPackages = loadApplicationPackages(sandbox).length;
+    const firstReviewActions = first.actions.filter(
+      (action) => action.type === "review_application_package"
+    ).length;
+    const second = await runAutopilot(sandbox, { triggeredBy: "manual" });
+    const secondPackages = loadApplicationPackages(sandbox).length;
+    const secondReviewActions = second.actions.filter(
+      (action) => action.type === "review_application_package"
+    ).length;
+    const passed =
+      firstPackages === secondPackages &&
+      firstReviewActions === secondReviewActions;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `packages=${firstPackages}->${secondPackages} reviewActions=${firstReviewActions}->${secondReviewActions}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown autopilot_safety eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -3057,6 +3475,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "recruiter_crm") {
       return await recruiterCrmEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "autopilot_safety") {
+      return await autopilotSafetyEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

@@ -236,7 +236,19 @@ export const feedbackEventTypes = [
   "outreach_draft_helpful",
   "outreach_draft_not_helpful",
   "follow_up_completed",
-  "interview_note_used"
+  "interview_note_used",
+  "autopilot_enabled",
+  "autopilot_disabled",
+  "autopilot_settings_updated",
+  "autopilot_run_started",
+  "autopilot_run_completed",
+  "autopilot_action_created",
+  "autopilot_action_completed",
+  "autopilot_action_dismissed",
+  "autopilot_package_prepared",
+  "autopilot_missing_info_requested",
+  "autopilot_blocked_by_risk_signal",
+  "autopilot_blocked_by_avoid_company"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -283,7 +295,11 @@ export const usageMeteringEventTypes = [
   "recruiter_contact_added",
   "outreach_draft_generated",
   "follow_up_reminder_created",
-  "interview_note_added"
+  "interview_note_added",
+  "autopilot_enabled",
+  "autopilot_run_completed",
+  "autopilot_action_created",
+  "autopilot_package_prepared"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -298,7 +314,8 @@ export const evalSuites = [
   "onboarding",
   "resume_intelligence",
   "resume_improvement",
-  "recruiter_crm"
+  "recruiter_crm",
+  "autopilot_safety"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -851,6 +868,128 @@ export interface InterviewNote {
   followUps: string[];
   createdAt: string;
   updatedAt: string;
+}
+
+export const autopilotRunFrequencies = [
+  "manual",
+  "daily",
+  "every_6_hours"
+] as const;
+export type AutopilotRunFrequency = (typeof autopilotRunFrequencies)[number];
+
+export const autopilotPreferredWorkStyles = [
+  "remote",
+  "hybrid",
+  "onsite",
+  "any"
+] as const;
+export type AutopilotPreferredWorkStyle =
+  (typeof autopilotPreferredWorkStyles)[number];
+
+export const autopilotRunStatuses = [
+  "running",
+  "completed",
+  "failed"
+] as const;
+export type AutopilotRunStatus = (typeof autopilotRunStatuses)[number];
+
+export const autopilotRunTriggers = [
+  "manual",
+  "scheduled",
+  "onboarding"
+] as const;
+export type AutopilotRunTrigger = (typeof autopilotRunTriggers)[number];
+
+export const autopilotActionTypes = [
+  "review_high_match_job",
+  "review_application_package",
+  "approve_browser_fill",
+  "approve_submit",
+  "add_missing_work_authorization",
+  "add_salary_preference",
+  "add_linkedin_url",
+  "review_resume_warning",
+  "follow_up_due",
+  "interview_note_needed"
+] as const;
+export type AutopilotActionType = (typeof autopilotActionTypes)[number];
+
+export const autopilotActionUrgencies = ["low", "medium", "high"] as const;
+export type AutopilotActionUrgency =
+  (typeof autopilotActionUrgencies)[number];
+
+export const autopilotActionStatuses = [
+  "pending",
+  "completed",
+  "dismissed",
+  "snoozed"
+] as const;
+export type AutopilotActionStatus = (typeof autopilotActionStatuses)[number];
+
+export interface AutopilotSettings {
+  id: string;
+  tenantId: string;
+  userId: string;
+  enabled: boolean;
+  runFrequency: AutopilotRunFrequency;
+  autoScoreJobs: boolean;
+  autoPreparePackagesForHighScoreJobs: boolean;
+  highScoreThreshold: number;
+  maxPackagesPerRun: number;
+  requireReviewBeforePackageGeneration: boolean;
+  /**
+   * Hard safety invariant. Final submit always requires explicit approval.
+   * The Zod schema enforces this as a literal `true`; the setter rejects
+   * any attempt to disable it.
+   */
+  requireApprovalBeforeSubmit: true;
+  excludedCompanies: string[];
+  preferredWorkStyle: AutopilotPreferredWorkStyle;
+  targetRoles: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutopilotRun {
+  id: string;
+  tenantId: string;
+  userId: string;
+  triggeredBy: AutopilotRunTrigger;
+  status: AutopilotRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  careerOpsRunId: string | null;
+  jobsScored: number;
+  highScoreJobs: number;
+  packagesPrepared: number;
+  actionsCreated: number;
+  blockedReasons: string[];
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AutopilotAction {
+  id: string;
+  tenantId: string;
+  userId: string;
+  type: AutopilotActionType;
+  title: string;
+  reason: string;
+  urgency: AutopilotActionUrgency;
+  jobId: string | null;
+  applicationRecordId: string | null;
+  applicationPackageId: string | null;
+  primaryCtaLabel: string;
+  primaryCtaRoute: string;
+  secondaryCtaLabel: string;
+  secondaryCtaRoute: string;
+  status: AutopilotActionStatus;
+  createdAt: string;
+  updatedAt: string;
+  completedAt: string | null;
+  dismissedAt: string | null;
+  snoozedUntil: string | null;
 }
 
 export const resumeImprovementStatuses = [
