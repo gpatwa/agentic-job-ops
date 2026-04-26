@@ -30,6 +30,7 @@ import type {
   ExtensionSession,
   FeedbackEvent,
   JobMatch,
+  RealSiteDryRunSnapshot,
   Resume,
   UsageMeteringEvent,
   UserProfile
@@ -124,6 +125,13 @@ import {
   type ExtensionAuditEvent,
   type ExtensionResult
 } from "./services/extensionService";
+import {
+  createDryRunSnapshot,
+  loadDryRunSnapshots,
+  recordSnapshotExport,
+  type RealSiteAuditEvent,
+  type RealSiteDryRunComparison
+} from "./services/realSiteDryRunService";
 
 type RouteId =
   | "dashboard"
@@ -215,6 +223,9 @@ export default function App() {
   >(() => loadBrowserApplicationSessions(currentSession));
   const [extensionSessions, setExtensionSessions] = useState<ExtensionSession[]>(
     () => loadExtensionSessions(currentSession)
+  );
+  const [realSiteSnapshots, setRealSiteSnapshots] = useState<RealSiteDryRunSnapshot[]>(
+    () => loadDryRunSnapshots(currentSession)
   );
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
@@ -1494,6 +1505,97 @@ export default function App() {
     recordExtensionResult(result);
   }
 
+  function persistRealSiteAuditEvents(events: RealSiteAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (event.action === "real_site_dry_run_requested") {
+        recordFeedback({
+          eventType: "real_site_dry_run_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "real_site_dry_run_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "real_site_snapshot_saved") {
+        recordFeedback({
+          eventType: "real_site_snapshot_saved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "real_site_snapshot_saved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "real_site_snapshot_exported") {
+        recordFeedback({
+          eventType: "real_site_snapshot_exported",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "real_site_snapshot_exported",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  function handleRequestRealSiteDryRun(sourceUrl: string): {
+    snapshot: RealSiteDryRunSnapshot;
+    comparison: RealSiteDryRunComparison | null;
+  } | null {
+    let parsedHostname = "";
+    try {
+      parsedHostname = new URL(sourceUrl).hostname;
+    } catch {
+      parsedHostname = "";
+    }
+    const linkedExtensionSession = parsedHostname
+      ? extensionSessions
+          .filter((session) => session.hostname === parsedHostname)
+          .sort(
+            (a, b) =>
+              new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+          )[0] ?? null
+      : null;
+    try {
+      const result = createDryRunSnapshot(currentSession, {
+        sourceUrl,
+        extensionSession: linkedExtensionSession
+      });
+      setRealSiteSnapshots(result.snapshots);
+      persistRealSiteAuditEvents(result.auditEvents);
+      return { snapshot: result.snapshot, comparison: result.comparison };
+    } finally {
+      setAuditLogs(loadAuditLogs(currentSession).slice(0, 50));
+    }
+  }
+
+  function handleExportRealSiteSnapshot(snapshotId: string) {
+    const snapshot = realSiteSnapshots.find((item) => item.id === snapshotId);
+    if (!snapshot) {
+      return;
+    }
+    const events = recordSnapshotExport(currentSession, snapshot);
+    persistRealSiteAuditEvents(events);
+  }
+
   async function handleRunEvals() {
     setIsRunningEvals(true);
 
@@ -1592,6 +1694,9 @@ export default function App() {
             auditLogs={auditLogs}
             usageEvents={usageEvents}
             demoApplicationUrl="/extension/demo/demo-application.html"
+            realSiteSnapshots={realSiteSnapshots}
+            onRequestRealSiteDryRun={handleRequestRealSiteDryRun}
+            onExportRealSiteSnapshot={handleExportRealSiteSnapshot}
           />
         );
       case "admin":

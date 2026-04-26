@@ -409,6 +409,39 @@ export const extensionPageStructureSchema = z.object({
   capturedAt: isoDateSchema
 });
 
+export const realSiteValidationSummarySchema = z.object({
+  adapterDetectedCorrectly: z.boolean(),
+  requiredFieldsFound: z.boolean(),
+  safeFieldsMapped: z.boolean(),
+  uncertainFieldsPaused: z.boolean(),
+  sensitiveFieldsPaused: z.boolean(),
+  submitBlocked: z.boolean()
+});
+
+export const realSiteDryRunSnapshotSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  sourceUrl: z.string().trim(),
+  redactedUrl: z.string().trim(),
+  hostname: z.string().trim(),
+  atsType: z.enum(browserAtsTypes),
+  adapterConfidence: z.number().min(0).max(1),
+  pageTitle: z.string().trim().default(""),
+  detectedFieldCount: z.number().int().min(0),
+  requiredFieldCount: z.number().int().min(0),
+  safeFillCount: z.number().int().min(0),
+  pausedFieldCount: z.number().int().min(0),
+  sensitiveFieldCount: z.number().int().min(0),
+  submitButtonCount: z.number().int().min(0),
+  submitBlocked: z.boolean(),
+  submitBlockedReason: z.string().trim(),
+  validationSummary: realSiteValidationSummarySchema,
+  source: z.enum(["extension_session", "url_only"]),
+  extensionSessionId: idSchema.nullable(),
+  createdAt: isoDateSchema
+});
+
 export const extensionSessionSchema = z.object({
   id: idSchema,
   tenantId: idSchema,

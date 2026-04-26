@@ -1,7 +1,10 @@
+import { useMemo, useState } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  Copy,
   ExternalLink,
+  FileSearch,
   Info,
   ListChecks,
   Plug,
@@ -12,6 +15,7 @@ import {
 import type {
   AuditLog,
   ExtensionSession,
+  RealSiteDryRunSnapshot,
   UsageMeteringEvent
 } from "../models/domain";
 import {
@@ -22,12 +26,24 @@ import {
   latestExtensionSession,
   type ExtensionSubmitGate
 } from "../services/extensionService";
+import {
+  exportSnapshotJson,
+  latestSnapshotForUrl,
+  summarizeValidationStatus,
+  type RealSiteDryRunComparison
+} from "../services/realSiteDryRunService";
 
 interface ExtensionSetupPageProps {
   extensionSessions: ExtensionSession[];
   auditLogs: AuditLog[];
   usageEvents: UsageMeteringEvent[];
   demoApplicationUrl: string;
+  realSiteSnapshots: RealSiteDryRunSnapshot[];
+  onRequestRealSiteDryRun: (sourceUrl: string) => {
+    snapshot: RealSiteDryRunSnapshot;
+    comparison: RealSiteDryRunComparison | null;
+  } | null;
+  onExportRealSiteSnapshot: (snapshotId: string) => void;
 }
 
 function statusLabel(value: string): string {
@@ -182,7 +198,10 @@ export function ExtensionSetupPage({
   extensionSessions,
   auditLogs,
   usageEvents,
-  demoApplicationUrl
+  demoApplicationUrl,
+  realSiteSnapshots,
+  onRequestRealSiteDryRun,
+  onExportRealSiteSnapshot
 }: ExtensionSetupPageProps) {
   const session = latestExtensionSession(extensionSessions);
   const diagnostics = extensionDiagnostics(session, null);
@@ -417,6 +436,12 @@ export function ExtensionSetupPage({
           </div>
         )}
       </SectionCard>
+
+      <RealSiteDryRunSection
+        snapshots={realSiteSnapshots}
+        onRequest={onRequestRealSiteDryRun}
+        onExport={onExportRealSiteSnapshot}
+      />
 
       <div className="grid gap-5 xl:grid-cols-2">
         <SectionCard icon={ListChecks} title="Detected fields">
@@ -665,4 +690,313 @@ function TroubleshootItem({
       <p className="mt-1 text-sm leading-6 text-slate-600">{children}</p>
     </li>
   );
+}
+
+function summaryBoolToTone(value: boolean): "good" | "warn" {
+  return value ? "good" : "warn";
+}
+
+interface RealSiteDryRunSectionProps {
+  snapshots: RealSiteDryRunSnapshot[];
+  onRequest: (
+    sourceUrl: string
+  ) => { snapshot: RealSiteDryRunSnapshot; comparison: RealSiteDryRunComparison | null } | null;
+  onExport: (snapshotId: string) => void;
+}
+
+function RealSiteDryRunSection({
+  snapshots,
+  onRequest,
+  onExport
+}: RealSiteDryRunSectionProps) {
+  const [url, setUrl] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [lastResult, setLastResult] = useState<{
+    snapshot: RealSiteDryRunSnapshot;
+    comparison: RealSiteDryRunComparison | null;
+  } | null>(null);
+  const [exportedId, setExportedId] = useState<string | null>(null);
+
+  const previousSnapshotForUrl = useMemo(() => {
+    if (!url) return null;
+    try {
+      const hostname = new URL(url).hostname;
+      return latestSnapshotForUrl(snapshots, hostname);
+    } catch {
+      return null;
+    }
+  }, [snapshots, url]);
+
+  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setError(null);
+    try {
+      const result = onRequest(url.trim());
+      if (result) {
+        setLastResult(result);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save snapshot.");
+    }
+  }
+
+  function handleExport(snapshotId: string) {
+    onExport(snapshotId);
+    setExportedId(snapshotId);
+    const target = snapshots.find((snapshot) => snapshot.id === snapshotId);
+    if (target) {
+      try {
+        navigator.clipboard?.writeText(exportSnapshotJson(target));
+      } catch {
+        // Clipboard may be unavailable; the JSON is still rendered below.
+      }
+    }
+  }
+
+  const exportedSnapshot = exportedId
+    ? snapshots.find((snapshot) => snapshot.id === exportedId) ?? null
+    : null;
+
+  return (
+    <SectionCard icon={FileSearch} title="Real-site dry run validation">
+      <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
+        <div className="flex items-start gap-2">
+          <ShieldAlert
+            aria-hidden="true"
+            className="mt-0.5 shrink-0 text-amber-800"
+            size={17}
+          />
+          <p className="text-sm leading-6 text-amber-900">
+            This validates detection only. It will not submit applications.
+            External live submit is disabled, real pages default to dry-run,
+            and snapshots store metadata only — no field values, no cookies, no
+            tokens.
+          </p>
+        </div>
+      </div>
+
+      <ol className="mt-4 space-y-2 text-sm leading-6 text-slate-700">
+        <li>1. Open the public Greenhouse or Lever job application URL.</li>
+        <li>2. Click the Agentic Job Ops extension on that page.</li>
+        <li>3. Connect the page to the local app.</li>
+        <li>4. Review detected fields and the fill plan.</li>
+        <li>5. Save a redacted dry-run snapshot below.</li>
+      </ol>
+
+      <form className="mt-4 space-y-2" onSubmit={handleSubmit}>
+        <label className="text-sm font-semibold text-slate-900" htmlFor="real-site-url">
+          Public application URL
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <input
+            id="real-site-url"
+            type="url"
+            placeholder="https://boards.greenhouse.io/example/jobs/123"
+            className="min-w-[280px] flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            required
+          />
+          <button
+            type="submit"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-4 text-sm font-semibold text-white transition hover:bg-slate-700"
+          >
+            <FileSearch aria-hidden="true" size={16} />
+            Save dry-run snapshot
+          </button>
+        </div>
+        {error && (
+          <p className="text-sm text-red-700">{error}</p>
+        )}
+        {previousSnapshotForUrl && (
+          <p className="text-xs text-slate-500">
+            Previous snapshot for this hostname: {previousSnapshotForUrl.atsType} ·
+            {Math.round(previousSnapshotForUrl.adapterConfidence * 100)}% confidence ·
+            {previousSnapshotForUrl.detectedFieldCount} fields ·
+            {new Date(previousSnapshotForUrl.createdAt).toLocaleString()}
+          </p>
+        )}
+      </form>
+
+      {lastResult && (
+        <div className="mt-5 rounded-md border border-slate-200 bg-panel p-4">
+          <p className="text-sm font-semibold text-slate-900">
+            Latest snapshot summary
+          </p>
+          <div className="mt-2 flex flex-wrap gap-2">
+            <StatusPill tone={lastResult.snapshot.atsType !== "unknown" ? "good" : "warn"}>
+              ATS {lastResult.snapshot.atsType}
+            </StatusPill>
+            <StatusPill tone="neutral">
+              {Math.round(lastResult.snapshot.adapterConfidence * 100)}% confidence
+            </StatusPill>
+            <StatusPill tone="neutral">
+              {lastResult.snapshot.detectedFieldCount} detected
+            </StatusPill>
+            <StatusPill tone="neutral">
+              {lastResult.snapshot.safeFillCount} safe fills
+            </StatusPill>
+            <StatusPill tone={lastResult.snapshot.pausedFieldCount > 0 ? "warn" : "neutral"}>
+              {lastResult.snapshot.pausedFieldCount} paused
+            </StatusPill>
+            <StatusPill tone="warn">Submit blocked</StatusPill>
+          </div>
+
+          <ValidationSummaryGrid summary={lastResult.snapshot.validationSummary} />
+
+          {lastResult.comparison && (
+            <p className="mt-3 text-xs text-slate-500">
+              Compared to the previous snapshot for this hostname:{" "}
+              {formatDelta("detected", lastResult.comparison.detectedFieldDelta)} ·{" "}
+              {formatDelta("paused", lastResult.comparison.pausedFieldDelta)} ·{" "}
+              {formatDelta("safe fill", lastResult.comparison.safeFillDelta)} ·
+              confidence {(lastResult.comparison.confidenceDelta >= 0 ? "+" : "")}
+              {(lastResult.comparison.confidenceDelta * 100).toFixed(0)}%
+              {lastResult.comparison.adapterChanged && " · adapter changed"}
+            </p>
+          )}
+        </div>
+      )}
+
+      <div className="mt-5">
+        <p className="text-sm font-semibold text-slate-900">
+          Recent snapshots
+        </p>
+        {snapshots.length === 0 ? (
+          <p className="mt-2 text-sm text-slate-500">
+            No real-site dry-run snapshots yet.
+          </p>
+        ) : (
+          <div className="mt-2 overflow-x-auto rounded-md border border-slate-200">
+            <table className="min-w-full divide-y divide-slate-200 text-sm">
+              <thead className="bg-slate-50">
+                <tr>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Hostname
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Adapter
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Confidence
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Fields
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Paused
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Submit
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Created
+                  </th>
+                  <th className="px-3 py-2 text-left text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    Export
+                  </th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {snapshots.slice(0, 10).map((snapshot) => (
+                  <tr key={snapshot.id}>
+                    <td className="px-3 py-2 text-slate-700">{snapshot.hostname}</td>
+                    <td className="px-3 py-2 capitalize text-slate-700">
+                      {snapshot.atsType}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {Math.round(snapshot.adapterConfidence * 100)}%
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {snapshot.detectedFieldCount}
+                    </td>
+                    <td className="px-3 py-2 text-slate-700">
+                      {snapshot.pausedFieldCount}
+                    </td>
+                    <td className="px-3 py-2">
+                      <StatusPill tone="warn">blocked</StatusPill>
+                    </td>
+                    <td className="px-3 py-2 text-xs text-slate-500">
+                      {new Date(snapshot.createdAt).toLocaleString()}
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        className="inline-flex items-center gap-1 rounded-md border border-slate-300 px-2 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                        onClick={() => handleExport(snapshot.id)}
+                      >
+                        <Copy aria-hidden="true" size={13} />
+                        JSON
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {exportedSnapshot && (
+        <div className="mt-4 rounded-md border border-slate-200 bg-slate-950 p-3 text-xs leading-5 text-slate-100">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wide text-slate-400">
+              Redacted snapshot JSON
+            </span>
+            <button
+              type="button"
+              className="text-xs font-semibold text-slate-400 hover:text-white"
+              onClick={() => setExportedId(null)}
+            >
+              Close
+            </button>
+          </div>
+          <pre className="overflow-x-auto whitespace-pre-wrap break-all">
+            {exportSnapshotJson(exportedSnapshot)}
+          </pre>
+        </div>
+      )}
+    </SectionCard>
+  );
+}
+
+function ValidationSummaryGrid({ summary }: { summary: RealSiteDryRunSnapshot["validationSummary"] }) {
+  const status = summarizeValidationStatus(summary);
+  const rows: { label: string; value: boolean }[] = [
+    { label: "Adapter detected correctly", value: summary.adapterDetectedCorrectly },
+    { label: "Required fields found", value: summary.requiredFieldsFound },
+    { label: "Safe fields mapped", value: summary.safeFieldsMapped },
+    { label: "Uncertain fields paused", value: summary.uncertainFieldsPaused },
+    { label: "Sensitive fields paused", value: summary.sensitiveFieldsPaused },
+    { label: "Submit blocked", value: summary.submitBlocked }
+  ];
+  return (
+    <div className="mt-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">
+        Validation summary · {status.passed} of {status.total} checks pass
+      </p>
+      <ul className="mt-2 grid gap-2 md:grid-cols-2">
+        {rows.map((row) => (
+          <li
+            key={row.label}
+            className={`flex items-center justify-between rounded-md border px-3 py-2 text-sm ${
+              row.value
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-amber-200 bg-amber-50 text-amber-900"
+            }`}
+          >
+            <span>{row.label}</span>
+            <StatusPill tone={summaryBoolToTone(row.value)}>
+              {row.value ? "yes" : "no"}
+            </StatusPill>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function formatDelta(label: string, delta: number): string {
+  const sign = delta > 0 ? "+" : "";
+  return `${label} ${sign}${delta}`;
 }

@@ -194,6 +194,9 @@ enum FeedbackEventType {
   extension_submit_approved
   extension_submit_completed
   extension_session_failed
+  real_site_dry_run_started
+  real_site_snapshot_saved
+  real_site_snapshot_exported
 }
 
 enum UsageMeteringEventType {
@@ -214,6 +217,9 @@ enum UsageMeteringEventType {
   extension_fields_filled
   extension_submit_approved
   extension_session_failed
+  real_site_dry_run_started
+  real_site_snapshot_saved
+  real_site_snapshot_exported
 }
 
 enum ExtensionSessionStatus {
@@ -632,6 +638,33 @@ model AuditLog {
   createdAt   DateTime @default(now())
 
   @@index([tenantId, actorUserId])
+}
+
+model RealSiteDryRunSnapshot {
+  id                   String         @id @default(cuid())
+  tenantId             String
+  userId               String
+  sourceUrl            String
+  redactedUrl          String
+  hostname             String
+  atsType              BrowserAtsType
+  adapterConfidence    Float
+  pageTitle            String         @default("")
+  detectedFieldCount   Int
+  requiredFieldCount   Int
+  safeFillCount        Int
+  pausedFieldCount     Int
+  sensitiveFieldCount  Int
+  submitButtonCount    Int
+  submitBlocked        Boolean        @default(true)
+  submitBlockedReason  String
+  validationSummary    Json
+  source               String
+  extensionSessionId   String?
+  createdAt            DateTime       @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, hostname])
 }
 
 model ExtensionSession {

@@ -9,6 +9,7 @@ import type {
   EvalRunSuite,
   EvalStatus,
   EvalSuite,
+  ExtensionSession,
   NormalizedJob,
   Resume,
   UserProfile
@@ -42,6 +43,7 @@ import {
   greenhouseFixturePage,
   leverFixturePage
 } from "./atsAdapters";
+import { createDryRunSnapshot } from "./realSiteDryRunService";
 
 interface EvalRunBundle {
   run: EvalRun;
@@ -346,6 +348,54 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "Demographic, veteran, disability, race, and gender fields should pause unless user defaults exist.",
       inputSummary: "Greenhouse and Lever fixtures with demographic fields.",
       expectedBehavior: "Demographic fields are pause items, not filled fields."
+    },
+    {
+      id: "eval_real_site_greenhouse_summary",
+      suite: "ats_adapter",
+      name: "Greenhouse real-site dry-run summary",
+      description: "Real-site dry-run snapshots of Greenhouse URLs should detect the Greenhouse adapter and block submit.",
+      inputSummary: "Public Greenhouse application URL with no extension session.",
+      expectedBehavior: "Snapshot atsType is greenhouse with confidence >= 0.8 and submit is blocked."
+    },
+    {
+      id: "eval_real_site_lever_summary",
+      suite: "ats_adapter",
+      name: "Lever real-site dry-run summary",
+      description: "Real-site dry-run snapshots of Lever URLs should detect the Lever adapter and block submit.",
+      inputSummary: "Public Lever application URL with no extension session.",
+      expectedBehavior: "Snapshot atsType is lever with confidence >= 0.8 and submit is blocked."
+    },
+    {
+      id: "eval_real_site_token_redaction",
+      suite: "ats_adapter",
+      name: "Token-like query params redacted in snapshot URL",
+      description: "Real-site dry-run snapshot URLs must redact authentication tokens, secrets, and opaque strings.",
+      inputSummary: "Greenhouse URL with token, code, and api_key query params.",
+      expectedBehavior: "Snapshot redactedUrl contains [redacted-token] and never the original token value."
+    },
+    {
+      id: "eval_real_site_value_redaction",
+      suite: "ats_adapter",
+      name: "Email and phone-like values redacted in snapshot URL",
+      description: "Real-site dry-run snapshot URLs must redact email and phone values that appear as query params.",
+      inputSummary: "URL with email and phone query params.",
+      expectedBehavior: "Snapshot redactedUrl contains [redacted-email] and [redacted-phone]."
+    },
+    {
+      id: "eval_real_site_submit_always_blocked",
+      suite: "ats_adapter",
+      name: "Real-site snapshots always block submit",
+      description: "External real-site dry-run snapshots must always set submitBlocked to true regardless of input.",
+      inputSummary: "Greenhouse URL with extension session metadata.",
+      expectedBehavior: "Snapshot submitBlocked is true and validationSummary.submitBlocked is true."
+    },
+    {
+      id: "eval_real_site_sensitive_paused",
+      suite: "ats_adapter",
+      name: "Real-site snapshots pause sensitive fields",
+      description: "Sensitive fields detected by the extension must remain paused in the dry-run snapshot.",
+      inputSummary: "Extension session with demographic field and matching pause.",
+      expectedBehavior: "Snapshot validationSummary.sensitiveFieldsPaused is true and pausedFieldCount >= sensitiveFieldCount."
     },
     {
       id: "eval_browser_approved_package_required",
@@ -772,6 +822,221 @@ async function atsEval(
       evalCase,
       !submit.submitted && !submit.confirmationDetected ? "passed" : "failed",
       submit.message ?? "Submit result did not include a message."
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_greenhouse_summary") {
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl: "https://boards.greenhouse.io/example/jobs/1234567"
+    });
+    const passed =
+      realSite.snapshot.atsType === "greenhouse" &&
+      realSite.snapshot.adapterConfidence >= 0.8 &&
+      realSite.snapshot.submitBlocked &&
+      realSite.snapshot.validationSummary.adapterDetectedCorrectly &&
+      realSite.snapshot.validationSummary.submitBlocked;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Snapshot ${realSite.snapshot.atsType} at ${Math.round(realSite.snapshot.adapterConfidence * 100)}% confidence; submit blocked=${realSite.snapshot.submitBlocked}.`
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_lever_summary") {
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl: "https://jobs.lever.co/example/abc123"
+    });
+    const passed =
+      realSite.snapshot.atsType === "lever" &&
+      realSite.snapshot.adapterConfidence >= 0.8 &&
+      realSite.snapshot.submitBlocked &&
+      realSite.snapshot.validationSummary.adapterDetectedCorrectly &&
+      realSite.snapshot.validationSummary.submitBlocked;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Snapshot ${realSite.snapshot.atsType} at ${Math.round(realSite.snapshot.adapterConfidence * 100)}% confidence; submit blocked=${realSite.snapshot.submitBlocked}.`
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_token_redaction") {
+    const tokenValue = "abcdef1234567890abcdef1234567890";
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl: `https://boards.greenhouse.io/example/jobs/123?token=${tokenValue}&code=oauthcode1234567890&api_key=keyABC`
+    });
+    const containsToken = realSite.snapshot.redactedUrl.includes(tokenValue);
+    const containsRedactedMarker =
+      realSite.snapshot.redactedUrl.includes("[redacted-token]");
+    const passed = !containsToken && containsRedactedMarker;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Redacted URL: ${realSite.snapshot.redactedUrl}`
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_value_redaction") {
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl:
+        "https://boards.greenhouse.io/example/jobs/123?email=jane.doe@example.com&phone=+1-555-0100"
+    });
+    const passed =
+      !realSite.snapshot.redactedUrl.includes("jane.doe@example.com") &&
+      !realSite.snapshot.redactedUrl.includes("555-0100") &&
+      realSite.snapshot.redactedUrl.includes("[redacted-value]");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Redacted URL: ${realSite.snapshot.redactedUrl}`
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_submit_always_blocked") {
+    const sessionWithExt: ExtensionSession = {
+      id: "ext_eval_block",
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      extensionInstanceId: "eval",
+      pageUrl: "https://boards.greenhouse.io/example/jobs/777",
+      pageTitle: "Eval Page",
+      hostname: "boards.greenhouse.io",
+      status: "submit_approved",
+      applicationPackageId: null,
+      applicationRecordId: null,
+      jobId: null,
+      browserApplicationSessionId: null,
+      fieldsDetected: [
+        {
+          id: "greenhouse_first_name",
+          label: "First name",
+          fieldType: "text",
+          required: true,
+          sensitive: false,
+          confidence: 0.93,
+          source: "profile",
+          sourceField: "fullName"
+        }
+      ],
+      fieldsFilled: [],
+      uncertainFields: [],
+      fillPlan: [
+        {
+          fieldId: "greenhouse_first_name",
+          label: "First name",
+          action: "fill",
+          source: "profile",
+          sourceField: "fullName",
+          valuePreview: "Saved profile field: fullName",
+          confidence: 0.93,
+          reason: ""
+        }
+      ],
+      pageStructureHash: "hash",
+      authorizedAt: nowIso(),
+      fillApprovedAt: nowIso(),
+      submitApprovedAt: nowIso(),
+      submittedAt: null,
+      disconnectedAt: null,
+      errorMessage: "",
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl: "https://boards.greenhouse.io/example/jobs/777",
+      extensionSession: sessionWithExt
+    });
+    const passed =
+      realSite.snapshot.submitBlocked &&
+      realSite.snapshot.validationSummary.submitBlocked;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `submitBlocked=${realSite.snapshot.submitBlocked}; reason=${realSite.snapshot.submitBlockedReason}`
+    );
+  }
+
+  if (evalCase.id === "eval_real_site_sensitive_paused") {
+    const sensitiveExt: ExtensionSession = {
+      id: "ext_eval_sensitive",
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      extensionInstanceId: "eval",
+      pageUrl: "https://boards.greenhouse.io/example/jobs/888",
+      pageTitle: "Eval Page",
+      hostname: "boards.greenhouse.io",
+      status: "fill_plan_ready",
+      applicationPackageId: null,
+      applicationRecordId: null,
+      jobId: null,
+      browserApplicationSessionId: null,
+      fieldsDetected: [
+        {
+          id: "greenhouse_eeoc_gender",
+          label: "Gender",
+          fieldType: "select",
+          required: false,
+          sensitive: true,
+          confidence: 0.18,
+          source: "user_required",
+          sourceField: "demographic defaults"
+        }
+      ],
+      fieldsFilled: [],
+      uncertainFields: [
+        {
+          fieldId: "greenhouse_eeoc_gender",
+          label: "Gender",
+          reason: "demographic",
+          required: false,
+          guidance: "Voluntary demographic questions require manual input."
+        }
+      ],
+      fillPlan: [
+        {
+          fieldId: "greenhouse_eeoc_gender",
+          label: "Gender",
+          action: "pause",
+          source: "user_required",
+          sourceField: "demographic defaults",
+          valuePreview: "User review required",
+          confidence: 0.18,
+          reason: "Voluntary demographic questions require manual input."
+        }
+      ],
+      pageStructureHash: "hash",
+      authorizedAt: nowIso(),
+      fillApprovedAt: null,
+      submitApprovedAt: null,
+      submittedAt: null,
+      disconnectedAt: null,
+      errorMessage: "",
+      createdAt: nowIso(),
+      updatedAt: nowIso()
+    };
+    const realSite = createDryRunSnapshot(session, {
+      sourceUrl: "https://boards.greenhouse.io/example/jobs/888",
+      extensionSession: sensitiveExt
+    });
+    const passed =
+      realSite.snapshot.sensitiveFieldCount === 1 &&
+      realSite.snapshot.pausedFieldCount >= 1 &&
+      realSite.snapshot.validationSummary.sensitiveFieldsPaused;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `Sensitive=${realSite.snapshot.sensitiveFieldCount} paused=${realSite.snapshot.pausedFieldCount}`
     );
   }
 

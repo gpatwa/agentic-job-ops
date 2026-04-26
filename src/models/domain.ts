@@ -209,7 +209,10 @@ export const feedbackEventTypes = [
   "extension_fields_filled",
   "extension_submit_approved",
   "extension_submit_completed",
-  "extension_session_failed"
+  "extension_session_failed",
+  "real_site_dry_run_started",
+  "real_site_snapshot_saved",
+  "real_site_snapshot_exported"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -231,7 +234,10 @@ export const usageMeteringEventTypes = [
   "extension_fill_plan_created",
   "extension_fields_filled",
   "extension_submit_approved",
-  "extension_session_failed"
+  "extension_session_failed",
+  "real_site_dry_run_started",
+  "real_site_snapshot_saved",
+  "real_site_snapshot_exported"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -674,6 +680,39 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export interface RealSiteValidationSummary {
+  adapterDetectedCorrectly: boolean;
+  requiredFieldsFound: boolean;
+  safeFieldsMapped: boolean;
+  uncertainFieldsPaused: boolean;
+  sensitiveFieldsPaused: boolean;
+  submitBlocked: boolean;
+}
+
+export interface RealSiteDryRunSnapshot {
+  id: string;
+  tenantId: string;
+  userId: string;
+  sourceUrl: string;
+  redactedUrl: string;
+  hostname: string;
+  atsType: BrowserAtsType;
+  adapterConfidence: number;
+  pageTitle: string;
+  detectedFieldCount: number;
+  requiredFieldCount: number;
+  safeFillCount: number;
+  pausedFieldCount: number;
+  sensitiveFieldCount: number;
+  submitButtonCount: number;
+  submitBlocked: boolean;
+  submitBlockedReason: string;
+  validationSummary: RealSiteValidationSummary;
+  source: "extension_session" | "url_only";
+  extensionSessionId: string | null;
+  createdAt: string;
 }
 
 export interface ExtensionSession {
