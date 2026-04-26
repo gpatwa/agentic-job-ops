@@ -8,6 +8,7 @@ export interface NavigationItem<RouteId extends string = string> {
   id: RouteId;
   label: string;
   icon: LucideIcon;
+  section?: "primary" | "advanced";
 }
 
 interface AppShellProps<RouteId extends string> {
@@ -36,6 +37,33 @@ export function AppShell<RouteId extends string>({
   resume,
   onNavigate
 }: AppShellProps<RouteId>) {
+  const primaryItems = navigationItems.filter(
+    (item) => item.section !== "advanced"
+  );
+  const advancedItems = navigationItems.filter(
+    (item) => item.section === "advanced"
+  );
+  const renderItem = (item: NavigationItem<RouteId>) => {
+    const Icon = item.icon;
+    const active = item.id === currentRoute;
+
+    return (
+      <button
+        key={item.id}
+        className={`flex min-h-11 shrink-0 items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition ${
+          active
+            ? "bg-emerald-50 text-emerald-800"
+            : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
+        }`}
+        type="button"
+        onClick={() => onNavigate(item.id)}
+      >
+        <Icon aria-hidden="true" size={19} />
+        <span>{item.label}</span>
+      </button>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-[#eef1ea] text-ink">
       <div className="mx-auto flex min-h-screen max-w-[1500px] flex-col lg:flex-row">
@@ -54,27 +82,20 @@ export function AppShell<RouteId extends string>({
             </div>
           </div>
 
-          <nav className="mt-6 flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
-            {navigationItems.map((item) => {
-              const Icon = item.icon;
-              const active = item.id === currentRoute;
-
-              return (
-                <button
-                  key={item.id}
-                  className={`flex min-h-11 shrink-0 items-center gap-3 rounded-md px-3 text-left text-sm font-medium transition ${
-                    active
-                      ? "bg-emerald-50 text-emerald-800"
-                      : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
-                  }`}
-                  type="button"
-                  onClick={() => onNavigate(item.id)}
-                >
-                  <Icon aria-hidden="true" size={19} />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
+          <nav className="mt-6 flex flex-col gap-4">
+            <div className="flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+              {primaryItems.map(renderItem)}
+            </div>
+            {advancedItems.length > 0 && (
+              <div>
+                <p className="px-3 text-xs font-semibold uppercase tracking-wide text-slate-400">
+                  Advanced
+                </p>
+                <div className="mt-2 flex gap-2 overflow-x-auto lg:flex-col lg:overflow-visible">
+                  {advancedItems.map(renderItem)}
+                </div>
+              </div>
+            )}
           </nav>
 
           <div className="mt-6 hidden rounded-lg border border-line bg-panel p-4 lg:block">

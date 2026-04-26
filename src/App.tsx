@@ -6,7 +6,6 @@ import {
   DatabaseZap,
   FileUp,
   Inbox,
-  LayoutDashboard,
   Plug,
   Rocket,
   Sparkles,
@@ -243,7 +242,7 @@ import {
   type ResumeImprovementAuditEvent
 } from "./services/resumeImprovementService";
 
-type RouteId =
+export type RouteId =
   | "dashboard"
   | "action-center"
   | "autopilot-settings"
@@ -260,27 +259,69 @@ type RouteId =
   | "package-review"
   | "browser-session";
 
-const navigationItems: NavigationItem<RouteId>[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { id: "action-center", label: "Action Center", icon: Inbox },
-  { id: "autopilot-settings", label: "Autopilot", icon: Sparkles },
-  { id: "onboarding", label: "Onboarding", icon: Rocket },
-  { id: "profile-setup", label: "Profile setup", icon: UserRound },
-  { id: "resume-upload", label: "Resume upload", icon: FileUp },
-  { id: "career-profile", label: "Career profile", icon: UserCog },
-  { id: "ingestion", label: "Ingestion", icon: DatabaseZap },
-  { id: "jobs", label: "Job queues", icon: BriefcaseBusiness },
-  { id: "tracker", label: "Tracker", icon: ClipboardList },
-  { id: "career-ops", label: "Career Ops", icon: CalendarClock },
-  { id: "extension-setup", label: "Extension setup", icon: Plug },
-  { id: "admin", label: "Admin", icon: BarChart3 }
+export const primaryNavigationItems: NavigationItem<RouteId>[] = [
+  { id: "action-center", label: "Action Center", icon: Inbox, section: "primary" },
+  { id: "onboarding", label: "Onboarding", icon: Rocket, section: "primary" },
+  { id: "jobs", label: "Job Matches", icon: BriefcaseBusiness, section: "primary" },
+  { id: "tracker", label: "Applications", icon: ClipboardList, section: "primary" },
+  { id: "resume-upload", label: "Resume", icon: FileUp, section: "primary" },
+  {
+    id: "autopilot-settings",
+    label: "Autopilot",
+    icon: Sparkles,
+    section: "primary"
+  }
 ];
 
-const routeIds = navigationItems.map((item) => item.id);
+export const advancedNavigationItems: NavigationItem<RouteId>[] = [
+  { id: "ingestion", label: "Ingestion", icon: DatabaseZap, section: "advanced" },
+  { id: "career-ops", label: "Career Ops", icon: CalendarClock, section: "advanced" },
+  {
+    id: "extension-setup",
+    label: "Extension Setup",
+    icon: Plug,
+    section: "advanced"
+  },
+  { id: "admin", label: "Admin/System", icon: BarChart3, section: "advanced" },
+  { id: "profile-setup", label: "Profile setup", icon: UserRound, section: "advanced" },
+  { id: "career-profile", label: "Career profile", icon: UserCog, section: "advanced" }
+];
+
+const navigationItems: NavigationItem<RouteId>[] = [
+  ...primaryNavigationItems,
+  ...advancedNavigationItems
+];
+
+const routeIds: RouteId[] = [
+  "dashboard",
+  "package-review",
+  "browser-session",
+  ...navigationItems.map((item) => item.id)
+];
 const isDevelopment = import.meta.env.DEV;
 
-function routeFromHash(): RouteId {
-  const route = window.location.hash.replace("#", "");
+export function isOnboardingComplete(
+  state: Pick<OnboardingState, "onboardingCompletedAt">
+): boolean {
+  return Boolean(state.onboardingCompletedAt);
+}
+
+export function defaultRouteForOnboarding(onboardingComplete: boolean): RouteId {
+  return onboardingComplete ? "action-center" : "onboarding";
+}
+
+export function routeAfterDashboardRedirect(
+  route: RouteId,
+  onboardingComplete: boolean
+): RouteId {
+  return route === "dashboard" ? defaultRouteForOnboarding(onboardingComplete) : route;
+}
+
+export function resolveRouteFromHash(
+  hash: string,
+  onboardingComplete: boolean
+): RouteId {
+  const route = hash.replace("#", "");
   if (route.startsWith("package-review:")) {
     return "package-review";
   }
@@ -289,7 +330,17 @@ function routeFromHash(): RouteId {
     return "browser-session";
   }
 
-  return routeIds.includes(route as RouteId) ? (route as RouteId) : "dashboard";
+  if (!route) {
+    return defaultRouteForOnboarding(onboardingComplete);
+  }
+
+  return routeIds.includes(route as RouteId)
+    ? (route as RouteId)
+    : defaultRouteForOnboarding(onboardingComplete);
+}
+
+function routeFromHash(onboardingComplete: boolean): RouteId {
+  return resolveRouteFromHash(window.location.hash, onboardingComplete);
 }
 
 function packageIdFromHash(): string | null {
@@ -316,7 +367,12 @@ function extensionFor(fileName: string): string {
 }
 
 export default function App() {
-  const [route, setRoute] = useState<RouteId>(() => routeFromHash());
+  const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
+    loadOnboardingState(currentSession)
+  );
+  const [route, setRoute] = useState<RouteId>(() =>
+    routeFromHash(isOnboardingComplete(onboardingState))
+  );
   const [profile, setProfile] = useState<UserProfile | null>(() =>
     loadUserProfile(currentSession)
   );
@@ -385,9 +441,6 @@ export default function App() {
     () => loadAutopilotActions(currentSession)
   );
   const [isAutopilotRunning, setIsAutopilotRunning] = useState(false);
-  const [onboardingState, setOnboardingState] = useState<OnboardingState>(() =>
-    loadOnboardingState(currentSession)
-  );
   const [isOnboardingRecommending, setIsOnboardingRecommending] = useState(false);
   const [onboardingResult, setOnboardingResult] =
     useState<OnboardingRecommendationResult | null>(null);
@@ -439,16 +492,25 @@ export default function App() {
     () => loadAIOutputMetadata(currentSession)
   );
   const [isRunningEvals, setIsRunningEvals] = useState(false);
+  const onboardingComplete = isOnboardingComplete(onboardingState);
+  const displayedRoute = routeAfterDashboardRedirect(route, onboardingComplete);
 
   useEffect(() => {
     const handleHashChange = () => {
-      setRoute(routeFromHash());
+      setRoute(routeFromHash(onboardingComplete));
       setSelectedPackageId(packageIdFromHash());
       setSelectedBrowserSessionId(browserSessionIdFromHash());
     };
     window.addEventListener("hashchange", handleHashChange);
     return () => window.removeEventListener("hashchange", handleHashChange);
-  }, []);
+  }, [onboardingComplete]);
+
+  useEffect(() => {
+    const redirectedRoute = routeAfterDashboardRedirect(route, onboardingComplete);
+    if (redirectedRoute !== route) {
+      navigate(redirectedRoute);
+    }
+  }, [route, onboardingComplete]);
 
   const completion = useMemo(() => calculateProfileCompletion(profile), [profile]);
 
@@ -532,8 +594,9 @@ export default function App() {
   );
 
   function navigate(nextRoute: RouteId) {
-    window.location.hash = nextRoute;
-    setRoute(nextRoute);
+    const resolvedRoute = routeAfterDashboardRedirect(nextRoute, onboardingComplete);
+    window.location.hash = resolvedRoute;
+    setRoute(resolvedRoute);
   }
 
   function navigateToPackage(packageId: string) {
@@ -2985,7 +3048,7 @@ export default function App() {
   }
 
   function renderRoute() {
-    switch (route) {
+    switch (displayedRoute) {
       case "profile-setup":
         return (
           <ProfileSetupPage
@@ -3373,7 +3436,7 @@ export default function App() {
 
   return (
     <AppShell
-      currentRoute={route}
+      currentRoute={displayedRoute}
       navigationItems={navigationItems}
       session={currentSession}
       completion={completion}
