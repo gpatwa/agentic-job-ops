@@ -14,8 +14,9 @@ competitive gap).
 
 Who hits this problem and when. Be specific:
 
-- Persona: <e.g. "first-time B2C user, no resume uploaded yet">
-- Trigger moment: <e.g. "lands on Action Center after onboarding">
+- Persona: <one sentence — who they are, why they're here>
+- Trigger moment: <the specific moment in their flow when this problem
+  shows up>
 
 ## Success criteria
 

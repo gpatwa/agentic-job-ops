@@ -48,9 +48,9 @@ A short pass / fail report with:
 
 ### PII / sensitive data in logs
 
-- Grep for `console.log` / `logger.info` / `logger.debug` near user
-  data: profile fields, resume text, application answers, recruiter
-  contact info, demographic fields.
+- Grep for debug / info log calls (e.g. `console.log`, `logger.info`,
+  `logger.debug` in JS) near user data: profile fields, raw document
+  content, free-form answers, contact info, demographic fields.
 - Confirm log statements use IDs, lengths, hashes — not content.
 
 ### Approval bypass

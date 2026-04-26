@@ -6,16 +6,20 @@
 
 ## Commands run
 
-In order. Record actual output (tail at minimum).
+In order, using the project's commands from `.agentic/LOCAL_COMMANDS.md`.
+Record actual output (tail at minimum).
 
-| # | Command | Result | Notes |
-|---|---------|--------|-------|
-| 1 | `npm run typecheck` | pass / fail | <tail> |
-| 2 | `npx vitest run <file>` | pass / fail | <tail> |
-| 3 | `npm test` | pass / fail | <tail> |
-| 4 | `npm run build` | pass / fail | <tail> |
-| 5 | `npm run qa:mvp` (or pack equivalent) | pass / fail | <tail> |
-| 6 | `git diff --check` | pass / fail | — |
+| # | Step | Project command | Result | Notes |
+|---|------|-----------------|--------|-------|
+| 1 | Typecheck | `<command>` | pass / fail | <tail> |
+| 2 | Targeted tests | `<command>` | pass / fail | <tail> |
+| 3 | Full test suite | `<command>` | pass / fail | <tail> |
+| 4 | Build | `<command>` | pass / fail | <tail> |
+| 5 | Local regression | `<command>` | pass / fail | <tail> |
+| 6 | Whitespace / diff check | `git diff --check` | pass / fail | — |
+
+> For TypeScript / Node projects these are typically `npm run typecheck`,
+> `npx vitest run <file>`, `npm test`, `npm run build`, `npm run qa:mvp`.
 
 ## UI verification
 

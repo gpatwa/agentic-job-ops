@@ -77,12 +77,14 @@ the artefact. This is what makes role separation actually save context.
 
 ## Token / context limits
 
-Models have finite context windows. The Anthropic prompt cache has a
-five-minute TTL; sleeping past that wastes the cache. These constraints
-shape how slices are sized:
+Models have finite context windows. Many also support prompt caching with
+a short TTL (Anthropic's, for example, is five minutes), which makes long
+mid-slice pauses expensive. These constraints shape how slices are sized:
 
-- **Plan within 5 minutes of work, then act.** Don't pause to think for
-  ten minutes mid-slice — you'll lose the cache and re-pay the cost.
+- **Plan within the cache TTL, then act.** Don't pause to think for so
+  long that you lose the prompt cache mid-slice — you'll re-pay the cost
+  of replaying context. Treat the model's TTL as a soft budget on think
+  time per round.
 - **Avoid pulling whole files into context when a `grep -n` answers the
   question.** Read targeted ranges with `Read` `offset`/`limit`.
 - **Avoid restating prior agents' work in your own response.** Reference
@@ -116,8 +118,8 @@ Things the body should NOT contain:
 
 - A blow-by-blow narrative of how the work was done.
 - A list of files (the diff already shows that).
-- "Generated with Claude Code" boilerplate (unless the project explicitly
-  wants it).
+- Generic tool / model boilerplate (e.g. "Generated with <tool>") unless
+  the project explicitly wants it.
 
 ---
 

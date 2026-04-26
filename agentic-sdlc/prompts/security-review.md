@@ -29,8 +29,8 @@ Operating constraints:
 Scan for (each is its own grep / inspection):
 1. Secrets / credentials in the diff (tokens, keys, passwords, JWTs,
    .env files).
-2. PII / sensitive data in log statements (profile fields, resume text,
-   application answers, recruiter contact info, demographic fields).
+2. PII / sensitive data in log statements (profile fields, raw document
+   content, free-form user answers, contact info, demographic fields).
 3. Approval bypass (any new send / submit / publish / deploy code path
    without an explicit user-approval gate).
 4. Audit event coverage (every state-changing function has an event;

@@ -38,14 +38,19 @@ handing off to QA.
 - The implementation matches the UX spec, including all listed states.
 - Targeted tests cover at minimum the happy path, one edge case, and any
   safety invariant the slice touches.
-- `npm run typecheck` (or pack equivalent) passes.
-- `npx vitest run <touched files>` passes — and this is run BEFORE the
+- The project's typecheck command passes.
+- The project's targeted-test command passes — and is run BEFORE the
   full suite.
-- `npm test` (full suite) passes.
-- `npm run build` passes.
+- The project's full-suite test command passes.
+- The project's build command passes.
+- The project's local regression command passes.
 - The UI is verified in the browser preview where the change is
   observable.
 - One commit, narrow diff, descriptive message per `OPERATING_MODEL.md`.
+
+> See `.agentic/LOCAL_COMMANDS.md` for the exact commands. For
+> TypeScript / Node projects these are typically `npm run typecheck`,
+> `npx vitest run <file>`, `npm test`, `npm run build`, `npm run qa:mvp`.
 
 ## Operating constraints
 
@@ -56,8 +61,9 @@ handing off to QA.
   surprise a future reader.
 - Don't add features beyond the slice. Out-of-scope ideas go to the EM
   as a note, not into this commit.
-- Don't disable type errors with `any` or `@ts-ignore` to "move
-  forward" — fix the root cause or escalate.
+- Don't disable type errors with the language's escape hatches (e.g.
+  `any` / `@ts-ignore` in TypeScript) to "move forward" — fix the root
+  cause or escalate.
 
 ## Browser preview verification
 

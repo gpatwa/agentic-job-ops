@@ -135,9 +135,10 @@ how, what passed, what failed, what was deferred.
 **Hand off to:** Security & Privacy Agent.
 
 QA Evidence is independent. It re-runs the full local regression command
-(e.g. `npm run qa:mvp` for B2C SaaS), spot-checks the UI in the browser
-preview where the change is observable, and verifies the safety invariants
-listed in `.agentic/SAFETY_INVARIANTS.md`.
+(named in `.agentic/LOCAL_COMMANDS.md` — typically `npm run qa:mvp` or a
+project-pack equivalent), spot-checks the UI in the browser preview where
+the change is observable, and verifies the safety invariants listed in
+`.agentic/SAFETY_INVARIANTS.md`.
 
 ---
 

@@ -26,15 +26,15 @@ Read first (and ONLY these — don't pre-tour the codebase):
 Operating constraints (non-negotiable):
 - One focused commit (or small related series).
 - Read only the files you will touch and the files those depend on.
-- Targeted tests first (`npx vitest run <file>`), then full suite
-  (`npm test`).
-- Build before commit (`npm run build`).
-- Run the project's local regression command before commit (e.g.
-  `npm run qa:mvp`).
+- Targeted tests first, then full suite, then build, then the project's
+  local regression command. Exact commands per
+  `.agentic/LOCAL_COMMANDS.md` (typically `npm run typecheck`,
+  `npx vitest run <file>`, `npm test`, `npm run build`,
+  `npm run qa:mvp` for TS / Node projects).
 - Never bypass hooks (--no-verify, --no-gpg-sign, etc.).
 - Never invent claims, fields, or numbers the user must verify.
-- Never log secrets, PII, resumes, application answers, demographic
-  fields.
+- Never log secrets, PII, raw document content, free-form user answers,
+  contact details, or demographic fields. Log IDs, lengths, hashes.
 - Default to no comments. Only write a comment when the *why* would
   surprise a future reader.
 - Do not implement features beyond the slice. Out-of-scope ideas go to

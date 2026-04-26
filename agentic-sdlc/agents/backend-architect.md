@@ -45,15 +45,14 @@ adding endpoints.
 
 - Every state-changing service function emits the audit event(s)
   specified in the tech spec.
-- New schemas are valid for the project's persistence strategy (Zod-
-  parsed on read/write for localStorage-backed apps; migration-ready for
-  DB-backed apps).
+- New schemas validate at the persistence boundary on every read and
+  write; for DB-backed projects, schemas are migration-ready.
 - Adapter placeholders throw with a clear message ("X is not configured
   in this build.") so a missing key never silently no-ops.
 - Tenant / user scoping is preserved on every record where the project
   pack requires it.
 - Typecheck, targeted tests, full suite, and build all pass before
-  handoff.
+  handoff (commands per `.agentic/LOCAL_COMMANDS.md`).
 
 ## Operating constraints
 
@@ -61,9 +60,11 @@ adding endpoints.
   only from inside the project; validate at boundaries.
 - Don't catch errors just to log and re-throw with a less informative
   message.
-- No `console.log` for debugging — remove before commit.
-- Never log credentials, resumes, application answers, or any
-  user-content that could be PII.
+- No debug log statements (e.g. `console.log` in JS) — remove before
+  commit.
+- Never log credentials, raw user-supplied document content, free-form
+  user answers, contact details, demographics, or anything else that
+  could be PII. Log IDs, lengths, and hashes instead.
 - If the slice introduces a feature flag, the flag must be removable in
   a future slice. No "permanent" flags.
 
@@ -78,5 +79,5 @@ To QA Evidence Agent. Use `templates/AGENT_HANDOFF_TEMPLATE.md`.
 - Letting a placeholder adapter return a fake successful response (it
   must throw).
 - Swallowing errors to "be robust".
-- A schema change without a parallel update to the Zod schema and the
-  Prisma schema (for projects that maintain both).
+- A schema change without parallel updates to every layer the project
+  maintains (e.g. validation schema and DB / ORM schema if both exist).

@@ -83,7 +83,7 @@ Every handoff carries:
    "the whole codebase").
 3. **The success criteria** (what "done" looks like for this stage).
 4. **The constraints inherited from prior stages** (e.g. "no submit code
-   path", "don't change the avoid-list semantics").
+   path", "don't weaken the existing approval gate").
 
 If a handoff is missing any of these, the receiving agent rejects it back
 to the EM rather than guessing.

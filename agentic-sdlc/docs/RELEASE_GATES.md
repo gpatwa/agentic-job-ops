@@ -84,8 +84,8 @@ above each map back to one of these:
   something the user didn't authorise.
 - **Silent LLM call.** A placeholder adapter gets replaced with a real
   client and tests start hitting the network without anyone noticing.
-- **Logged secrets.** A debug log statement captures a credential, resume,
-  or PII.
+- **Logged secrets.** A debug log statement captures a credential,
+  user-content blob, or PII field.
 - **Hidden state change.** A migration or a settings save runs without an
   audit event, so the user can't see what happened.
 - **Token budget blow-up.** A slice that was supposed to be one task

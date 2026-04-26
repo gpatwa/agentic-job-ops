@@ -4,7 +4,7 @@
 > phase lands or scope shifts. Stale snapshots are worse than no
 > snapshot.
 
-Last updated alongside Phase 15.
+Last updated alongside Phase 16 + the agentic-sdlc playbook polish.
 
 ---
 
@@ -27,20 +27,19 @@ Last updated alongside Phase 15.
 | Company / recruiter intelligence | Shipped | intelligenceService |
 | Recruiter CRM + follow-up agent | Shipped | recruiterCrmService |
 | B2C Autopilot + Action Center | Shipped | autopilotService + ActionCenterPage |
+| Simplified B2C navigation + onboarding-aware default home | Shipped | App.tsx route + AppShell |
+| Realistic B2C demo seed | Shipped | demo seed service + Action Center CTA |
+| MVP readiness + happy-path QA documentation | Shipped | docs/MVP_READINESS.md, docs/QA_HAPPY_PATH.md |
+| Automated MVP happy-path QA | Shipped | `npm run qa:mvp` (typecheck + tests + build + e2e) |
+| Agentic SDLC playbook + project adapter | Shipped | agentic-sdlc/ + .agentic/ |
 
 ---
 
 ## What's queued
 
-| Slice | Owner | Status |
-|-------|-------|--------|
-| Phase 16: MVP readiness + simplified B2C navigation | Orchestrator | Scoped, partially in-flight |
-
-The Phase 16 working tree currently includes intentional non-runtime
-modifications staged in `src/pages/ActionCenterPage.tsx` and
-`src/pages/ApplicationTrackerPage.tsx` (added `data-testid` markers
-and Action Center demo-CTA props). Those changes are independent of
-this `agentic-sdlc/` introduction and will land with their own slice.
+Nothing in flight at the moment. The next slice is up to the Orchestrator
+to scope from the launch-blocker list below or from a new product
+direction.
 
 ---
 
@@ -80,14 +79,16 @@ shape of the future B2B / enterprise direction.
 To go from "MVP code complete" to "first real B2C release", these must
 be resolved:
 
-- [ ] Phase 16 (MVP readiness) lands.
-- [ ] `npm run qa:mvp` script is defined and passing in CI.
-- [ ] `docs/MVP_READINESS.md` and `docs/QA_HAPPY_PATH.md` exist and pass
-      a manual run-through.
-- [ ] Demo seed flow lands and is clearly labeled.
+- [x] Phase 16 (MVP readiness) lands.
+- [x] `npm run qa:mvp` script is defined locally
+      (`typecheck && test && build && test:e2e`). CI wiring still TBD.
+- [x] `docs/MVP_READINESS.md` and `docs/QA_HAPPY_PATH.md` exist.
+- [x] Demo seed flow lands and is clearly labeled.
+- [ ] `npm run qa:mvp` runs green in CI on every push to `main`.
 - [ ] All twelve safety invariants in `.agentic/SAFETY_INVARIANTS.md`
-      pass their named eval / inspection check.
-- [ ] One additional independent QA pass on a clean workspace.
+      pass their named eval / inspection check on a clean workspace.
+- [ ] One additional independent QA pass on a clean workspace by an
+      agent that did not implement the slice.
 
 ---
 
