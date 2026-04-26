@@ -39,6 +39,10 @@ function statusDescription(status: ApplicationStatus): string {
       return "Marked as manually applied by the user.";
     case "rejected":
       return "Not moving forward, still retained for history.";
+    case "offer":
+      return "Offer received.";
+    case "withdrawn":
+      return "Withdrawn by the user.";
     case "archived":
       return "Archived but not deleted.";
     default:

@@ -3,12 +3,19 @@ import {
   answerConfidences,
   applicationAnswerSources,
   applicationFieldSources,
+  applicationOutcomeStatuses,
   applicationFieldTypes,
   applicationPackageStatuses,
   applicationStatuses,
   atsTypes,
+  aiOutputTypes,
   browserApplicationSessionStatuses,
   browserAtsTypes,
+  evalRunStatuses,
+  evalRunSuites,
+  evalStatuses,
+  evalSuites,
+  feedbackEventTypes,
   generationModes,
   jobRemoteTypes,
   jobSources,
@@ -20,6 +27,7 @@ import {
   scanSchedules,
   scoringStatuses,
   uncertainFieldReasons,
+  usageMeteringEventTypes,
   tenantPlans,
   tenantStatuses,
   tenantTypes
@@ -28,6 +36,8 @@ import {
 const idSchema = z.string().min(1);
 const isoDateSchema = z.string().datetime();
 const stringListSchema = z.array(z.string().trim().min(1)).default([]);
+const metadataValueSchema = z.union([z.string(), z.number(), z.boolean(), z.null()]);
+const metadataSchema = z.record(metadataValueSchema);
 
 export const tenantSchema = z.object({
   id: idSchema,
@@ -254,6 +264,99 @@ export const browserApplicationSessionSchema = z.object({
   updatedAt: isoDateSchema
 });
 
+export const feedbackEventSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  eventType: z.enum(feedbackEventTypes),
+  resourceType: z.string().trim().min(1),
+  resourceId: idSchema,
+  metadata: metadataSchema,
+  createdAt: isoDateSchema
+});
+
+export const evalCaseSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  suite: z.enum(evalSuites),
+  name: z.string().trim().min(1),
+  description: z.string().trim().min(1),
+  inputSummary: z.string().trim().min(1),
+  expectedBehavior: z.string().trim().min(1),
+  createdAt: isoDateSchema
+});
+
+export const evalRunSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  suite: z.enum(evalRunSuites),
+  status: z.enum(evalRunStatuses),
+  startedAt: isoDateSchema,
+  finishedAt: isoDateSchema.nullable(),
+  passCount: z.number().int().min(0),
+  failCount: z.number().int().min(0)
+});
+
+export const evalResultSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  evalRunId: idSchema,
+  evalCaseId: idSchema,
+  suite: z.enum(evalSuites),
+  name: z.string().trim().min(1),
+  status: z.enum(evalStatuses),
+  message: z.string().trim().min(1),
+  severity: z.enum(["info", "warning", "critical"]),
+  createdAt: isoDateSchema
+});
+
+export const usageMeteringEventSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  eventType: z.enum(usageMeteringEventTypes),
+  resourceType: z.string().trim().min(1),
+  resourceId: idSchema,
+  quantity: z.number().min(0),
+  unit: z.string().trim().min(1),
+  metadata: metadataSchema,
+  createdAt: isoDateSchema
+});
+
+export const applicationOutcomeSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  applicationRecordId: idSchema,
+  jobId: idSchema,
+  outcome: z.enum(applicationOutcomeStatuses),
+  outcomeDate: isoDateSchema,
+  notes: z.string(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const aiOutputMetadataSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  outputType: z.enum(aiOutputTypes),
+  resourceType: z.string().trim().min(1),
+  resourceId: idSchema,
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  provider: z.string().trim().min(1),
+  mode: z.string().trim().min(1),
+  inputHash: z.string().trim().min(1),
+  outputHash: z.string().trim().min(1),
+  tokenInput: z.number().int().min(0),
+  tokenOutput: z.number().int().min(0),
+  createdAt: isoDateSchema
+});
+
 export const auditLogSchema = z.object({
   id: idSchema,
   tenantId: idSchema,
@@ -261,6 +364,6 @@ export const auditLogSchema = z.object({
   action: z.string().trim().min(1),
   resourceType: z.string().trim().min(1),
   resourceId: idSchema,
-  metadata: z.record(z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  metadata: metadataSchema,
   createdAt: isoDateSchema
 });

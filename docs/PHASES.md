@@ -26,4 +26,8 @@ Browser application assistant with a deterministic development flow, ATS detecti
 
 ## Phase 7
 
-Evals, feedback events, model and prompt versioning, usage metering, RBAC, tenant administration, and audit reporting.
+Evals, feedback events, model and prompt metadata, usage metering, outcome tracking, score calibration basics, admin visibility, audit summaries, and safety checks for application packages and browser assistant workflows. Keep optimization focused on strong-fit, truthful, human-approved applications rather than raw submission volume.
+
+## Future Enterprise Controls
+
+Backend tenant isolation, RBAC, delegated approval rules, usage billing, and production-grade tenant administration.

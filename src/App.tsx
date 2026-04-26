@@ -1,4 +1,5 @@
 import {
+  BarChart3,
   BriefcaseBusiness,
   ClipboardList,
   DatabaseZap,
@@ -11,17 +12,26 @@ import { useEffect, useMemo, useState } from "react";
 import { AppShell, type NavigationItem } from "./components/AppShell";
 import { currentSession } from "./data/currentSession";
 import type {
+  AIOutputMetadata,
   ApplicationAnswer,
+  ApplicationOutcome,
   BrowserApplicationSession,
   ApplicationPackage,
   ApplicationRecord,
   ApplicationStatus,
   AuditLog,
   DashboardJobAction,
+  EvalCase,
+  EvalResult,
+  EvalRun,
+  EventMetadata,
+  FeedbackEvent,
   JobMatch,
   Resume,
+  UsageMeteringEvent,
   UserProfile
 } from "./models/domain";
+import { AdminSystemPage } from "./pages/AdminSystemPage";
 import { ApplicationPackagePage } from "./pages/ApplicationPackagePage";
 import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { BrowserSessionReviewPage } from "./pages/BrowserSessionReviewPage";
@@ -67,6 +77,15 @@ import {
 } from "./services/profileService";
 import { createResumeUpload, loadResume, saveResume } from "./services/resumeService";
 import {
+  loadAIOutputMetadata,
+  recordAIOutputMetadata
+} from "./services/aiOutputMetadata";
+import {
+  loadApplicationOutcomes,
+  outcomeForApplicationStatus,
+  recordApplicationOutcome
+} from "./services/applicationOutcomeService";
+import {
   approveBrowserSubmit,
   loadBrowserApplicationSessions,
   markBrowserSessionManualRequired,
@@ -75,6 +94,17 @@ import {
   submitApprovedBrowserApplication,
   type BrowserApplicationResult
 } from "./services/browserApplicationAssistant";
+import {
+  loadEvalCases,
+  loadEvalResults,
+  loadEvalRuns,
+  runEvalSuite
+} from "./services/evalService";
+import { appendFeedbackEvent, loadFeedbackEvents } from "./services/feedbackService";
+import {
+  appendUsageMeteringEvent,
+  loadUsageMeteringEvents
+} from "./services/usageMetering";
 
 type RouteId =
   | "dashboard"
@@ -84,6 +114,7 @@ type RouteId =
   | "ingestion"
   | "jobs"
   | "tracker"
+  | "admin"
   | "package-review"
   | "browser-session";
 
@@ -94,7 +125,8 @@ const navigationItems: NavigationItem<RouteId>[] = [
   { id: "career-profile", label: "Career profile", icon: UserCog },
   { id: "ingestion", label: "Ingestion", icon: DatabaseZap },
   { id: "jobs", label: "Job queues", icon: BriefcaseBusiness },
-  { id: "tracker", label: "Tracker", icon: ClipboardList }
+  { id: "tracker", label: "Tracker", icon: ClipboardList },
+  { id: "admin", label: "Admin", icon: BarChart3 }
 ];
 
 const routeIds = navigationItems.map((item) => item.id);
@@ -175,6 +207,28 @@ export default function App() {
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(() =>
     loadAuditLogs(currentSession)
   );
+  const [feedbackEvents, setFeedbackEvents] = useState<FeedbackEvent[]>(() =>
+    loadFeedbackEvents(currentSession)
+  );
+  const [usageEvents, setUsageEvents] = useState<UsageMeteringEvent[]>(() =>
+    loadUsageMeteringEvents(currentSession)
+  );
+  const [evalCases, setEvalCases] = useState<EvalCase[]>(() =>
+    loadEvalCases(currentSession)
+  );
+  const [evalRuns, setEvalRuns] = useState<EvalRun[]>(() =>
+    loadEvalRuns(currentSession)
+  );
+  const [evalResults, setEvalResults] = useState<EvalResult[]>(() =>
+    loadEvalResults(currentSession)
+  );
+  const [applicationOutcomes, setApplicationOutcomes] = useState<
+    ApplicationOutcome[]
+  >(() => loadApplicationOutcomes(currentSession));
+  const [aiOutputMetadata, setAIOutputMetadata] = useState<AIOutputMetadata[]>(
+    () => loadAIOutputMetadata(currentSession)
+  );
+  const [isRunningEvals, setIsRunningEvals] = useState(false);
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -210,6 +264,69 @@ export default function App() {
     setAuditLogs((current) => [savedLog, ...current].slice(0, 50));
   }
 
+  function recordFeedback(input: Parameters<typeof appendFeedbackEvent>[1]) {
+    const event = appendFeedbackEvent(currentSession, input);
+    setFeedbackEvents((current) => [event, ...current].slice(0, 500));
+  }
+
+  function recordUsage(input: Parameters<typeof appendUsageMeteringEvent>[1]) {
+    const event = appendUsageMeteringEvent(currentSession, input);
+    setUsageEvents((current) => [event, ...current].slice(0, 1000));
+  }
+
+  function recordAIOutput(input: Parameters<typeof recordAIOutputMetadata>[1]) {
+    const metadata = recordAIOutputMetadata(currentSession, input);
+    setAIOutputMetadata((current) => [metadata, ...current].slice(0, 1000));
+  }
+
+  function recordOutcomeForApplication(
+    application: ApplicationRecord,
+    notes = ""
+  ) {
+    const outcome = outcomeForApplicationStatus(application.status);
+    if (!outcome) {
+      return;
+    }
+
+    const savedOutcome = recordApplicationOutcome(
+      currentSession,
+      application,
+      outcome,
+      notes
+    );
+    setApplicationOutcomes(loadApplicationOutcomes(currentSession));
+
+    if (outcome === "recruiter_response") {
+      recordFeedback({
+        eventType: "recruiter_response_received",
+        resourceType: "ApplicationOutcome",
+        resourceId: savedOutcome.id,
+        metadata: { applicationRecordId: application.id, jobId: application.jobId }
+      });
+    } else if (outcome === "interview_scheduled") {
+      recordFeedback({
+        eventType: "interview_scheduled",
+        resourceType: "ApplicationOutcome",
+        resourceId: savedOutcome.id,
+        metadata: { applicationRecordId: application.id, jobId: application.jobId }
+      });
+    } else if (outcome === "rejected") {
+      recordFeedback({
+        eventType: "rejected",
+        resourceType: "ApplicationOutcome",
+        resourceId: savedOutcome.id,
+        metadata: { applicationRecordId: application.id, jobId: application.jobId }
+      });
+    } else if (outcome === "offer") {
+      recordFeedback({
+        eventType: "offer_received",
+        resourceType: "ApplicationOutcome",
+        resourceId: savedOutcome.id,
+        metadata: { applicationRecordId: application.id, jobId: application.jobId }
+      });
+    }
+  }
+
   function recordBrowserResult(result: BrowserApplicationResult) {
     setBrowserSessions(result.sessions);
     setApplications(result.applications);
@@ -220,6 +337,59 @@ export default function App() {
         resourceId: event.resourceId,
         metadata: event.metadata
       });
+      if (event.action === "browser_session_created") {
+        recordFeedback({
+          eventType: "browser_session_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "browser_session_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "user_approved_browser_submit") {
+        recordFeedback({
+          eventType: "browser_submit_approved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "browser_submit_approved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "application_submitted") {
+        recordFeedback({
+          eventType: "application_submitted",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "application_submitted",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordOutcomeForApplication(result.application);
+      } else if (event.action === "form_fields_detected") {
+        recordAIOutput({
+          outputType: "browser_field_mapping",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          modelName: "mock-browser-application-adapter",
+          promptVersion: "browser-field-mapping-v1",
+          provider: "local",
+          mode: "deterministic",
+          inputHash: String(event.metadata.applicationPackageId ?? "not_recorded"),
+          outputHash: String(event.metadata.fieldCount ?? 0)
+        });
+      }
     });
   }
 
@@ -302,6 +472,56 @@ export default function App() {
       resourceId: result.application.id,
       metadata: result.auditMetadata
     });
+
+    if (result.auditAction === "job_saved") {
+      recordFeedback({
+        eventType: "job_saved",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+    } else if (
+      result.auditAction === "job_rejected" ||
+      result.auditAction === "job_marked_not_interested"
+    ) {
+      recordFeedback({
+        eventType: "job_rejected",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+    } else if (
+      result.auditAction === "job_promoted_to_apply_review" ||
+      result.auditAction === "job_moved_to_maybe"
+    ) {
+      recordFeedback({
+        eventType: "score_overridden",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+    } else if (result.auditAction === "manually_applied") {
+      recordFeedback({
+        eventType: "manually_applied",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+      recordFeedback({
+        eventType: "application_submitted",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+      recordUsage({
+        eventType: "application_submitted",
+        resourceType: "ApplicationRecord",
+        resourceId: result.application.id,
+        metadata: result.auditMetadata
+      });
+    }
+
+    recordOutcomeForApplication(result.application);
   }
 
   function handleSaveProfile(draft: UserProfileDraft) {
@@ -336,6 +556,15 @@ export default function App() {
         hasLocalFile: true
       }
     });
+    recordUsage({
+      eventType: "resume_uploaded",
+      resourceType: "Resume",
+      resourceId: uploadedResume.id,
+      metadata: {
+        fileExtension: extensionFor(file.name),
+        hasLocalFile: true
+      }
+    });
   }
 
   function handlePlaceholderResume() {
@@ -351,6 +580,15 @@ export default function App() {
       resourceId: placeholderResume.id,
       metadata: {
         status: placeholderResume.status,
+        fileExtension: "pdf",
+        hasLocalFile: false
+      }
+    });
+    recordUsage({
+      eventType: "resume_uploaded",
+      resourceType: "Resume",
+      resourceId: placeholderResume.id,
+      metadata: {
         fileExtension: "pdf",
         hasLocalFile: false
       }
@@ -384,10 +622,25 @@ export default function App() {
         enabled: config.enabled
       }
     });
+    recordUsage({
+      eventType: "job_source_created",
+      resourceType: "JobSourceConfig",
+      resourceId: config.id,
+      metadata: {
+        source: config.source,
+        schedule: config.schedule,
+        enabled: config.enabled
+      }
+    });
   }
 
   async function handleRunScan(configId: string) {
     setIsScanning(true);
+    recordUsage({
+      eventType: "scan_run_started",
+      resourceType: "JobSourceConfig",
+      resourceId: configId
+    });
 
     try {
       const result = await runManualScan(currentSession, configId);
@@ -408,6 +661,17 @@ export default function App() {
           duplicatesSkipped: result.scanRun.duplicatesSkipped
         }
       });
+      recordUsage({
+        eventType: "job_ingested",
+        resourceType: "ScanRun",
+        resourceId: result.scanRun.id,
+        quantity: result.scanRun.jobsInserted,
+        metadata: {
+          source: result.scanRun.source,
+          jobsFetched: result.scanRun.jobsFetched,
+          duplicatesSkipped: result.scanRun.duplicatesSkipped
+        }
+      });
     } finally {
       setIsScanning(false);
     }
@@ -422,6 +686,16 @@ export default function App() {
       resourceId: summary.jobs[0]?.id ?? "manual_import",
       metadata: {
         inserted: summary.inserted,
+        duplicatesSkipped: summary.duplicatesSkipped
+      }
+    });
+    recordUsage({
+      eventType: "job_ingested",
+      resourceType: "NormalizedJob",
+      resourceId: summary.jobs[0]?.id ?? "manual_import",
+      quantity: summary.inserted,
+      metadata: {
+        source: "manual",
         duplicatesSkipped: summary.duplicatesSkipped
       }
     });
@@ -452,6 +726,42 @@ export default function App() {
           profileIncomplete: Boolean(result.profileWarning)
         }
       });
+      recordUsage({
+        eventType: "job_scored",
+        resourceType: "JobMatch",
+        resourceId: "batch_score_jobs",
+        quantity: result.scoredCount,
+        metadata: {
+          applyCount: result.applyCount,
+          maybeCount: result.maybeCount,
+          browseCount: result.browseCount,
+          skipCount: result.skipCount
+        }
+      });
+      recordUsage({
+        eventType: "llm_tokens_used",
+        resourceType: "JobMatch",
+        resourceId: "batch_score_jobs",
+        quantity: 0,
+        unit: "tokens",
+        metadata: { modelMode: "deterministic" }
+      });
+      const scoredJobIds = new Set(normalizedJobs.map((job) => job.id));
+      result.matches
+        .filter((match) => scoredJobIds.has(match.jobId))
+        .forEach((match) => {
+          recordAIOutput({
+            outputType: "match_score",
+            resourceType: "JobMatch",
+            resourceId: match.id,
+            modelName: match.modelName,
+            promptVersion: match.promptVersion,
+            provider: "local",
+            mode: "deterministic",
+            inputHash: match.jobId,
+            outputHash: `${match.overallScore}-${match.recommendation}`
+          });
+        });
     } finally {
       setIsScoring(false);
     }
@@ -495,6 +805,58 @@ export default function App() {
         generationMode: packageResult.package.generationMode,
         warningCount: packageResult.warningsCreated.length
       }
+    });
+    recordFeedback({
+      eventType: "application_package_generated",
+      resourceType: "ApplicationPackage",
+      resourceId: packageResult.package.id,
+      metadata: {
+        jobId,
+        applicationRecordId: result.application.id,
+        warningCount: packageResult.warningsCreated.length
+      }
+    });
+    recordUsage({
+      eventType: "application_package_generated",
+      resourceType: "ApplicationPackage",
+      resourceId: packageResult.package.id,
+      metadata: {
+        jobId,
+        generationMode: packageResult.package.generationMode,
+        warningCount: packageResult.warningsCreated.length
+      }
+    });
+    recordUsage({
+      eventType: "llm_tokens_used",
+      resourceType: "ApplicationPackage",
+      resourceId: packageResult.package.id,
+      quantity: 0,
+      unit: "tokens",
+      metadata: { modelMode: packageResult.package.generationMode }
+    });
+    recordAIOutput({
+      outputType: "application_package",
+      resourceType: "ApplicationPackage",
+      resourceId: packageResult.package.id,
+      modelName: packageResult.package.modelName,
+      promptVersion: packageResult.package.promptVersion,
+      provider: "local",
+      mode: packageResult.package.generationMode,
+      inputHash: packageResult.package.inputHash,
+      outputHash: packageResult.package.outputHash
+    });
+    packageResult.answers.forEach((answer) => {
+      recordAIOutput({
+        outputType: "application_answer",
+        resourceType: "ApplicationAnswer",
+        resourceId: answer.id,
+        modelName: packageResult.package.modelName,
+        promptVersion: packageResult.package.promptVersion,
+        provider: "local",
+        mode: packageResult.package.generationMode,
+        inputHash: packageResult.package.inputHash,
+        outputHash: packageResult.package.outputHash
+      });
     });
     recordUnsupportedClaimWarnings(
       packageResult.package.id,
@@ -552,6 +914,28 @@ export default function App() {
         warningCount: result.warningsCreated.length
       }
     });
+    if (existing.resumeMarkdown !== updates.resumeMarkdown) {
+      recordFeedback({
+        eventType: "resume_edited",
+        resourceType: "ApplicationPackage",
+        resourceId: packageId,
+        metadata: {
+          jobId: result.package.jobId,
+          warningCount: result.warningsCreated.length
+        }
+      });
+    }
+    if (existing.coverLetter !== updates.coverLetter) {
+      recordFeedback({
+        eventType: "cover_letter_edited",
+        resourceType: "ApplicationPackage",
+        resourceId: packageId,
+        metadata: {
+          jobId: result.package.jobId,
+          warningCount: result.warningsCreated.length
+        }
+      });
+    }
     recordUnsupportedClaimWarnings(
       packageId,
       result.package.jobId,
@@ -593,6 +977,16 @@ export default function App() {
         warningCount: result.warningsCreated.length
       }
     });
+    recordFeedback({
+      eventType: "application_answer_edited",
+      resourceType: "ApplicationAnswer",
+      resourceId: answerId,
+      metadata: {
+        packageId: result.package.id,
+        jobId: result.package.jobId,
+        warningCount: result.warningsCreated.length
+      }
+    });
     recordUnsupportedClaimWarnings(
       result.package.id,
       result.package.jobId,
@@ -614,6 +1008,15 @@ export default function App() {
         status: result.application.status
       }
     });
+    recordFeedback({
+      eventType: "application_package_approved",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId: result.package.jobId,
+        applicationRecordId: result.application.id
+      }
+    });
   }
 
   function handleRejectApplicationPackage(packageId: string) {
@@ -628,6 +1031,15 @@ export default function App() {
         jobId: result.package.jobId,
         applicationRecordId: result.application.id,
         status: result.application.status
+      }
+    });
+    recordFeedback({
+      eventType: "application_package_rejected",
+      resourceType: "ApplicationPackage",
+      resourceId: packageId,
+      metadata: {
+        jobId: result.package.jobId,
+        applicationRecordId: result.application.id
       }
     });
   }
@@ -687,6 +1099,30 @@ export default function App() {
       "User chose manual completion from the browser session review."
     );
     recordBrowserResult(result);
+  }
+
+  async function handleRunEvals() {
+    setIsRunningEvals(true);
+
+    try {
+      const result = await runEvalSuite(currentSession);
+      setEvalCases(result.cases);
+      setEvalRuns(loadEvalRuns(currentSession));
+      setEvalResults(loadEvalResults(currentSession));
+      recordAudit({
+        action:
+          result.run.failCount > 0 ? "eval_run.failed" : "eval_run.completed",
+        resourceType: "EvalRun",
+        resourceId: result.run.id,
+        metadata: {
+          suite: result.run.suite,
+          passCount: result.run.passCount,
+          failCount: result.run.failCount
+        }
+      });
+    } finally {
+      setIsRunningEvals(false);
+    }
   }
 
   function renderRoute() {
@@ -754,6 +1190,25 @@ export default function App() {
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
             onOpenBrowserSession={navigateToBrowserSession}
+          />
+        );
+      case "admin":
+        return (
+          <AdminSystemPage
+            jobs={normalizedJobs}
+            matches={jobMatches}
+            packages={applicationPackages}
+            browserSessions={browserSessions}
+            applications={applications}
+            auditLogs={auditLogs}
+            feedbackEvents={feedbackEvents}
+            usageEvents={usageEvents}
+            evalRuns={evalRuns}
+            evalResults={evalResults}
+            outcomes={applicationOutcomes}
+            aiOutputMetadata={aiOutputMetadata}
+            isRunningEvals={isRunningEvals}
+            onRunEvals={handleRunEvals}
           />
         );
       case "package-review": {

@@ -55,6 +55,7 @@ enum ApplicationStatus {
   interviewing
   rejected
   offer
+  withdrawn
   archived
 }
 
@@ -157,6 +158,80 @@ enum BrowserApplicationSessionStatus {
   submitted
   failed
   manual_required
+}
+
+enum FeedbackEventType {
+  job_viewed
+  job_saved
+  job_rejected
+  score_overridden
+  application_package_generated
+  resume_edited
+  cover_letter_edited
+  application_answer_edited
+  application_package_approved
+  application_package_rejected
+  browser_session_created
+  browser_submit_approved
+  application_submitted
+  manually_applied
+  recruiter_response_received
+  interview_scheduled
+  rejected
+  offer_received
+}
+
+enum UsageMeteringEventType {
+  resume_uploaded
+  job_source_created
+  scan_run_started
+  job_ingested
+  job_scored
+  application_package_generated
+  browser_session_started
+  browser_submit_approved
+  application_submitted
+  llm_tokens_used
+}
+
+enum EvalSuite {
+  match_score
+  application_package
+  browser_assistant_safety
+}
+
+enum EvalRunSuite {
+  all
+  match_score
+  application_package
+  browser_assistant_safety
+}
+
+enum EvalRunStatus {
+  running
+  completed
+  failed
+}
+
+enum EvalStatus {
+  passed
+  failed
+}
+
+enum ApplicationOutcomeStatus {
+  recruiter_response
+  interview_scheduled
+  rejected
+  offer
+  withdrawn
+  submitted
+}
+
+enum AIOutputType {
+  match_score
+  application_package
+  application_answer
+  browser_field_mapping
 }
 
 model Tenant {
@@ -385,6 +460,121 @@ model BrowserApplicationSession {
   @@index([tenantId, userId])
   @@index([tenantId, applicationPackageId])
   @@index([tenantId, applicationRecordId])
+}
+
+model FeedbackEvent {
+  id           String            @id @default(cuid())
+  tenantId     String
+  userId       String
+  eventType    FeedbackEventType
+  resourceType String
+  resourceId   String
+  metadata     Json
+  createdAt    DateTime          @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, eventType])
+}
+
+model EvalCase {
+  id               String    @id @default(cuid())
+  tenantId         String
+  userId           String
+  suite            EvalSuite
+  name             String
+  description      String
+  inputSummary     String
+  expectedBehavior String
+  createdAt        DateTime  @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, suite])
+}
+
+model EvalRun {
+  id         String        @id @default(cuid())
+  tenantId   String
+  userId     String
+  suite      EvalRunSuite
+  status     EvalRunStatus
+  startedAt  DateTime
+  finishedAt DateTime?
+  passCount  Int           @default(0)
+  failCount  Int           @default(0)
+
+  @@index([tenantId, userId])
+  @@index([tenantId, suite])
+}
+
+model EvalResult {
+  id         String     @id @default(cuid())
+  tenantId   String
+  userId     String
+  evalRunId  String
+  evalCaseId String
+  suite      EvalSuite
+  name       String
+  status     EvalStatus
+  message    String
+  severity   String
+  createdAt  DateTime   @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, evalRunId])
+}
+
+model UsageMeteringEvent {
+  id           String                 @id @default(cuid())
+  tenantId     String
+  userId       String
+  eventType    UsageMeteringEventType
+  resourceType String
+  resourceId   String
+  quantity     Float
+  unit         String
+  metadata     Json
+  createdAt    DateTime               @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, eventType])
+}
+
+model ApplicationOutcome {
+  id                  String                   @id @default(cuid())
+  tenantId            String
+  userId              String
+  applicationRecordId String
+  jobId               String
+  outcome             ApplicationOutcomeStatus
+  outcomeDate         DateTime
+  notes               String
+  createdAt           DateTime                 @default(now())
+  updatedAt           DateTime                 @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, applicationRecordId])
+}
+
+model AIOutputMetadata {
+  id            String       @id @default(cuid())
+  tenantId      String
+  userId        String
+  outputType    AIOutputType
+  resourceType  String
+  resourceId    String
+  modelName     String
+  promptVersion String
+  provider      String
+  mode          String
+  inputHash     String
+  outputHash    String
+  tokenInput    Int          @default(0)
+  tokenOutput   Int          @default(0)
+  createdAt     DateTime     @default(now())
+
+  @@index([tenantId, userId])
+  @@index([tenantId, outputType])
+  @@index([tenantId, resourceType, resourceId])
 }
 
 model AuditLog {

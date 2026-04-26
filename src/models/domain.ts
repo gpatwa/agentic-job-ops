@@ -36,6 +36,7 @@ export const applicationStatuses = [
   "interviewing",
   "rejected",
   "offer",
+  "withdrawn",
   "archived"
 ] as const;
 
@@ -169,6 +170,83 @@ export type QueueType = (typeof queueTypes)[number];
 
 export const matchRecommendations = ["apply", "maybe", "browse", "skip"] as const;
 export type MatchRecommendation = (typeof matchRecommendations)[number];
+
+export const feedbackEventTypes = [
+  "job_viewed",
+  "job_saved",
+  "job_rejected",
+  "score_overridden",
+  "application_package_generated",
+  "resume_edited",
+  "cover_letter_edited",
+  "application_answer_edited",
+  "application_package_approved",
+  "application_package_rejected",
+  "browser_session_created",
+  "browser_submit_approved",
+  "application_submitted",
+  "manually_applied",
+  "recruiter_response_received",
+  "interview_scheduled",
+  "rejected",
+  "offer_received"
+] as const;
+
+export type FeedbackEventType = (typeof feedbackEventTypes)[number];
+
+export const usageMeteringEventTypes = [
+  "resume_uploaded",
+  "job_source_created",
+  "scan_run_started",
+  "job_ingested",
+  "job_scored",
+  "application_package_generated",
+  "browser_session_started",
+  "browser_submit_approved",
+  "application_submitted",
+  "llm_tokens_used"
+] as const;
+
+export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
+
+export const evalSuites = [
+  "match_score",
+  "application_package",
+  "browser_assistant_safety"
+] as const;
+
+export type EvalSuite = (typeof evalSuites)[number];
+
+export const evalRunSuites = ["all", ...evalSuites] as const;
+export type EvalRunSuite = (typeof evalRunSuites)[number];
+
+export const evalStatuses = ["passed", "failed"] as const;
+export type EvalStatus = (typeof evalStatuses)[number];
+
+export const evalRunStatuses = ["running", "completed", "failed"] as const;
+export type EvalRunStatus = (typeof evalRunStatuses)[number];
+
+export const applicationOutcomeStatuses = [
+  "recruiter_response",
+  "interview_scheduled",
+  "rejected",
+  "offer",
+  "withdrawn",
+  "submitted"
+] as const;
+
+export type ApplicationOutcomeStatus = (typeof applicationOutcomeStatuses)[number];
+
+export const aiOutputTypes = [
+  "match_score",
+  "application_package",
+  "application_answer",
+  "browser_field_mapping"
+] as const;
+
+export type AIOutputType = (typeof aiOutputTypes)[number];
+
+export type EventMetadata = Record<string, string | number | boolean | null>;
 
 export interface Tenant {
   id: string;
@@ -398,6 +476,99 @@ export interface BrowserApplicationSession {
   updatedAt: string;
 }
 
+export interface FeedbackEvent {
+  id: string;
+  tenantId: string;
+  userId: string;
+  eventType: FeedbackEventType;
+  resourceType: string;
+  resourceId: string;
+  metadata: EventMetadata;
+  createdAt: string;
+}
+
+export interface EvalCase {
+  id: string;
+  tenantId: string;
+  userId: string;
+  suite: EvalSuite;
+  name: string;
+  description: string;
+  inputSummary: string;
+  expectedBehavior: string;
+  createdAt: string;
+}
+
+export interface EvalRun {
+  id: string;
+  tenantId: string;
+  userId: string;
+  suite: EvalRunSuite;
+  status: EvalRunStatus;
+  startedAt: string;
+  finishedAt: string | null;
+  passCount: number;
+  failCount: number;
+}
+
+export interface EvalResult {
+  id: string;
+  tenantId: string;
+  userId: string;
+  evalRunId: string;
+  evalCaseId: string;
+  suite: EvalSuite;
+  name: string;
+  status: EvalStatus;
+  message: string;
+  severity: "info" | "warning" | "critical";
+  createdAt: string;
+}
+
+export interface UsageMeteringEvent {
+  id: string;
+  tenantId: string;
+  userId: string;
+  eventType: UsageMeteringEventType;
+  resourceType: string;
+  resourceId: string;
+  quantity: number;
+  unit: string;
+  metadata: EventMetadata;
+  createdAt: string;
+}
+
+export interface ApplicationOutcome {
+  id: string;
+  tenantId: string;
+  userId: string;
+  applicationRecordId: string;
+  jobId: string;
+  outcome: ApplicationOutcomeStatus;
+  outcomeDate: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AIOutputMetadata {
+  id: string;
+  tenantId: string;
+  userId: string;
+  outputType: AIOutputType;
+  resourceType: string;
+  resourceId: string;
+  modelName: string;
+  promptVersion: string;
+  provider: string;
+  mode: string;
+  inputHash: string;
+  outputHash: string;
+  tokenInput: number;
+  tokenOutput: number;
+  createdAt: string;
+}
+
 export interface AuditLog {
   id: string;
   tenantId: string;
@@ -405,7 +576,7 @@ export interface AuditLog {
   action: string;
   resourceType: string;
   resourceId: string;
-  metadata: Record<string, string | number | boolean | null>;
+  metadata: EventMetadata;
   createdAt: string;
 }
 

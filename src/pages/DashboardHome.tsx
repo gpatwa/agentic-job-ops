@@ -109,7 +109,9 @@ function activityLabel(action: string): string {
     user_approved_browser_submit: "Browser submit approved",
     application_submitted: "Application submitted",
     browser_session_failed: "Browser session failed",
-    manual_application_required: "Manual application required"
+    manual_application_required: "Manual application required",
+    "eval_run.completed": "Eval run completed",
+    "eval_run.failed": "Eval run found issues"
   };
 
   return labels[action] ?? action.replace(/[._]/g, " ");

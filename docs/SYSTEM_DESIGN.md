@@ -15,6 +15,11 @@ Phase 1 is a client-side React/Vite TypeScript app with local persistence. The c
 - `src/services/jobIngestion.ts`: Phase 2 source configs, Greenhouse/Lever connectors, manual URL placeholder import, scan-run logging, schedule due checks, and deduplication.
 - `src/services/matchEngine.ts`: Phase 3 deterministic scoring adapter, placeholder LLM adapter, match persistence, queue mapping, and job status updates.
 - `src/services/browserApplicationAssistant.ts`: Browser application session state machine, deterministic adapter, Playwright adapter boundary, safe field mapping, approval guardrails, and manual-required fallback.
+- `src/services/feedbackService.ts`: Tenant-scoped product feedback event capture and summaries.
+- `src/services/usageMetering.ts`: Tenant-scoped usage metering events and aggregate counters.
+- `src/services/evalService.ts`: Deterministic eval cases, runs, results, and safety checks for match scoring, package generation, and browser assistant guardrails.
+- `src/services/applicationOutcomeService.ts`: Application outcome records for recruiter responses, interviews, rejections, offers, withdrawals, and submitted applications.
+- `src/services/aiOutputMetadata.ts`: Centralized model, prompt, mode, version, and hash metadata for AI-produced outputs without storing sensitive content.
 - `prisma/schema.prisma`: PostgreSQL-ready model reference.
 
 ## Ingestion Flow
@@ -82,3 +87,13 @@ Audit metadata is intentionally narrow. Resume content, profile details, credent
 Browser submit approval requires the job seeker identity and an explicit approval flag. The submit action is unavailable until the session reaches `ready_for_review`, and the assistant cannot submit until the session is `approved_for_submit`.
 
 Before any submit adapter can run, the service verifies that the application package is still `approved`, the persisted audit log contains `user_approved_browser_submit` for the same browser session, that approval was granted from `ready_for_review`, and the session still matches the same package, application record, and job. The application record moves to `submitted` only after the adapter confirms submission or when the user explicitly marks a manual application as submitted.
+
+## Quality, Evals, And Metering
+
+Phase 7 adds a local quality-control layer before any real browser automation is connected. Feedback events record major user decisions and workflow milestones, including job saves, rejections, scoring overrides, package edits, browser-session starts, submit approvals, and outcomes. Usage metering events record operational counters such as resume uploads, scan runs, jobs ingested, jobs scored, packages generated, browser sessions, submit approvals, confirmed submissions, and placeholder token usage.
+
+The eval runner stores deterministic `EvalCase`, `EvalRun`, and `EvalResult` records. Current suites cover match score calibration, application package truthfulness, and browser assistant safety guardrails. These evals verify that strong matches score high, weak matches score low, avoid-list companies are skipped, low-score jobs remain browsable, unsupported claims are flagged, browser sessions require approved packages, submit cannot happen before approval, sensitive fields pause, manual fallback works, and only the job seeker can approve submit.
+
+`AIOutputMetadata` centralizes model and prompt metadata for match scores, package drafts, application answers, and browser field detection. It stores identifiers, versions, hashes, and generation mode only; generated resume text, application answers, and other sensitive content are not copied into metadata, usage, feedback, or audit records.
+
+The admin/system dashboard summarizes jobs ingested, jobs scored, packages generated, browser sessions, submitted applications, feedback counts, usage by tenant, latest eval pass/fail results, outcomes, recent audit events, and recent failures. It is intended for operational visibility and safety monitoring, not for optimizing the raw number of submitted applications.

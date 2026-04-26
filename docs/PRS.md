@@ -57,6 +57,32 @@ Build application package generation with:
 - Tracker and job dashboard links into package review.
 - Audit events for generation, edits, answer edits, approval, rejection, and unsupported-claim warnings.
 
+## Phase 6 Scope
+
+Build a browser application assistant foundation with:
+
+- `BrowserApplicationSession` records for tenant-scoped browser apply sessions.
+- Deterministic browser-session flow that works without real external automation.
+- Playwright adapter boundary for future real browser control.
+- ATS detection placeholder, form-field detection, safe field mapping, uncertain-field pauses, and screenshot placeholder support.
+- Package review entry point for approved packages only.
+- Human approval gate before submit, including persisted approval audit verification for the same approved session.
+- Manual-required fallback when automation should pause or cannot safely continue.
+- Tracker visibility for browser session state.
+- Tests for session state transitions and submit approval guardrails.
+
+## Phase 7 Scope
+
+Build quality, safety, and enterprise visibility foundations with:
+
+- `FeedbackEvent` records for major product actions, edits, approvals, submissions, and outcomes.
+- `UsageMeteringEvent` records for operational events such as uploads, source creation, scans, ingestion, scoring, packages, browser sessions, submit approvals, submissions, and token placeholders.
+- `EvalCase`, `EvalRun`, and `EvalResult` records with deterministic sample suites.
+- `ApplicationOutcome` records for recruiter responses, interviews, rejections, offers, withdrawals, and submitted applications.
+- `AIOutputMetadata` records for model, prompt, version, generation mode, and hash metadata without storing sensitive generated content.
+- Admin/system dashboard with audit, feedback, usage, eval, outcome, and failure summaries.
+- Score calibration basics and safety eval checks for match scoring, application package truthfulness, and browser assistant approval guardrails.
+
 ## Functional Requirements
 
 - Users can create and edit a career profile.
@@ -78,6 +104,13 @@ Build application package generation with:
 - Users can edit generated resume, cover letter, and answers before approving.
 - Users can approve or reject a generated package.
 - Unsupported-claim warnings are visible when generated or edited text mentions risky unsupported claims.
+- Users can start browser apply only from an approved application package.
+- Browser sessions show detected fields, filled fields, uncertain fields, status, and manual fallback controls.
+- Assistant submission remains blocked until the same session has an approved package, ready-for-review status, explicit job-seeker approval, and a matching submit-approval audit event.
+- Application records move to submitted only after confirmed assistant submission or an explicit manual submitted action.
+- Feedback and usage events are recorded for major workflow actions.
+- Admin users can run deterministic evals and review pass/fail summaries.
+- Admin users can review usage, feedback, outcomes, recent audit events, and recent failures.
 
 ## Non-Functional Requirements
 
@@ -87,3 +120,4 @@ Build application package generation with:
 - Do not log resume content, sensitive profile data, credentials, or application answers.
 - Preserve a service boundary for ingestion, matching, AI generation, and browser-agent workflows.
 - Require human approval before any future application submission.
+- Do not optimize for the number of applications submitted; optimize for strong-fit applications, approval quality, recruiter response rate, interview conversion, truthful generated content, and low unsupported-claim rate.
