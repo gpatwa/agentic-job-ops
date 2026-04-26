@@ -28,6 +28,13 @@ function resumeDisplayName(resume: Resume): string {
     : resume.originalFileName;
 }
 
+function navigationTestId(id: string): string {
+  if (id === "jobs") return "job-matches-nav";
+  if (id === "tracker") return "tracker-nav";
+  if (id === "admin") return "admin-nav";
+  return `${id}-nav`;
+}
+
 export function AppShell<RouteId extends string>({
   children,
   currentRoute,
@@ -55,6 +62,7 @@ export function AppShell<RouteId extends string>({
             ? "bg-emerald-50 text-emerald-800"
             : "text-slate-600 hover:bg-slate-100 hover:text-slate-950"
         }`}
+        data-testid={navigationTestId(item.id)}
         type="button"
         onClick={() => onNavigate(item.id)}
       >

@@ -198,7 +198,7 @@ export function ApplicationPackagePage({
   const canReject = applicationPackage.status !== "rejected";
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="application-package-page">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
@@ -250,6 +250,7 @@ export function ApplicationPackagePage({
           {!browserSession && applicationPackage.status === "approved" && (
             <button
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-sm font-semibold text-white transition hover:bg-emerald-800"
+              data-testid="start-browser-apply-demo"
               type="button"
               onClick={() => onStartBrowserApply(applicationPackage.id)}
             >
@@ -268,6 +269,7 @@ export function ApplicationPackagePage({
           </button>
           <button
             className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            data-testid="approve-package"
             type="button"
             disabled={!canApprove}
             onClick={() => onApprove(applicationPackage.id)}

@@ -1,6 +1,31 @@
 # QA Happy Path
 
-Use this checklist for manual MVP verification. The expected result is a working B2C demo flow with no blind auto-apply and no live external submit.
+Use this checklist for MVP verification. The expected result is a working B2C demo flow with no blind auto-apply and no live external submit.
+
+## Automated QA
+
+Run the automated regression suite before shipping product changes:
+
+```bash
+npm run qa:mvp
+```
+
+This command runs typecheck, unit tests, production build, and the Playwright MVP happy-path test.
+
+The automated Playwright test covers:
+
+- Clean local workspace startup.
+- Realistic demo seeding.
+- Action Center rendering with pending actions.
+- Job Matches rendering with scored jobs.
+- Starting application prep from a strong match.
+- Application package page opening and package approval.
+- Browser apply demo session creation.
+- Submit blocked before explicit approval.
+- Tracker visibility for application context.
+- Admin/System audit event visibility.
+
+Manual QA is still useful for copy polish, visual layout review across viewports, exploratory package editing, and browser-extension edge cases.
 
 ## Preconditions
 

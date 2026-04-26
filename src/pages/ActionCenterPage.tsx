@@ -95,6 +95,7 @@ function ActionCard({
   return (
     <article
       className={`rounded-lg border ${tone.border} ${tone.background} p-4 shadow-soft`}
+      data-testid="action-card"
     >
       <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
         <div className="flex items-start gap-3">
@@ -214,7 +215,7 @@ export function ActionCenterPage({
   }, [actions]);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="action-center">
       <header className="max-w-3xl">
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
           Action Center

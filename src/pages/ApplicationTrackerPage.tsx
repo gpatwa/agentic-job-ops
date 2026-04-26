@@ -372,7 +372,7 @@ export function ApplicationTrackerPage({
     .filter((group) => group.applications.length > 0);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="application-tracker">
       <header className="max-w-3xl">
         <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
           Tracker

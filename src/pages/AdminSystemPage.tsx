@@ -160,7 +160,7 @@ export function AdminSystemPage({
   ].slice(0, 6);
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="admin-system">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
         <div className="max-w-3xl">
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
@@ -352,7 +352,7 @@ export function AdminSystemPage({
           <h3 className="text-base font-semibold text-slate-950">
             Recent audit events
           </h3>
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 space-y-3" data-testid="audit-events">
             {auditLogs.slice(0, 6).map((log) => (
               <div key={log.id} className="rounded-md border border-slate-200 p-3">
                 <p className="text-sm font-semibold text-slate-900">

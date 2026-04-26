@@ -172,7 +172,7 @@ export function BrowserSessionReviewPage({
   );
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-testid="browser-session-page">
       <header className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
         <div className="max-w-3xl">
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
@@ -286,6 +286,15 @@ export function BrowserSessionReviewPage({
               screen always require human control. The assistant stores field
               provenance and redacted previews, not private answer text.
             </p>
+            {!canSubmit && (
+              <p
+                className="mt-2 text-sm font-semibold text-amber-950"
+                data-testid="submit-blocked-message"
+              >
+                Submit is blocked until this same session has explicit user
+                approval and reaches approved-for-submit status.
+              </p>
+            )}
           </div>
         </div>
       </section>

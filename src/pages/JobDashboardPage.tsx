@@ -164,6 +164,8 @@ function ActionButton({
   notes?: string;
   variant?: "primary" | "secondary" | "danger";
 }) {
+  const testId =
+    action === "start_application_prep" ? "start-application-prep" : undefined;
   const className =
     variant === "primary"
       ? "border-ink bg-ink text-white hover:bg-slate-700"
@@ -174,6 +176,7 @@ function ActionButton({
   return (
     <button
       className={`inline-flex min-h-9 items-center justify-center rounded-md border px-3 text-xs font-semibold transition ${className}`}
+      data-testid={testId}
       type="button"
       onClick={() => {
         if (confirmSensitiveAction(action)) {
@@ -219,7 +222,10 @@ function JobMatchCard({
 
   if (!match) {
     return (
-      <article className="rounded-lg border border-slate-200 bg-white p-4">
+      <article
+        className="rounded-lg border border-slate-200 bg-white p-4"
+        data-testid="job-card"
+      >
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div className="min-w-0">
             <h3 className="text-base font-semibold text-slate-950">
@@ -272,7 +278,10 @@ function JobMatchCard({
   const lowMatch = match.queue === "browse" && match.overallScore < 5.5;
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4">
+    <article
+      className="rounded-lg border border-slate-200 bg-white p-4"
+      data-testid="job-card"
+    >
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-slate-950">
