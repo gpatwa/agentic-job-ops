@@ -25,6 +25,8 @@ import type {
   EvalResult,
   EvalRun,
   EventMetadata,
+  ExtensionPageStructure,
+  ExtensionSession,
   FeedbackEvent,
   JobMatch,
   Resume,
@@ -105,6 +107,21 @@ import {
   appendUsageMeteringEvent,
   loadUsageMeteringEvents
 } from "./services/usageMetering";
+import {
+  approveExtensionFill,
+  approveExtensionSubmit,
+  authorizeExtensionSession,
+  createExtensionFillPlan,
+  createExtensionSession,
+  disconnectExtensionSession,
+  ingestExtensionPageStructure,
+  loadExtensionSessions,
+  markExtensionManualRequired,
+  recordExtensionFieldsFilled,
+  recordExtensionSubmitCompleted,
+  type ExtensionAuditEvent,
+  type ExtensionResult
+} from "./services/extensionService";
 
 type RouteId =
   | "dashboard"
@@ -192,6 +209,9 @@ export default function App() {
   const [browserSessions, setBrowserSessions] = useState<
     BrowserApplicationSession[]
   >(() => loadBrowserApplicationSessions(currentSession));
+  const [extensionSessions, setExtensionSessions] = useState<ExtensionSession[]>(
+    () => loadExtensionSessions(currentSession)
+  );
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -1123,6 +1143,353 @@ export default function App() {
     recordBrowserResult(result);
   }
 
+  function persistExtensionAuditEvents(events: ExtensionAuditEvent[]) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+
+      if (event.action === "extension_connection_requested") {
+        recordFeedback({
+          eventType: "extension_session_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_session_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "application_page_analyzed") {
+        recordFeedback({
+          eventType: "extension_page_analyzed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_page_analyzed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "fill_plan_created") {
+        recordFeedback({
+          eventType: "extension_fill_plan_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_fill_plan_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "user_approved_field_fill") {
+        recordFeedback({
+          eventType: "user_approved_extension_fill",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "extension_fields_filled") {
+        recordFeedback({
+          eventType: "extension_fields_filled",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_fields_filled",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "user_approved_extension_submit") {
+        recordFeedback({
+          eventType: "extension_submit_approved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_submit_approved",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "extension_submit_completed") {
+        recordFeedback({
+          eventType: "extension_submit_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "extension_session_failed") {
+        recordFeedback({
+          eventType: "extension_session_failed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "extension_session_failed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  function recordExtensionResult(result: ExtensionResult) {
+    setExtensionSessions(result.sessions);
+    persistExtensionAuditEvents(result.auditEvents);
+  }
+
+  function buildDemoExtensionPageStructure(
+    job: { applicationUrl: string; title: string; company: string } | null
+  ): ExtensionPageStructure {
+    const url =
+      job?.applicationUrl ||
+      "http://127.0.0.1:5174/extension/demo/demo-application.html";
+    let hostname = "demo.local";
+    try {
+      hostname = new URL(url).hostname || hostname;
+    } catch {
+      hostname = "demo.local";
+    }
+    const title = job
+      ? `${job.title} — ${job.company}`
+      : "Demo Job Application — Agentic Job Ops";
+    return {
+      pageUrl: url,
+      pageTitle: title,
+      hostname,
+      hasSubmitButton: true,
+      hasCaptcha: false,
+      hasLoginChallenge: false,
+      capturedAt: new Date().toISOString(),
+      fields: [
+        {
+          fieldId: "first_name",
+          label: "First name",
+          fieldType: "text",
+          inputName: "first_name",
+          inputId: "first_name",
+          placeholder: "",
+          required: true,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "last_name",
+          label: "Last name",
+          fieldType: "text",
+          inputName: "last_name",
+          inputId: "last_name",
+          placeholder: "",
+          required: true,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "email",
+          label: "Email",
+          fieldType: "email",
+          inputName: "email",
+          inputId: "email",
+          placeholder: "",
+          required: true,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "phone",
+          label: "Phone",
+          fieldType: "phone",
+          inputName: "phone",
+          inputId: "phone",
+          placeholder: "",
+          required: false,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "linkedin",
+          label: "LinkedIn URL",
+          fieldType: "url",
+          inputName: "linkedin",
+          inputId: "linkedin",
+          placeholder: "",
+          required: false,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "resume",
+          label: "Resume",
+          fieldType: "file",
+          inputName: "resume",
+          inputId: "resume",
+          placeholder: "",
+          required: true,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "custom_question",
+          label: "What makes you a strong fit?",
+          fieldType: "textarea",
+          inputName: "custom_question",
+          inputId: "custom_question",
+          placeholder: "",
+          required: false,
+          sensitive: false,
+          hasValue: false
+        },
+        {
+          fieldId: "eeoc_gender",
+          label: "Gender (voluntary demographic question)",
+          fieldType: "select",
+          inputName: "eeoc_gender",
+          inputId: "eeoc_gender",
+          placeholder: "",
+          required: false,
+          sensitive: true,
+          hasValue: false
+        }
+      ]
+    };
+  }
+
+  function handleConnectExtensionDemo(browserSessionId: string) {
+    const browserSession = browserSessions.find((item) => item.id === browserSessionId);
+    if (!browserSession) {
+      return;
+    }
+    const job = normalizedJobs.find((item) => item.id === browserSession.jobId) ?? null;
+    const applicationPackage = applicationPackages.find(
+      (item) => item.id === browserSession.applicationPackageId
+    );
+    const application = applications.find(
+      (item) => item.id === browserSession.applicationRecordId
+    );
+    const created = createExtensionSession(currentSession, {
+      extensionInstanceId: `demo_${globalThis.crypto.randomUUID()}`,
+      pageUrl:
+        job?.applicationUrl ||
+        "http://127.0.0.1:5174/extension/demo/demo-application.html",
+      pageTitle: job ? `${job.title} — ${job.company}` : "Demo Job Application",
+      hostname: "demo.local",
+      applicationPackageId: applicationPackage?.id ?? null,
+      applicationRecordId: application?.id ?? null,
+      jobId: job?.id ?? null,
+      browserApplicationSessionId: browserSession.id
+    });
+    recordExtensionResult(created);
+
+    const authorized = authorizeExtensionSession(currentSession, created.session.id, {
+      actorUserId: currentSession.userId,
+      authorizedByUser: true
+    });
+    recordExtensionResult(authorized);
+
+    const ingested = ingestExtensionPageStructure(
+      currentSession,
+      created.session.id,
+      buildDemoExtensionPageStructure(job)
+    );
+    recordExtensionResult(ingested);
+
+    if (ingested.session.status === "page_analyzed") {
+      const planned = createExtensionFillPlan(currentSession, created.session.id, {
+        applicationPackage: applicationPackage ?? null,
+        application: application ?? null,
+        job,
+        profile
+      });
+      recordExtensionResult(planned);
+    }
+  }
+
+  function handleApproveExtensionFill(extensionSessionId: string) {
+    const result = approveExtensionFill(currentSession, extensionSessionId, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    recordExtensionResult(result);
+  }
+
+  function handleSimulateExtensionFill(extensionSessionId: string) {
+    const session = extensionSessions.find((item) => item.id === extensionSessionId);
+    if (!session) {
+      return;
+    }
+    const fillableIds = session.fillPlan
+      .filter((item) => item.action === "fill" || item.action === "upload")
+      .map((item) => item.fieldId);
+    const result = recordExtensionFieldsFilled(
+      currentSession,
+      extensionSessionId,
+      fillableIds
+    );
+    recordExtensionResult(result);
+  }
+
+  function handleApproveExtensionSubmit(extensionSessionId: string) {
+    const result = approveExtensionSubmit(currentSession, extensionSessionId, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    recordExtensionResult(result);
+  }
+
+  async function handleSimulateExtensionSubmitComplete(extensionSessionId: string) {
+    const session = extensionSessions.find((item) => item.id === extensionSessionId);
+    const linkedPackage = session?.applicationPackageId
+      ? applicationPackages.find((item) => item.id === session.applicationPackageId) ?? null
+      : null;
+    try {
+      const result = recordExtensionSubmitCompleted(
+        currentSession,
+        extensionSessionId,
+        {
+          actorUserId: currentSession.userId,
+          confirmationDetected: true,
+          applicationPackage: linkedPackage
+        }
+      );
+      recordExtensionResult(result);
+    } finally {
+      setAuditLogs(loadAuditLogs(currentSession).slice(0, 50));
+    }
+  }
+
+  function handleDisconnectExtension(extensionSessionId: string) {
+    const result = disconnectExtensionSession(
+      currentSession,
+      extensionSessionId,
+      "User disconnected the extension session from the app."
+    );
+    recordExtensionResult(result);
+  }
+
+  function handleExtensionManualRequired(extensionSessionId: string) {
+    const result = markExtensionManualRequired(
+      currentSession,
+      extensionSessionId,
+      "User chose manual completion from the extension review."
+    );
+    recordExtensionResult(result);
+  }
+
   async function handleRunEvals() {
     setIsRunningEvals(true);
 
@@ -1221,6 +1588,7 @@ export default function App() {
             matches={jobMatches}
             packages={applicationPackages}
             browserSessions={browserSessions}
+            extensionSessions={extensionSessions}
             applications={applications}
             auditLogs={auditLogs}
             feedbackEvents={feedbackEvents}
@@ -1295,6 +1663,14 @@ export default function App() {
         const match = job
           ? jobMatches.find((item) => item.jobId === job.id) ?? null
           : null;
+        const linkedExtensionSession = browserSession
+          ? extensionSessions
+              .filter((item) => item.browserApplicationSessionId === browserSession.id)
+              .sort(
+                (a, b) =>
+                  new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+              )[0] ?? null
+          : null;
 
         return (
           <BrowserSessionReviewPage
@@ -1303,11 +1679,21 @@ export default function App() {
             application={application}
             job={job}
             match={match}
+            extensionSession={linkedExtensionSession}
             onBack={() => navigate("tracker")}
             onMarkReadyForReview={handleMarkBrowserSessionReady}
             onApproveSubmit={handleApproveBrowserSubmit}
             onSubmitApproved={handleSubmitApprovedBrowserApplication}
             onManualRequired={handleMarkBrowserSessionManualRequired}
+            onConnectExtensionDemo={handleConnectExtensionDemo}
+            onApproveExtensionFill={handleApproveExtensionFill}
+            onSimulateExtensionFill={handleSimulateExtensionFill}
+            onApproveExtensionSubmit={handleApproveExtensionSubmit}
+            onSimulateExtensionSubmitComplete={
+              handleSimulateExtensionSubmitComplete
+            }
+            onDisconnectExtension={handleDisconnectExtension}
+            onExtensionManualRequired={handleExtensionManualRequired}
           />
         );
       }

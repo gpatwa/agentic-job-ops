@@ -16,6 +16,7 @@ import {
   evalRunSuites,
   evalStatuses,
   evalSuites,
+  extensionSessionStatuses,
   feedbackEventTypes,
   fillPlanActions,
   generationModes,
@@ -383,4 +384,55 @@ export const auditLogSchema = z.object({
   resourceId: idSchema,
   metadata: metadataSchema,
   createdAt: isoDateSchema
+});
+
+export const extensionPageStructureFieldSchema = z.object({
+  fieldId: z.string().trim().min(1),
+  label: z.string().trim().min(1),
+  fieldType: z.enum(applicationFieldTypes),
+  inputName: z.string().trim().default(""),
+  inputId: z.string().trim().default(""),
+  placeholder: z.string().trim().default(""),
+  required: z.boolean(),
+  sensitive: z.boolean(),
+  hasValue: z.boolean()
+});
+
+export const extensionPageStructureSchema = z.object({
+  pageUrl: z.string().trim().url(),
+  pageTitle: z.string().trim(),
+  hostname: z.string().trim().min(1),
+  fields: z.array(extensionPageStructureFieldSchema),
+  hasSubmitButton: z.boolean(),
+  hasCaptcha: z.boolean(),
+  hasLoginChallenge: z.boolean(),
+  capturedAt: isoDateSchema
+});
+
+export const extensionSessionSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  extensionInstanceId: z.string().trim().min(1),
+  pageUrl: z.string().trim(),
+  pageTitle: z.string().trim().default(""),
+  hostname: z.string().trim().default(""),
+  status: z.enum(extensionSessionStatuses),
+  applicationPackageId: idSchema.nullable(),
+  applicationRecordId: idSchema.nullable(),
+  jobId: idSchema.nullable(),
+  browserApplicationSessionId: idSchema.nullable(),
+  fieldsDetected: z.array(detectedApplicationFieldSchema).default([]),
+  fieldsFilled: z.array(filledApplicationFieldSchema).default([]),
+  uncertainFields: z.array(uncertainApplicationFieldSchema).default([]),
+  fillPlan: z.array(browserFillPlanItemSchema).default([]),
+  pageStructureHash: z.string().trim().default(""),
+  authorizedAt: isoDateSchema.nullable(),
+  fillApprovedAt: isoDateSchema.nullable(),
+  submitApprovedAt: isoDateSchema.nullable(),
+  submittedAt: isoDateSchema.nullable(),
+  disconnectedAt: isoDateSchema.nullable(),
+  errorMessage: z.string().default(""),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
 });

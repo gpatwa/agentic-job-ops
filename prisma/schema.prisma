@@ -186,6 +186,14 @@ enum FeedbackEventType {
   interview_scheduled
   rejected
   offer_received
+  extension_session_started
+  extension_page_analyzed
+  extension_fill_plan_created
+  user_approved_extension_fill
+  extension_fields_filled
+  extension_submit_approved
+  extension_submit_completed
+  extension_session_failed
 }
 
 enum UsageMeteringEventType {
@@ -200,6 +208,28 @@ enum UsageMeteringEventType {
   browser_submit_approved
   application_submitted
   llm_tokens_used
+  extension_session_started
+  extension_page_analyzed
+  extension_fill_plan_created
+  extension_fields_filled
+  extension_submit_approved
+  extension_session_failed
+}
+
+enum ExtensionSessionStatus {
+  extension_not_connected
+  awaiting_user_authorization
+  connected
+  page_analyzed
+  fill_plan_ready
+  fill_approved
+  fields_filled
+  ready_for_final_review
+  submit_approved
+  submitted
+  disconnected
+  manual_required
+  failed
 }
 
 enum EvalSuite {
@@ -602,4 +632,36 @@ model AuditLog {
   createdAt   DateTime @default(now())
 
   @@index([tenantId, actorUserId])
+}
+
+model ExtensionSession {
+  id                          String                 @id @default(cuid())
+  tenantId                    String
+  userId                      String
+  extensionInstanceId         String
+  pageUrl                     String
+  pageTitle                   String
+  hostname                    String
+  status                      ExtensionSessionStatus
+  applicationPackageId        String?
+  applicationRecordId         String?
+  jobId                       String?
+  browserApplicationSessionId String?
+  fieldsDetected              Json
+  fieldsFilled                Json
+  uncertainFields             Json
+  fillPlan                    Json
+  pageStructureHash           String
+  authorizedAt                DateTime?
+  fillApprovedAt              DateTime?
+  submitApprovedAt            DateTime?
+  submittedAt                 DateTime?
+  disconnectedAt              DateTime?
+  errorMessage                String                 @default("")
+  createdAt                   DateTime               @default(now())
+  updatedAt                   DateTime               @updatedAt
+
+  @@index([tenantId, userId])
+  @@index([tenantId, status])
+  @@index([tenantId, browserApplicationSessionId])
 }

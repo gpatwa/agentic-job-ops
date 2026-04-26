@@ -4,6 +4,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   FileWarning,
+  Plug,
   Send,
   ShieldAlert
 } from "lucide-react";
@@ -13,9 +14,12 @@ import type {
   ApplicationRecord,
   BrowserApplicationSession,
   BrowserApplicationSessionStatus,
+  ExtensionSession,
+  ExtensionSessionStatus,
   JobMatch,
   NormalizedJob
 } from "../models/domain";
+import { isExtensionSubmitAllowed } from "../services/extensionService";
 
 interface BrowserSessionReviewPageProps {
   browserSession: BrowserApplicationSession | null;
@@ -23,11 +27,68 @@ interface BrowserSessionReviewPageProps {
   application: ApplicationRecord | null;
   job: NormalizedJob | null;
   match: JobMatch | null;
+  extensionSession: ExtensionSession | null;
   onBack: () => void;
   onMarkReadyForReview: (sessionId: string) => void;
   onApproveSubmit: (sessionId: string) => void;
   onSubmitApproved: (sessionId: string) => void;
   onManualRequired: (sessionId: string) => void;
+  onConnectExtensionDemo: (browserSessionId: string) => void;
+  onApproveExtensionFill: (extensionSessionId: string) => void;
+  onSimulateExtensionFill: (extensionSessionId: string) => void;
+  onApproveExtensionSubmit: (extensionSessionId: string) => void;
+  onSimulateExtensionSubmitComplete: (extensionSessionId: string) => void;
+  onDisconnectExtension: (extensionSessionId: string) => void;
+  onExtensionManualRequired: (extensionSessionId: string) => void;
+}
+
+function extensionStatusTone(status: ExtensionSessionStatus): string {
+  if (status === "submitted" || status === "submit_approved") {
+    return "bg-emerald-50 text-emerald-700";
+  }
+  if (
+    status === "manual_required" ||
+    status === "awaiting_user_authorization"
+  ) {
+    return "bg-amber-50 text-amber-700";
+  }
+  if (status === "failed" || status === "disconnected") {
+    return "bg-red-50 text-red-700";
+  }
+  return "bg-slate-100 text-slate-700";
+}
+
+function extensionStatusMessage(status: ExtensionSessionStatus): string {
+  switch (status) {
+    case "extension_not_connected":
+      return "No extension session is connected for this application.";
+    case "awaiting_user_authorization":
+      return "Extension is waiting for explicit authorization to inspect the page.";
+    case "connected":
+      return "Extension is connected and authorized; waiting for page structure.";
+    case "page_analyzed":
+      return "Page structure ingested. Generating a safe fill plan.";
+    case "fill_plan_ready":
+      return "A safe fill plan is ready for your approval.";
+    case "fill_approved":
+      return "Fill is approved. The extension will fill safe fields next.";
+    case "fields_filled":
+      return "Fields filled. Move to the final review when ready.";
+    case "ready_for_final_review":
+      return "Final review. Approve submit only after you review every field on the page.";
+    case "submit_approved":
+      return "Submit approved. The extension will report submission status when complete.";
+    case "submitted":
+      return "Submission was confirmed by the extension.";
+    case "manual_required":
+      return "Manual completion required. CAPTCHA, login, or sensitive field is in the way.";
+    case "disconnected":
+      return "Extension session has been disconnected.";
+    case "failed":
+      return "Extension session failed and needs manual review.";
+    default:
+      return "";
+  }
 }
 
 function statusLabel(value: string): string {
@@ -75,11 +136,19 @@ export function BrowserSessionReviewPage({
   application,
   job,
   match,
+  extensionSession,
   onBack,
   onMarkReadyForReview,
   onApproveSubmit,
   onSubmitApproved,
-  onManualRequired
+  onManualRequired,
+  onConnectExtensionDemo,
+  onApproveExtensionFill,
+  onSimulateExtensionFill,
+  onApproveExtensionSubmit,
+  onSimulateExtensionSubmitComplete,
+  onDisconnectExtension,
+  onExtensionManualRequired
 }: BrowserSessionReviewPageProps) {
   if (!browserSession || !applicationPackage || !job) {
     return (
@@ -421,6 +490,267 @@ export function BrowserSessionReviewPage({
           </div>
         )}
       </section>
+
+      <ExtensionPanel
+        browserSessionId={browserSession.id}
+        extensionSession={extensionSession}
+        applicationPackage={applicationPackage}
+        onConnectExtensionDemo={onConnectExtensionDemo}
+        onApproveExtensionFill={onApproveExtensionFill}
+        onSimulateExtensionFill={onSimulateExtensionFill}
+        onApproveExtensionSubmit={onApproveExtensionSubmit}
+        onSimulateExtensionSubmitComplete={onSimulateExtensionSubmitComplete}
+        onDisconnectExtension={onDisconnectExtension}
+        onExtensionManualRequired={onExtensionManualRequired}
+      />
     </div>
+  );
+}
+
+interface ExtensionPanelProps {
+  browserSessionId: string;
+  extensionSession: ExtensionSession | null;
+  applicationPackage: ApplicationPackage | null;
+  onConnectExtensionDemo: (browserSessionId: string) => void;
+  onApproveExtensionFill: (extensionSessionId: string) => void;
+  onSimulateExtensionFill: (extensionSessionId: string) => void;
+  onApproveExtensionSubmit: (extensionSessionId: string) => void;
+  onSimulateExtensionSubmitComplete: (extensionSessionId: string) => void;
+  onDisconnectExtension: (extensionSessionId: string) => void;
+  onExtensionManualRequired: (extensionSessionId: string) => void;
+}
+
+function ExtensionPanel({
+  browserSessionId,
+  extensionSession,
+  applicationPackage,
+  onConnectExtensionDemo,
+  onApproveExtensionFill,
+  onSimulateExtensionFill,
+  onApproveExtensionSubmit,
+  onSimulateExtensionSubmitComplete,
+  onDisconnectExtension,
+  onExtensionManualRequired
+}: ExtensionPanelProps) {
+  if (!extensionSession) {
+    return (
+      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <h3 className="text-base font-semibold text-slate-950">
+              Extension session
+            </h3>
+            <p className="mt-1 text-sm leading-6 text-slate-600">
+              No extension is connected for this browser session. The local
+              extension is opt-in and never inspects pages without your
+              authorization.
+            </p>
+          </div>
+          <button
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-emerald-700 bg-white px-3 text-sm font-semibold text-emerald-700 transition hover:bg-emerald-50"
+            type="button"
+            onClick={() => onConnectExtensionDemo(browserSessionId)}
+          >
+            <Plug aria-hidden="true" size={17} />
+            Connect demo extension
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  const submitAllowed = isExtensionSubmitAllowed(
+    extensionSession,
+    applicationPackage
+  );
+  const canApproveFill = extensionSession.status === "fill_plan_ready";
+  const canSimulateFill = extensionSession.status === "fill_approved";
+  const canApproveSubmit = extensionSession.status === "ready_for_final_review";
+  const canSimulateComplete = submitAllowed;
+  const canDisconnect =
+    extensionSession.status !== "submitted" &&
+    extensionSession.status !== "disconnected";
+  const canManualFallback =
+    extensionSession.status !== "submitted" &&
+    extensionSession.status !== "manual_required" &&
+    extensionSession.status !== "disconnected";
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
+        <div className="max-w-2xl">
+          <h3 className="text-base font-semibold text-slate-950">
+            Extension session
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            {extensionStatusMessage(extensionSession.status)}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <span
+              className={`rounded-md px-2 py-1 text-xs font-semibold capitalize ${extensionStatusTone(extensionSession.status)}`}
+            >
+              {statusLabel(extensionSession.status)}
+            </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              {extensionSession.fieldsDetected.length} fields detected
+            </span>
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              {extensionSession.fieldsFilled.length} filled
+            </span>
+            <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
+              {extensionSession.uncertainFields.length} pause items
+            </span>
+          </div>
+          <div className="mt-3 space-y-1 text-xs text-slate-600">
+            <p>
+              <strong>Page:</strong> {extensionSession.pageTitle || "(untitled)"} —{" "}
+              <span className="break-all">{extensionSession.pageUrl}</span>
+            </p>
+            <p>
+              <strong>Hostname:</strong> {extensionSession.hostname || "(unknown)"}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          {canApproveFill && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+              type="button"
+              onClick={() => onApproveExtensionFill(extensionSession.id)}
+            >
+              <CheckCircle2 aria-hidden="true" size={17} />
+              Approve fill
+            </button>
+          )}
+          {canSimulateFill && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onSimulateExtensionFill(extensionSession.id)}
+            >
+              <ClipboardCheck aria-hidden="true" size={17} />
+              Simulate extension fill
+            </button>
+          )}
+          {canApproveSubmit && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700"
+              type="button"
+              onClick={() => onApproveExtensionSubmit(extensionSession.id)}
+            >
+              <CheckCircle2 aria-hidden="true" size={17} />
+              Approve extension submit
+            </button>
+          )}
+          <button
+            className={`inline-flex min-h-10 items-center justify-center gap-2 rounded-md px-3 text-sm font-semibold transition ${
+              canSimulateComplete
+                ? "bg-emerald-700 text-white hover:bg-emerald-800"
+                : "cursor-not-allowed border border-slate-200 bg-slate-100 text-slate-400"
+            }`}
+            type="button"
+            disabled={!canSimulateComplete}
+            onClick={() => onSimulateExtensionSubmitComplete(extensionSession.id)}
+          >
+            <Send aria-hidden="true" size={17} />
+            {canSimulateComplete
+              ? "Confirm extension submit"
+              : "Submit blocked until approved"}
+          </button>
+          {canManualFallback && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 text-sm font-semibold text-amber-800 transition hover:bg-amber-100"
+              type="button"
+              onClick={() => onExtensionManualRequired(extensionSession.id)}
+            >
+              <FileWarning aria-hidden="true" size={17} />
+              Manual apply
+            </button>
+          )}
+          {canDisconnect && (
+            <button
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() => onDisconnectExtension(extensionSession.id)}
+            >
+              <Plug aria-hidden="true" size={17} />
+              Disconnect
+            </button>
+          )}
+        </div>
+      </div>
+
+      {extensionSession.fillPlan.length > 0 && (
+        <div className="mt-5 grid gap-4 lg:grid-cols-2">
+          <div>
+            <h4 className="text-sm font-semibold text-slate-950">
+              Extension fill plan
+            </h4>
+            <div className="mt-2 space-y-2">
+              {extensionSession.fillPlan.map((item) => (
+                <div
+                  key={`${item.fieldId}-${item.action}`}
+                  className="rounded-md border border-slate-200 bg-panel p-3"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <p className="text-sm font-semibold text-slate-900">
+                      {item.label}
+                    </p>
+                    <span className="rounded-md bg-white px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+                      {statusLabel(item.action)}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-sm leading-6 text-slate-600">
+                    {item.valuePreview || "No safe value available"}
+                  </p>
+                  {item.reason && (
+                    <p className="mt-1 text-xs leading-5 text-amber-800">
+                      {item.reason}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <h4 className="text-sm font-semibold text-slate-950">
+              Pause items
+            </h4>
+            {extensionSession.uncertainFields.length === 0 ? (
+              <p className="mt-2 text-sm text-slate-500">
+                No pause items detected on this page.
+              </p>
+            ) : (
+              <div className="mt-2 space-y-2">
+                {extensionSession.uncertainFields.map((field) => (
+                  <div
+                    key={`${field.fieldId}-${field.reason}`}
+                    className="rounded-md border border-amber-200 bg-amber-50 p-3"
+                  >
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle
+                        aria-hidden="true"
+                        className="mt-0.5 shrink-0 text-amber-800"
+                        size={16}
+                      />
+                      <div>
+                        <p className="text-sm font-semibold text-amber-950">
+                          {field.label}
+                        </p>
+                        <p className="mt-1 text-sm leading-6 text-amber-900">
+                          {field.guidance}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 }

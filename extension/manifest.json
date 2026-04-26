@@ -1,0 +1,20 @@
+{
+  "manifest_version": 3,
+  "name": "Agentic Job Ops Assistant",
+  "description": "Inspect a job application page you authorize, request a safe fill plan from your local Agentic Job Ops app, and only ever submit with explicit human approval.",
+  "version": "0.1.0",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": [
+    "http://127.0.0.1:5174/*",
+    "http://localhost:5174/*"
+  ],
+  "action": {
+    "default_popup": "src/popup.html",
+    "default_title": "Agentic Job Ops"
+  },
+  "background": {
+    "service_worker": "src/background.js",
+    "type": "module"
+  },
+  "icons": {}
+}

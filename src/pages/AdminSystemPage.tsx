@@ -17,6 +17,7 @@ import type {
   BrowserApplicationSession,
   EvalResult,
   EvalRun,
+  ExtensionSession,
   FeedbackEvent,
   JobMatch,
   NormalizedJob,
@@ -36,6 +37,7 @@ interface AdminSystemPageProps {
   matches: JobMatch[];
   packages: ApplicationPackage[];
   browserSessions: BrowserApplicationSession[];
+  extensionSessions: ExtensionSession[];
   applications: ApplicationRecord[];
   auditLogs: AuditLog[];
   feedbackEvents: FeedbackEvent[];
@@ -104,6 +106,7 @@ export function AdminSystemPage({
   matches,
   packages,
   browserSessions,
+  extensionSessions,
   applications,
   auditLogs,
   feedbackEvents,
@@ -201,7 +204,7 @@ export function AdminSystemPage({
         </div>
       </section>
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-6">
         <StatCard label="Jobs ingested" value={String(jobs.length)} icon={BarChart3} />
         <StatCard label="Jobs scored" value={String(matches.length)} icon={Gauge} />
         <StatCard
@@ -212,6 +215,11 @@ export function AdminSystemPage({
         <StatCard
           label="Browser sessions"
           value={String(browserSessions.length)}
+          icon={Activity}
+        />
+        <StatCard
+          label="Extension sessions"
+          value={String(extensionSessions.length)}
           icon={Activity}
         />
         <StatCard

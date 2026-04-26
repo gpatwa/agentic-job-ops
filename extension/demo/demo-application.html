@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Demo Job Application — Agentic Job Ops</title>
+    <style>
+      :root {
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        color-scheme: light;
+      }
+      body {
+        margin: 0;
+        padding: 32px;
+        background: #f1f5f9;
+        color: #0f172a;
+      }
+      main {
+        max-width: 720px;
+        margin: 0 auto;
+        background: white;
+        padding: 32px;
+        border-radius: 12px;
+        box-shadow: 0 4px 20px rgba(15, 23, 42, 0.05);
+      }
+      h1 {
+        margin: 0 0 8px 0;
+        font-size: 24px;
+      }
+      p.lede {
+        margin: 0 0 24px 0;
+        color: #475569;
+        font-size: 14px;
+      }
+      label {
+        display: block;
+        margin-top: 16px;
+        font-size: 13px;
+        font-weight: 600;
+        color: #1e293b;
+      }
+      input,
+      textarea,
+      select {
+        display: block;
+        width: 100%;
+        margin-top: 6px;
+        padding: 8px 10px;
+        border: 1px solid #cbd5f5;
+        border-radius: 6px;
+        font: inherit;
+        box-sizing: border-box;
+      }
+      .pause-block {
+        margin-top: 24px;
+        padding: 12px;
+        border-radius: 8px;
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        color: #78350f;
+        font-size: 13px;
+      }
+      button {
+        margin-top: 24px;
+        padding: 10px 16px;
+        font-size: 14px;
+        font-weight: 600;
+        border-radius: 6px;
+        border: 1px solid #047857;
+        background: #047857;
+        color: white;
+        cursor: pointer;
+      }
+      .demo-disclaimer {
+        margin-top: 32px;
+        padding: 12px;
+        font-size: 12px;
+        background: #f8fafc;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        color: #475569;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Demo Job Application</h1>
+      <p class="lede">
+        Local fixture page for the Agentic Job Ops browser extension. Open the
+        extension popup and click <strong>Connect to active tab</strong>, then
+        <strong>Read page structure</strong>.
+      </p>
+
+      <form id="demo-application-form" autocomplete="off">
+        <label for="first_name">First name</label>
+        <input id="first_name" name="first_name" type="text" required />
+
+        <label for="last_name">Last name</label>
+        <input id="last_name" name="last_name" type="text" required />
+
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" required />
+
+        <label for="phone">Phone</label>
+        <input id="phone" name="phone" type="tel" />
+
+        <label for="location">Location</label>
+        <input id="location" name="location" type="text" />
+
+        <label for="linkedin">LinkedIn URL</label>
+        <input id="linkedin" name="linkedin" type="url" />
+
+        <label for="portfolio">Portfolio URL</label>
+        <input id="portfolio" name="portfolio" type="url" />
+
+        <label for="resume">Resume</label>
+        <input id="resume" name="resume" type="file" required />
+
+        <label for="cover_letter">Cover letter</label>
+        <textarea id="cover_letter" name="cover_letter" rows="4"></textarea>
+
+        <label for="custom_question">What makes you a strong fit?</label>
+        <textarea id="custom_question" name="custom_question" rows="4"></textarea>
+
+        <label for="salary">Salary expectations</label>
+        <input id="salary" name="salary" type="text" />
+
+        <label for="eeoc_gender">Gender (voluntary demographic question)</label>
+        <select id="eeoc_gender" name="eeoc_gender">
+          <option value=""></option>
+          <option value="prefer_not">Prefer not to say</option>
+        </select>
+
+        <div class="pause-block">
+          The extension never bypasses CAPTCHA, sign-in, or sensitive demographic
+          questions. Those always pause for the user.
+        </div>
+
+        <button type="button" id="fake-submit">
+          Submit (disabled — submit always requires explicit human approval in
+          the app)
+        </button>
+      </form>
+
+      <p class="demo-disclaimer">
+        This page is a local fixture. The extension does not submit anything;
+        the button intentionally does nothing. Open the Agentic Job Ops app at
+        <code>http://127.0.0.1:5174/</code> to walk through the approval flow.
+      </p>
+    </main>
+
+    <script>
+      document.getElementById("fake-submit").addEventListener("click", (event) => {
+        event.preventDefault();
+        // Intentionally a no-op. Submit must happen through the app's
+        // approval gate, not from this fixture page.
+      });
+    </script>
+  </body>
+</html>

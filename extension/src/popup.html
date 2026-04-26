@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Agentic Job Ops</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+      }
+      body {
+        margin: 0;
+        padding: 16px;
+        width: 320px;
+        color: #0f172a;
+        background: #f8fafc;
+      }
+      h1 {
+        margin: 0 0 4px 0;
+        font-size: 14px;
+        font-weight: 600;
+        letter-spacing: 0.04em;
+        text-transform: uppercase;
+        color: #047857;
+      }
+      h2 {
+        margin: 0 0 8px 0;
+        font-size: 18px;
+        font-weight: 600;
+      }
+      p {
+        margin: 0;
+        font-size: 12px;
+        line-height: 1.4;
+        color: #475569;
+      }
+      .panel {
+        background: white;
+        border: 1px solid #e2e8f0;
+        border-radius: 8px;
+        padding: 12px;
+        margin-top: 12px;
+      }
+      .row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        font-size: 12px;
+        color: #334155;
+      }
+      .row strong {
+        color: #0f172a;
+      }
+      button {
+        appearance: none;
+        border: 1px solid #cbd5f5;
+        background: white;
+        color: #0f172a;
+        padding: 8px 10px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-top: 8px;
+        width: 100%;
+      }
+      button.primary {
+        background: #047857;
+        color: white;
+        border-color: #047857;
+      }
+      button.danger {
+        background: #b91c1c;
+        color: white;
+        border-color: #b91c1c;
+      }
+      .status {
+        font-size: 11px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+        color: #475569;
+      }
+      .pause {
+        background: #fef3c7;
+        border: 1px solid #fde68a;
+        color: #78350f;
+        padding: 8px;
+        border-radius: 6px;
+        font-size: 12px;
+        margin-top: 8px;
+      }
+      .field-list {
+        max-height: 160px;
+        overflow-y: auto;
+        margin-top: 8px;
+        border: 1px solid #e2e8f0;
+        border-radius: 6px;
+      }
+      .field-list-item {
+        padding: 6px 8px;
+        font-size: 11px;
+        border-bottom: 1px solid #f1f5f9;
+      }
+      .field-list-item:last-child {
+        border-bottom: none;
+      }
+      .field-list-item .label {
+        font-weight: 600;
+      }
+      .field-list-item .meta {
+        color: #64748b;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Agentic Job Ops</h1>
+    <h2>Application Assistant</h2>
+    <p>
+      The AI does the work. The human makes the decision. The extension never
+      submits without your explicit approval.
+    </p>
+
+    <div id="connection-panel" class="panel">
+      <p class="status" id="connection-status">Not connected</p>
+      <div class="row" id="connection-detail">
+        <p>
+          Open a job application page, then click connect. The extension will
+          ask you to authorize this page before reading anything.
+        </p>
+      </div>
+      <button id="connect-button" class="primary" type="button">
+        Connect to active tab
+      </button>
+      <button id="disconnect-button" type="button" hidden>
+        Disconnect
+      </button>
+    </div>
+
+    <div id="actions-panel" class="panel" hidden>
+      <p class="status">Authorized actions</p>
+      <button id="extract-button" class="primary" type="button">
+        Read page structure
+      </button>
+      <button id="fill-button" type="button">
+        Fill safe fields (uses approved fill plan)
+      </button>
+      <p style="margin-top: 8px; font-size: 11px; color: #64748b;">
+        Submit happens only inside the Agentic Job Ops app, after explicit
+        approval. The extension never clicks submit.
+      </p>
+    </div>
+
+    <div id="result-panel" class="panel" hidden>
+      <p class="status">Last result</p>
+      <div id="result-detail" class="row"></div>
+      <div id="result-fields" class="field-list" hidden></div>
+    </div>
+
+    <script src="popup.js" type="module"></script>
+  </body>
+</html>

@@ -201,7 +201,15 @@ export const feedbackEventTypes = [
   "recruiter_response_received",
   "interview_scheduled",
   "rejected",
-  "offer_received"
+  "offer_received",
+  "extension_session_started",
+  "extension_page_analyzed",
+  "extension_fill_plan_created",
+  "user_approved_extension_fill",
+  "extension_fields_filled",
+  "extension_submit_approved",
+  "extension_submit_completed",
+  "extension_session_failed"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -217,7 +225,13 @@ export const usageMeteringEventTypes = [
   "ats_adapter_run",
   "browser_submit_approved",
   "application_submitted",
-  "llm_tokens_used"
+  "llm_tokens_used",
+  "extension_session_started",
+  "extension_page_analyzed",
+  "extension_fill_plan_created",
+  "extension_fields_filled",
+  "extension_submit_approved",
+  "extension_session_failed"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -619,4 +633,73 @@ export interface ProfileCompletion {
   totalFields: number;
   percent: number;
   missingFields: string[];
+}
+
+export const extensionSessionStatuses = [
+  "extension_not_connected",
+  "awaiting_user_authorization",
+  "connected",
+  "page_analyzed",
+  "fill_plan_ready",
+  "fill_approved",
+  "fields_filled",
+  "ready_for_final_review",
+  "submit_approved",
+  "submitted",
+  "disconnected",
+  "manual_required",
+  "failed"
+] as const;
+
+export type ExtensionSessionStatus = (typeof extensionSessionStatuses)[number];
+
+export interface ExtensionPageStructureField {
+  fieldId: string;
+  label: string;
+  fieldType: ApplicationFieldType;
+  inputName: string;
+  inputId: string;
+  placeholder: string;
+  required: boolean;
+  sensitive: boolean;
+  hasValue: boolean;
+}
+
+export interface ExtensionPageStructure {
+  pageUrl: string;
+  pageTitle: string;
+  hostname: string;
+  fields: ExtensionPageStructureField[];
+  hasSubmitButton: boolean;
+  hasCaptcha: boolean;
+  hasLoginChallenge: boolean;
+  capturedAt: string;
+}
+
+export interface ExtensionSession {
+  id: string;
+  tenantId: string;
+  userId: string;
+  extensionInstanceId: string;
+  pageUrl: string;
+  pageTitle: string;
+  hostname: string;
+  status: ExtensionSessionStatus;
+  applicationPackageId: string | null;
+  applicationRecordId: string | null;
+  jobId: string | null;
+  browserApplicationSessionId: string | null;
+  fieldsDetected: DetectedApplicationField[];
+  fieldsFilled: FilledApplicationField[];
+  uncertainFields: UncertainApplicationField[];
+  fillPlan: BrowserFillPlanItem[];
+  pageStructureHash: string;
+  authorizedAt: string | null;
+  fillApprovedAt: string | null;
+  submitApprovedAt: string | null;
+  submittedAt: string | null;
+  disconnectedAt: string | null;
+  errorMessage: string;
+  createdAt: string;
+  updatedAt: string;
 }
