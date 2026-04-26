@@ -37,10 +37,12 @@ import type {
   FeedbackEvent,
   JobMatch,
   JobRiskSignal,
+  JobTargetRecommendation,
   OnboardingState,
   RealSiteDryRunSnapshot,
   RecruiterLead,
   Resume,
+  ResumeIntelligenceReport,
   UsageMeteringEvent,
   UserProfile
 } from "./models/domain";
@@ -170,6 +172,17 @@ import {
   type OnboardingAuditEvent,
   type OnboardingRecommendationResult
 } from "./services/onboardingJobRecommendationService";
+import {
+  analyzeResumeIntelligence,
+  getJobTargetRecommendation,
+  getResumeIntelligenceReport,
+  loadJobTargetRecommendations,
+  loadResumeIntelligenceReports,
+  recordRecommendationsConfirmed,
+  recordResumeProfileConfirmed,
+  selectionFromRecommendation,
+  type ResumeIntelligenceAuditEvent
+} from "./services/resumeIntelligenceService";
 
 type RouteId =
   | "dashboard"
@@ -292,6 +305,13 @@ export default function App() {
   const [isOnboardingRecommending, setIsOnboardingRecommending] = useState(false);
   const [onboardingResult, setOnboardingResult] =
     useState<OnboardingRecommendationResult | null>(null);
+  const [resumeIntelligenceReports, setResumeIntelligenceReports] = useState<
+    ResumeIntelligenceReport[]
+  >(() => loadResumeIntelligenceReports(currentSession));
+  const [jobTargetRecommendations, setJobTargetRecommendations] = useState<
+    JobTargetRecommendation[]
+  >(() => loadJobTargetRecommendations(currentSession));
+  const [isAnalyzingResume, setIsAnalyzingResume] = useState(false);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -1926,6 +1946,208 @@ export default function App() {
     persistOnboardingAuditEvents(result.auditEvents);
   }
 
+  function persistResumeIntelligenceAuditEvents(
+    events: ResumeIntelligenceAuditEvent[]
+  ) {
+    events.forEach((event) => {
+      recordAudit({
+        action: event.action,
+        resourceType: event.resourceType,
+        resourceId: event.resourceId,
+        metadata: event.metadata
+      });
+      if (event.action === "resume_intelligence_started") {
+        recordUsage({
+          eventType: "resume_intelligence_started",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_intelligence_completed") {
+        recordUsage({
+          eventType: "resume_intelligence_completed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_fix_suggestion_created") {
+        recordUsage({
+          eventType: "resume_fix_suggestion_created",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "job_target_recommendations_generated") {
+        recordUsage({
+          eventType: "job_target_recommendations_generated",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "resume_profile_confirmed") {
+        recordFeedback({
+          eventType: "resume_profile_confirmed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "job_target_recommendations_confirmed") {
+        recordFeedback({
+          eventType: "job_target_recommendations_confirmed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+        recordUsage({
+          eventType: "job_target_recommendations_confirmed",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      } else if (event.action === "job_target_recommendations_edited") {
+        recordFeedback({
+          eventType: "job_target_recommendations_edited",
+          resourceType: event.resourceType,
+          resourceId: event.resourceId,
+          metadata: event.metadata
+        });
+      }
+    });
+  }
+
+  async function handleAnalyzeResumeIntelligence() {
+    if (!resume) return;
+    setIsAnalyzingResume(true);
+    try {
+      const result = await analyzeResumeIntelligence(currentSession, resume);
+      setResumeIntelligenceReports(loadResumeIntelligenceReports(currentSession));
+      setJobTargetRecommendations(loadJobTargetRecommendations(currentSession));
+      persistResumeIntelligenceAuditEvents(result.auditEvents);
+    } finally {
+      setIsAnalyzingResume(false);
+    }
+  }
+
+  function handleConfirmResumeProfile() {
+    if (!resume) return;
+    const report = getResumeIntelligenceReport(currentSession, resume.id);
+    if (!report) return;
+    const extracted = report.extractedProfile;
+    const confidence = report.confidenceByField;
+    let appliedFieldCount = 0;
+    function pickHigh(fieldKey: keyof typeof confidence, value: string): string | null {
+      if (
+        confidence[fieldKey] === "high" &&
+        value &&
+        value.trim().length > 0
+      ) {
+        appliedFieldCount += 1;
+        return value;
+      }
+      return null;
+    }
+    // Build a draft that overrides only the high-confidence string fields.
+    const baseProfile = profile;
+    const mergedDraft = {
+      fullName: pickHigh("fullName", extracted.fullName) ?? baseProfile?.fullName ?? "",
+      email: pickHigh("email", extracted.email) ?? baseProfile?.email ?? "",
+      phone:
+        confidence.phone === "high" && extracted.phone
+          ? (() => {
+              appliedFieldCount += 1;
+              return extracted.phone;
+            })()
+          : baseProfile?.phone ?? "",
+      location:
+        confidence.location === "high" && extracted.location
+          ? (() => {
+              appliedFieldCount += 1;
+              return extracted.location;
+            })()
+          : baseProfile?.location ?? "",
+      workAuthorization:
+        extracted.workAuthorization || baseProfile?.workAuthorization || "",
+      linkedinUrl:
+        pickHigh("linkedinUrl", extracted.linkedinUrl) ??
+        baseProfile?.linkedinUrl ??
+        "",
+      portfolioUrl:
+        pickHigh("portfolioUrl", extracted.portfolioUrl) ??
+        baseProfile?.portfolioUrl ??
+        "",
+      githubUrl:
+        pickHigh("githubUrl", extracted.githubUrl) ?? baseProfile?.githubUrl ?? "",
+      targetTitles: (baseProfile?.targetTitles ?? []).join(", "),
+      targetLocations: (baseProfile?.targetLocations ?? []).join(", "),
+      targetIndustries: (baseProfile?.targetIndustries ?? []).join(", "),
+      remotePreference: baseProfile?.remotePreference ?? "any",
+      salaryMin: baseProfile?.salaryMin ? String(baseProfile.salaryMin) : "",
+      salaryTarget: baseProfile?.salaryTarget
+        ? String(baseProfile.salaryTarget)
+        : "",
+      companiesToAvoid: (baseProfile?.companiesToAvoid ?? []).join(", "),
+      companiesToPrioritize: (baseProfile?.companiesToPrioritize ?? []).join(", "),
+      careerSummary: baseProfile?.careerSummary ?? "",
+      verifiedFacts: Array.from(
+        new Set([
+          ...(baseProfile?.verifiedFacts ?? []),
+          ...extracted.resumeStrengths,
+          ...extracted.quantifiedAchievements
+        ])
+      ).join(", ")
+    };
+    handleSaveProfile(mergedDraft);
+    const events = recordResumeProfileConfirmed(report, appliedFieldCount);
+    persistResumeIntelligenceAuditEvents(events);
+  }
+
+  async function handleConfirmRecommendedTargets(selection: {
+    selectedRoles: string[];
+    selectedIndustries: string[];
+    recommendedSeniority: string;
+  }) {
+    if (!resume) return;
+    const recommendation = getJobTargetRecommendation(currentSession, resume.id);
+    if (!recommendation) return;
+    // Persist confirmation audits
+    const events = recordRecommendationsConfirmed(recommendation, selection);
+    persistResumeIntelligenceAuditEvents(events);
+    // Sync the onboarding state with the confirmed roles
+    const onboarding = await recordTargetRolesSelected(
+      currentSession,
+      selection.selectedRoles
+    );
+    setOnboardingState(onboarding.state);
+    persistOnboardingAuditEvents(onboarding.auditEvents);
+    // Optionally update the user profile target titles + industries so other
+    // pages reflect the choice. Use the same merge helper as profile confirm.
+    if (profile) {
+      const draft = {
+        fullName: profile.fullName,
+        email: profile.email,
+        phone: profile.phone,
+        location: profile.location,
+        workAuthorization: profile.workAuthorization,
+        linkedinUrl: profile.linkedinUrl,
+        portfolioUrl: profile.portfolioUrl,
+        githubUrl: profile.githubUrl,
+        targetTitles: selection.selectedRoles.join(", "),
+        targetLocations: profile.targetLocations.join(", "),
+        targetIndustries: Array.from(
+          new Set([...profile.targetIndustries, ...selection.selectedIndustries])
+        ).join(", "),
+        remotePreference: profile.remotePreference,
+        salaryMin: profile.salaryMin ? String(profile.salaryMin) : "",
+        salaryTarget: profile.salaryTarget ? String(profile.salaryTarget) : "",
+        companiesToAvoid: profile.companiesToAvoid.join(", "),
+        companiesToPrioritize: profile.companiesToPrioritize.join(", "),
+        careerSummary: profile.careerSummary,
+        verifiedFacts: profile.verifiedFacts.join(", ")
+      };
+      handleSaveProfile(draft);
+    }
+  }
+
   function handleDismissRiskSignal(signalId: string) {
     const remaining = jobRiskSignals.filter((signal) => signal.id !== signalId);
     saveJobRiskSignals(currentSession, remaining);
@@ -2069,7 +2291,15 @@ export default function App() {
             onOpenBrowserSession={navigateToBrowserSession}
           />
         );
-      case "onboarding":
+      case "onboarding": {
+        const currentReport = resume
+          ? resumeIntelligenceReports.find((r) => r.resumeId === resume.id) ??
+            null
+          : null;
+        const currentRecommendation = resume
+          ? jobTargetRecommendations.find((r) => r.resumeId === resume.id) ??
+            null
+          : null;
         return (
           <OnboardingPage
             profile={profile}
@@ -2078,6 +2308,12 @@ export default function App() {
             applications={applications}
             isRecommending={isOnboardingRecommending}
             lastResult={onboardingResult}
+            resumeIntelligenceReport={currentReport}
+            jobTargetRecommendation={currentRecommendation}
+            isAnalyzingResume={isAnalyzingResume}
+            onAnalyzeResume={handleAnalyzeResumeIntelligence}
+            onConfirmResumeProfile={handleConfirmResumeProfile}
+            onConfirmRecommendedTargets={handleConfirmRecommendedTargets}
             onSelectRoles={handleOnboardingSelectRoles}
             onGenerateRecommendations={handleOnboardingGenerate}
             onReviewJob={handleOnboardingReview}
@@ -2091,6 +2327,7 @@ export default function App() {
             onNavigateJobQueue={() => navigate("jobs")}
           />
         );
+      }
       case "career-ops":
         return (
           <CareerOpsPage

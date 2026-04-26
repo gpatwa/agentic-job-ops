@@ -209,6 +209,9 @@ enum FeedbackEventType {
   onboarding_jobs_recommended
   onboarding_application_prep_started
   onboarding_completed
+  resume_profile_confirmed
+  job_target_recommendations_confirmed
+  job_target_recommendations_edited
 }
 
 enum UsageMeteringEventType {
@@ -242,6 +245,41 @@ enum UsageMeteringEventType {
   onboarding_target_roles_selected
   onboarding_jobs_recommended
   onboarding_application_prep_started
+  resume_intelligence_started
+  resume_intelligence_completed
+  resume_fix_suggestion_created
+  job_target_recommendations_generated
+  job_target_recommendations_confirmed
+}
+
+enum ResumeIntelligenceMode {
+  deterministic
+  llm
+}
+
+enum ResumeFieldConfidence {
+  high
+  medium
+  low
+}
+
+enum AtsRiskLevel {
+  low
+  medium
+  high
+}
+
+enum RecommendedRoleFitLevel {
+  strong
+  adjacent
+  stretch
+  avoid
+}
+
+enum SkillGapImportance {
+  high
+  medium
+  low
 }
 
 enum IntelligenceSource {
@@ -320,6 +358,7 @@ enum EvalSuite {
   career_ops
   company_intelligence
   onboarding
+  resume_intelligence
 }
 
 enum EvalRunSuite {
@@ -331,6 +370,7 @@ enum EvalRunSuite {
   career_ops
   company_intelligence
   onboarding
+  resume_intelligence
 }
 
 enum EvalRunStatus {
@@ -802,6 +842,56 @@ model RecruiterLead {
 
   @@index([tenantId, userId])
   @@index([tenantId, jobId])
+}
+
+model ResumeIntelligenceReport {
+  id                 String                 @id @default(cuid())
+  tenantId           String
+  userId             String
+  resumeId           String
+  extractionMode     ResumeIntelligenceMode
+  modelName          String
+  promptVersion      String
+  extractedProfile   Json
+  confidenceByField  Json
+  missingFields      Json
+  ambiguousFields    Json
+  parsingWarnings    Json
+  atsRiskScore       Float
+  atsRiskLevel       AtsRiskLevel
+  suggestedFixes     Json
+  createdAt          DateTime               @default(now())
+  updatedAt          DateTime               @updatedAt
+
+  @@unique([tenantId, userId, resumeId])
+  @@index([tenantId, userId])
+}
+
+model JobTargetRecommendation {
+  id                          String                 @id @default(cuid())
+  tenantId                    String
+  userId                      String
+  resumeId                    String
+  reportId                    String
+  strongestRoles              Json
+  adjacentRoles               Json
+  stretchRoles                Json
+  rolesToAvoid                Json
+  recommendedIndustries       Json
+  recommendedSeniority        String                 @default("")
+  recommendedSearchKeywords   Json
+  positioningSummary          String                 @default("")
+  resumePositioningAdvice     Json
+  skillGaps                   Json
+  confidence                  ResumeFieldConfidence
+  extractionMode              ResumeIntelligenceMode
+  modelName                   String
+  promptVersion               String
+  createdAt                   DateTime               @default(now())
+  updatedAt                   DateTime               @updatedAt
+
+  @@unique([tenantId, userId, resumeId])
+  @@index([tenantId, userId])
 }
 
 model OnboardingState {

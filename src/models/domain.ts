@@ -224,7 +224,10 @@ export const feedbackEventTypes = [
   "onboarding_target_roles_selected",
   "onboarding_jobs_recommended",
   "onboarding_application_prep_started",
-  "onboarding_completed"
+  "onboarding_completed",
+  "resume_profile_confirmed",
+  "job_target_recommendations_confirmed",
+  "job_target_recommendations_edited"
 ] as const;
 
 export type FeedbackEventType = (typeof feedbackEventTypes)[number];
@@ -259,7 +262,12 @@ export const usageMeteringEventTypes = [
   "recruiter_lead_added",
   "onboarding_target_roles_selected",
   "onboarding_jobs_recommended",
-  "onboarding_application_prep_started"
+  "onboarding_application_prep_started",
+  "resume_intelligence_started",
+  "resume_intelligence_completed",
+  "resume_fix_suggestion_created",
+  "job_target_recommendations_generated",
+  "job_target_recommendations_confirmed"
 ] as const;
 
 export type UsageMeteringEventType = (typeof usageMeteringEventTypes)[number];
@@ -271,7 +279,8 @@ export const evalSuites = [
   "browser_assistant_safety",
   "career_ops",
   "company_intelligence",
-  "onboarding"
+  "onboarding",
+  "resume_intelligence"
 ] as const;
 
 export type EvalSuite = (typeof evalSuites)[number];
@@ -705,6 +714,135 @@ export interface ExtensionPageStructure {
   hasCaptcha: boolean;
   hasLoginChallenge: boolean;
   capturedAt: string;
+}
+
+export const resumeIntelligenceModes = ["deterministic", "llm"] as const;
+export type ResumeIntelligenceMode = (typeof resumeIntelligenceModes)[number];
+
+export const resumeFieldConfidences = ["high", "medium", "low"] as const;
+export type ResumeFieldConfidence = (typeof resumeFieldConfidences)[number];
+
+export const atsRiskLevels = ["low", "medium", "high"] as const;
+export type AtsRiskLevel = (typeof atsRiskLevels)[number];
+
+export const recommendedRoleFitLevels = [
+  "strong",
+  "adjacent",
+  "stretch",
+  "avoid"
+] as const;
+export type RecommendedRoleFitLevel = (typeof recommendedRoleFitLevels)[number];
+
+export const skillGapImportances = ["high", "medium", "low"] as const;
+export type SkillGapImportance = (typeof skillGapImportances)[number];
+
+export interface ExtractedResumeProfile {
+  fullName: string;
+  email: string;
+  phone: string;
+  location: string;
+  linkedinUrl: string;
+  githubUrl: string;
+  portfolioUrl: string;
+  currentTitle: string;
+  seniorityLevel: string;
+  yearsOfExperience: number | null;
+  industries: string[];
+  companies: string[];
+  jobTitles: string[];
+  education: string[];
+  certifications: string[];
+  skills: string[];
+  tools: string[];
+  projects: string[];
+  leadershipExamples: string[];
+  quantifiedAchievements: string[];
+  workAuthorization: string;
+  resumeStrengths: string[];
+  resumeGaps: string[];
+}
+
+export interface ResumeFieldConfidenceMap {
+  fullName: ResumeFieldConfidence;
+  email: ResumeFieldConfidence;
+  phone: ResumeFieldConfidence;
+  location: ResumeFieldConfidence;
+  linkedinUrl: ResumeFieldConfidence;
+  githubUrl: ResumeFieldConfidence;
+  portfolioUrl: ResumeFieldConfidence;
+  currentTitle: ResumeFieldConfidence;
+  seniorityLevel: ResumeFieldConfidence;
+  yearsOfExperience: ResumeFieldConfidence;
+  skills: ResumeFieldConfidence;
+  industries: ResumeFieldConfidence;
+}
+
+export interface ResumeIntelligenceSuggestedFix {
+  field: string;
+  severity: AtsRiskLevel;
+  message: string;
+  recommendedAction: string;
+}
+
+export interface ResumeIntelligenceReport {
+  id: string;
+  tenantId: string;
+  userId: string;
+  resumeId: string;
+  extractionMode: ResumeIntelligenceMode;
+  modelName: string;
+  promptVersion: string;
+  extractedProfile: ExtractedResumeProfile;
+  confidenceByField: ResumeFieldConfidenceMap;
+  missingFields: string[];
+  ambiguousFields: string[];
+  parsingWarnings: string[];
+  atsRiskScore: number;
+  atsRiskLevel: AtsRiskLevel;
+  suggestedFixes: ResumeIntelligenceSuggestedFix[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RecommendedRole {
+  title: string;
+  fitLevel: RecommendedRoleFitLevel;
+  confidence: ResumeFieldConfidence;
+  why: string;
+  evidenceFromResume: string[];
+  searchKeywords: string[];
+  suggestedResumeAngle: string;
+}
+
+export interface SkillGap {
+  skill: string;
+  importance: SkillGapImportance;
+  reason: string;
+  howToClose: string;
+}
+
+export interface JobTargetRecommendation {
+  id: string;
+  tenantId: string;
+  userId: string;
+  resumeId: string;
+  reportId: string;
+  strongestRoles: RecommendedRole[];
+  adjacentRoles: RecommendedRole[];
+  stretchRoles: RecommendedRole[];
+  rolesToAvoid: RecommendedRole[];
+  recommendedIndustries: string[];
+  recommendedSeniority: string;
+  recommendedSearchKeywords: string[];
+  positioningSummary: string;
+  resumePositioningAdvice: string[];
+  skillGaps: SkillGap[];
+  confidence: ResumeFieldConfidence;
+  extractionMode: ResumeIntelligenceMode;
+  modelName: string;
+  promptVersion: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface OnboardingState {

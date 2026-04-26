@@ -70,6 +70,10 @@ import {
   recordOnboardingCompleted,
   recordOnboardingJobReviewed
 } from "./onboardingJobRecommendationService";
+import {
+  analyzeResumeIntelligence,
+  selectionFromRecommendation
+} from "./resumeIntelligenceService";
 import { userProfileSchema } from "../models/schemas";
 
 interface EvalRunBundle {
@@ -623,6 +627,118 @@ function defaultEvalCases(session: AppSession): EvalCase[] {
       description: "Demo jobs use the demo_job_ id prefix and the description is prefixed with [Demo job].",
       inputSummary: "Demo jobs created during onboarding.",
       expectedBehavior: "Every demo job id starts with demo_job_ and description starts with [Demo job]."
+    },
+    {
+      id: "eval_ri_clean_resume_high_confidence",
+      suite: "resume_intelligence",
+      name: "Clean resume extracts high-confidence fields",
+      description: "A resume with name, email, LinkedIn, skills, and quantified achievements should yield high confidence on those fields.",
+      inputSummary: "Well-structured product manager resume.",
+      expectedBehavior: "Name, email, and LinkedIn are extracted with high confidence and ATS risk is low."
+    },
+    {
+      id: "eval_ri_missing_email_warning",
+      suite: "resume_intelligence",
+      name: "Missing email creates a warning",
+      description: "When the resume has no email, the report should add an email missing-field and a high-severity suggested fix.",
+      inputSummary: "Resume without an email line.",
+      expectedBehavior: "missingFields includes email; suggestedFixes contains an email fix at high severity."
+    },
+    {
+      id: "eval_ri_missing_phone_warning",
+      suite: "resume_intelligence",
+      name: "Missing phone creates a warning",
+      description: "When the resume has no phone, the report should add a phone missing-field and a medium-severity fix.",
+      inputSummary: "Resume without a phone number.",
+      expectedBehavior: "missingFields includes phone; suggestedFixes contains a phone fix."
+    },
+    {
+      id: "eval_ri_unclear_dates_warning",
+      suite: "resume_intelligence",
+      name: "Unclear dates creates a warning",
+      description: "When dates are not in 'YYYY – YYYY' format, the report should flag dates as ambiguous.",
+      inputSummary: "Resume without recognisable date ranges.",
+      expectedBehavior: "ambiguousFields includes dates."
+    },
+    {
+      id: "eval_ri_no_quantified_creates_suggestion",
+      suite: "resume_intelligence",
+      name: "No quantified achievements creates suggestion",
+      description: "Resumes with no measurable outcomes should produce a quantified-achievements suggestion.",
+      inputSummary: "Resume without numeric outcomes.",
+      expectedBehavior: "suggestedFixes contains a quantifiedAchievements suggestion."
+    },
+    {
+      id: "eval_ri_table_layout_warning",
+      suite: "resume_intelligence",
+      name: "Table/column formatting creates ATS warning",
+      description: "Pipes in the parsed text indicate column/table layouts ATS parsers struggle with.",
+      inputSummary: "Resume containing | characters.",
+      expectedBehavior: "parsingWarnings mentions multi-column / table layout."
+    },
+    {
+      id: "eval_ri_skills_not_invented",
+      suite: "resume_intelligence",
+      name: "Unsupported skills are not invented",
+      description: "When the resume mentions no relevant skill keywords, the extracted skills list must be empty.",
+      inputSummary: "Resume with no recognisable skill keywords.",
+      expectedBehavior: "extractedProfile.skills is empty."
+    },
+    {
+      id: "eval_ri_product_role_recommendation",
+      suite: "resume_intelligence",
+      name: "Product evidence recommends product roles",
+      description: "Product-manager resume should recommend Product Manager as a strongest-fit role.",
+      inputSummary: "Product manager resume.",
+      expectedBehavior: "strongestRoles includes a 'Product Manager' style title."
+    },
+    {
+      id: "eval_ri_data_role_recommendation",
+      suite: "resume_intelligence",
+      name: "Data evidence recommends data roles",
+      description: "Data-engineering resume should recommend a data-related role.",
+      inputSummary: "Data engineer resume.",
+      expectedBehavior: "strongestRoles includes a data-related title."
+    },
+    {
+      id: "eval_ri_ai_role_recommendation",
+      suite: "resume_intelligence",
+      name: "AI evidence recommends AI roles",
+      description: "AI/LLM resume should recommend an AI-related role.",
+      inputSummary: "AI engineer resume.",
+      expectedBehavior: "strongestRoles includes an AI-related title."
+    },
+    {
+      id: "eval_ri_stretch_clearly_labeled",
+      suite: "resume_intelligence",
+      name: "Stretch roles are clearly labeled",
+      description: "Stretch roles should have fitLevel='stretch' and low confidence.",
+      inputSummary: "Product manager resume.",
+      expectedBehavior: "Every stretch role has fitLevel='stretch' and confidence 'low'."
+    },
+    {
+      id: "eval_ri_no_strong_without_evidence",
+      suite: "resume_intelligence",
+      name: "Roles without evidence are not marked strong fit",
+      description: "Resumes with no role-family evidence should produce zero strongest-fit roles.",
+      inputSummary: "Resume with no recognisable role-family keywords.",
+      expectedBehavior: "strongestRoles is empty when no role family matches."
+    },
+    {
+      id: "eval_ri_avoid_includes_explanation",
+      suite: "resume_intelligence",
+      name: "Roles to avoid include an explanation",
+      description: "Each role in rolesToAvoid should explain why.",
+      inputSummary: "Product manager resume.",
+      expectedBehavior: "Every avoid role has a non-empty 'why' string."
+    },
+    {
+      id: "eval_ri_target_titles_populate_after_confirmation",
+      suite: "resume_intelligence",
+      name: "Target titles populate after confirmation",
+      description: "selectionFromRecommendation returns the strongest+adjacent titles in order so the UI can prefill onboarding pills.",
+      inputSummary: "Recommendation with strongest and adjacent roles.",
+      expectedBehavior: "selection.selectedRoles begins with the strongest role title."
     }
   ];
 
@@ -1917,6 +2033,317 @@ async function onboardingEval(
   );
 }
 
+async function resumeIntelligenceEval(
+  evalCase: EvalCase,
+  session: AppSession,
+  run: EvalRun
+): Promise<EvalResult> {
+  const sandbox = evalSession(session);
+  if (typeof window !== "undefined") {
+    [
+      "resume",
+      "resume_intelligence_reports",
+      "job_target_recommendations",
+      "audit_logs",
+      "profile"
+    ].forEach((resource) => {
+      window.localStorage.removeItem(
+        scopedKey(sandbox.tenant.id, sandbox.userId, resource)
+      );
+    });
+  }
+
+  function makeResume(text: string): Resume {
+    const now = nowIso();
+    return {
+      id: "resume_eval",
+      tenantId: sandbox.tenant.id,
+      userId: sandbox.userId,
+      originalFileName: "resume.txt",
+      fileUrl: "local://resume.txt",
+      parsedText: text,
+      status: "parsed",
+      createdAt: now
+    };
+  }
+
+  const cleanProductResume = `Jane Doe
+Senior Product Manager
+Remote
+jane.doe@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+https://github.com/janedoe
+
+Experience
+Senior Product Manager — DemoLabs — 2022 - 2026
+Led B2B SaaS workflow automation roadmap; partnered with engineering and design.
+Shipped major roadmap; +20% activation, +12% retention.
+Customer discovery interviews; led cross-functional team of 4 engineers.
+
+Skills
+Product Management, Roadmap, Customer Discovery, SQL, Figma`;
+
+  if (evalCase.id === "eval_ri_clean_resume_high_confidence") {
+    const result = await analyzeResumeIntelligence(
+      sandbox,
+      makeResume(cleanProductResume)
+    );
+    const report = result.report;
+    const passed =
+      report.confidenceByField.fullName === "high" &&
+      report.confidenceByField.email === "high" &&
+      report.confidenceByField.linkedinUrl === "high" &&
+      report.atsRiskLevel === "low";
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `name=${report.confidenceByField.fullName} email=${report.confidenceByField.email} linkedin=${report.confidenceByField.linkedinUrl} risk=${report.atsRiskLevel}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_missing_email_warning") {
+    const text = cleanProductResume.replace(/jane\.doe@example\.com\n/, "");
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed =
+      result.report.missingFields.includes("email") &&
+      result.report.suggestedFixes.some(
+        (fix) => fix.field === "email" && fix.severity === "high"
+      );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `missing=${result.report.missingFields.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_missing_phone_warning") {
+    const text = cleanProductResume.replace(/\+1 555-555-0100\n/, "");
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed =
+      result.report.missingFields.includes("phone") &&
+      result.report.suggestedFixes.some((fix) => fix.field === "phone");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `missing=${result.report.missingFields.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_unclear_dates_warning") {
+    const text = cleanProductResume.replace(/2022 - 2026/, "recently");
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed = result.report.ambiguousFields.includes("dates");
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `ambiguous=${result.report.ambiguousFields.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_no_quantified_creates_suggestion") {
+    const text = `Jane Doe\nSenior Product Manager\nRemote\njane.doe@example.com\n+1 555-555-0100\nhttps://www.linkedin.com/in/janedoe\n\nExperience\nSenior Product Manager — DemoLabs — 2022 - 2026\nWorked on roadmap and discovery.\nSkills\nProduct Management, Roadmap`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed = result.report.suggestedFixes.some(
+      (fix) => fix.field === "quantifiedAchievements"
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `fixes=${result.report.suggestedFixes.map((f) => f.field).join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_table_layout_warning") {
+    const text = `Jane Doe | Senior PM | jane@example.com | +1 555-555-0100\nLinkedIn | https://www.linkedin.com/in/janedoe`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed = result.report.parsingWarnings.some((warning) =>
+      warning.toLowerCase().includes("multi-column")
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `warnings=${result.report.parsingWarnings.join(" | ")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_skills_not_invented") {
+    const text = `Jane Doe\nNo recognisable role keywords here. Just personal description.`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed = result.report.extractedProfile.skills.length === 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `skills=${result.report.extractedProfile.skills.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_product_role_recommendation") {
+    const result = await analyzeResumeIntelligence(
+      sandbox,
+      makeResume(cleanProductResume)
+    );
+    const titles = result.recommendation.strongestRoles.map((role) =>
+      role.title.toLowerCase()
+    );
+    const passed = titles.some((title) => title.includes("product"));
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `strongest=${titles.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_data_role_recommendation") {
+    const text = `Jane Doe
+Senior Data Engineer
+Remote
+jane.doe@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+
+Experience
+Senior Data Engineer — DemoData — 2022 - 2026
+Built data pipelines, owned the warehouse and analytics ETL.
+Snowflake, Airflow, SQL, dbt.
+
+Skills
+Data Engineering, SQL, Pipelines, Snowflake`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const titles = result.recommendation.strongestRoles.map((role) =>
+      role.title.toLowerCase()
+    );
+    const passed = titles.some(
+      (title) => title.includes("data") || title.includes("analyt")
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `strongest=${titles.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_ai_role_recommendation") {
+    const text = `Jane Doe
+AI Engineer
+Remote
+jane.doe@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+
+Experience
+AI Engineer — DemoAI — 2022 - 2026
+Shipped LLM agents and RAG systems; built model evals across prompts and tools.
+
+Skills
+LLM, Agents, RAG, Model Evals, Python`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const titles = result.recommendation.strongestRoles.map((role) =>
+      role.title.toLowerCase()
+    );
+    const passed = titles.some((title) => title.includes("ai"));
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `strongest=${titles.join(",")}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_stretch_clearly_labeled") {
+    const result = await analyzeResumeIntelligence(
+      sandbox,
+      makeResume(cleanProductResume)
+    );
+    const passed = result.recommendation.stretchRoles.every(
+      (role) => role.fitLevel === "stretch" && role.confidence === "low"
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `stretchCount=${result.recommendation.stretchRoles.length}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_no_strong_without_evidence") {
+    const text = `Jane Doe\nNo recognisable role keywords here. Just personal description.\njane.doe@example.com\n+1 555-555-0100\nhttps://www.linkedin.com/in/janedoe`;
+    const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
+    const passed = result.recommendation.strongestRoles.length === 0;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `strongCount=${result.recommendation.strongestRoles.length}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_avoid_includes_explanation") {
+    const result = await analyzeResumeIntelligence(
+      sandbox,
+      makeResume(cleanProductResume)
+    );
+    const allHaveWhy = result.recommendation.rolesToAvoid.every(
+      (role) => role.why.trim().length > 0
+    );
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      allHaveWhy ? "passed" : "failed",
+      `avoidCount=${result.recommendation.rolesToAvoid.length}`
+    );
+  }
+
+  if (evalCase.id === "eval_ri_target_titles_populate_after_confirmation") {
+    const result = await analyzeResumeIntelligence(
+      sandbox,
+      makeResume(cleanProductResume)
+    );
+    const selection = selectionFromRecommendation(result.recommendation);
+    const firstStrong = result.recommendation.strongestRoles[0]?.title ?? "";
+    const passed =
+      selection.selectedRoles.length > 0 && selection.selectedRoles[0] === firstStrong;
+    return resultFor(
+      session,
+      run,
+      evalCase,
+      passed ? "passed" : "failed",
+      `firstSelected=${selection.selectedRoles[0] ?? "none"}`
+    );
+  }
+
+  return resultFor(
+    session,
+    run,
+    evalCase,
+    "failed",
+    `Unknown resume_intelligence eval: ${evalCase.id}`,
+    "warning"
+  );
+}
+
 async function evaluateCase(
   evalCase: EvalCase,
   session: AppSession,
@@ -1945,6 +2372,10 @@ async function evaluateCase(
 
     if (evalCase.suite === "onboarding") {
       return await onboardingEval(evalCase, session, run);
+    }
+
+    if (evalCase.suite === "resume_intelligence") {
+      return await resumeIntelligenceEval(evalCase, session, run);
     }
 
     return await browserEval(evalCase, session, run);

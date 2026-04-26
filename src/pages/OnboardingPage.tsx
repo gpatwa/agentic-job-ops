@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  AlertTriangle,
   ArrowRight,
   BookmarkPlus,
   CheckCircle2,
@@ -7,20 +8,28 @@ import {
   FileText,
   RefreshCw,
   Rocket,
+  ShieldAlert,
   Sparkles,
   Target,
   XCircle
 } from "lucide-react";
 import type {
   ApplicationRecord,
+  AtsRiskLevel,
+  ExtractedResumeProfile,
   JobMatch,
+  JobTargetRecommendation,
   NormalizedJob,
   OnboardingState,
+  RecommendedRole,
   Resume,
+  ResumeFieldConfidence,
+  ResumeIntelligenceReport,
   UserProfile
 } from "../models/domain";
 import type { OnboardingRecommendationResult } from "../services/onboardingJobRecommendationService";
 import { isDemoJob } from "../services/onboardingJobRecommendationService";
+import { selectionFromRecommendation } from "../services/resumeIntelligenceService";
 
 interface OnboardingPageProps {
   profile: UserProfile | null;
@@ -29,6 +38,16 @@ interface OnboardingPageProps {
   applications: ApplicationRecord[];
   isRecommending: boolean;
   lastResult: OnboardingRecommendationResult | null;
+  resumeIntelligenceReport: ResumeIntelligenceReport | null;
+  jobTargetRecommendation: JobTargetRecommendation | null;
+  isAnalyzingResume: boolean;
+  onAnalyzeResume: () => void;
+  onConfirmResumeProfile: () => void;
+  onConfirmRecommendedTargets: (selection: {
+    selectedRoles: string[];
+    selectedIndustries: string[];
+    recommendedSeniority: string;
+  }) => void;
   onSelectRoles: (roles: string[]) => void;
   onGenerateRecommendations: (roles: string[]) => void;
   onReviewJob: (jobId: string) => void;
@@ -89,6 +108,12 @@ export function OnboardingPage({
   applications,
   isRecommending,
   lastResult,
+  resumeIntelligenceReport,
+  jobTargetRecommendation,
+  isAnalyzingResume,
+  onAnalyzeResume,
+  onConfirmResumeProfile,
+  onConfirmRecommendedTargets,
   onSelectRoles,
   onGenerateRecommendations,
   onReviewJob,
@@ -214,6 +239,20 @@ export function OnboardingPage({
           }}
         />
       </section>
+
+      <ResumeIntelligenceSection
+        resume={resume}
+        report={resumeIntelligenceReport}
+        recommendation={jobTargetRecommendation}
+        isAnalyzing={isAnalyzingResume}
+        onAnalyzeResume={onAnalyzeResume}
+        onConfirmResumeProfile={onConfirmResumeProfile}
+        onConfirmRecommendedTargets={(selection) => {
+          onConfirmRecommendedTargets(selection);
+          setSelectedRoles(selection.selectedRoles);
+        }}
+        onNavigateResume={onNavigateResume}
+      />
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex items-start gap-3">
@@ -592,6 +631,527 @@ function RecommendationCard({
       )}
     </li>
   );
+}
+
+interface ResumeIntelligenceSectionProps {
+  resume: Resume | null;
+  report: ResumeIntelligenceReport | null;
+  recommendation: JobTargetRecommendation | null;
+  isAnalyzing: boolean;
+  onAnalyzeResume: () => void;
+  onConfirmResumeProfile: () => void;
+  onConfirmRecommendedTargets: (selection: {
+    selectedRoles: string[];
+    selectedIndustries: string[];
+    recommendedSeniority: string;
+  }) => void;
+  onNavigateResume: () => void;
+}
+
+function ResumeIntelligenceSection({
+  resume,
+  report,
+  recommendation,
+  isAnalyzing,
+  onAnalyzeResume,
+  onConfirmResumeProfile,
+  onConfirmRecommendedTargets,
+  onNavigateResume
+}: ResumeIntelligenceSectionProps) {
+  const baselineRoles = useMemo(
+    () => (recommendation ? selectionFromRecommendation(recommendation).selectedRoles : []),
+    [recommendation]
+  );
+  const [draftRoles, setDraftRoles] = useState<string[]>(baselineRoles);
+
+  useEffect(() => {
+    setDraftRoles(baselineRoles);
+  }, [baselineRoles]);
+
+  function toggleDraftRole(title: string) {
+    setDraftRoles((prev) =>
+      prev.includes(title)
+        ? prev.filter((item) => item !== title)
+        : [...prev, title]
+    );
+  }
+
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-sky-50 text-sky-700">
+          <Sparkles aria-hidden="true" size={18} />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-base font-semibold text-slate-950">
+            Resume intelligence
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Estimated only. Output is best-effort context, not authoritative
+            truth. We never invent experience, skills, or metrics; uncertain
+            extraction is marked low confidence.
+          </p>
+
+          <div className="mt-4 flex flex-wrap gap-2">
+            {!resume ? (
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-900 hover:bg-amber-100"
+                onClick={onNavigateResume}
+              >
+                Upload a resume to start
+                <ArrowRight aria-hidden="true" size={15} />
+              </button>
+            ) : !report ? (
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                onClick={onAnalyzeResume}
+                disabled={isAnalyzing}
+              >
+                {isAnalyzing ? (
+                  <RefreshCw className="animate-spin" aria-hidden="true" size={15} />
+                ) : (
+                  <Sparkles aria-hidden="true" size={15} />
+                )}
+                {isAnalyzing ? "Analyzing resume…" : "Analyze resume"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                onClick={onAnalyzeResume}
+                disabled={isAnalyzing}
+              >
+                <RefreshCw aria-hidden="true" size={15} />
+                {isAnalyzing ? "Refreshing…" : "Refresh analysis"}
+              </button>
+            )}
+            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
+              Adapter:{" "}
+              {report
+                ? statusLabel(report.extractionMode)
+                : "deterministic fallback"}
+            </span>
+          </div>
+
+          {report && (
+            <div className="mt-5 space-y-4">
+              <ExtractedProfileCard
+                profile={report.extractedProfile}
+                report={report}
+                onConfirm={onConfirmResumeProfile}
+              />
+              <AtsRiskCard report={report} />
+              {recommendation && (
+                <JobTargetRecommendationCard
+                  recommendation={recommendation}
+                  draftRoles={draftRoles}
+                  onToggleRole={toggleDraftRole}
+                  onConfirm={() =>
+                    onConfirmRecommendedTargets({
+                      selectedRoles: draftRoles,
+                      selectedIndustries: recommendation.recommendedIndustries,
+                      recommendedSeniority: recommendation.recommendedSeniority
+                    })
+                  }
+                />
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function ExtractedProfileCard({
+  profile,
+  report,
+  onConfirm
+}: {
+  profile: ExtractedResumeProfile;
+  report: ResumeIntelligenceReport;
+  onConfirm: () => void;
+}) {
+  const rows: { label: string; value: string; key: keyof typeof report.confidenceByField }[] = [
+    { label: "Full name", value: profile.fullName, key: "fullName" },
+    { label: "Email", value: profile.email, key: "email" },
+    { label: "Phone", value: profile.phone, key: "phone" },
+    { label: "Location", value: profile.location, key: "location" },
+    { label: "LinkedIn", value: profile.linkedinUrl, key: "linkedinUrl" },
+    { label: "GitHub", value: profile.githubUrl, key: "githubUrl" },
+    { label: "Portfolio", value: profile.portfolioUrl, key: "portfolioUrl" },
+    { label: "Current title", value: profile.currentTitle, key: "currentTitle" },
+    { label: "Seniority", value: profile.seniorityLevel, key: "seniorityLevel" },
+    {
+      label: "Years of experience",
+      value:
+        profile.yearsOfExperience !== null ? String(profile.yearsOfExperience) : "",
+      key: "yearsOfExperience"
+    }
+  ];
+  return (
+    <div className="rounded-md border border-slate-200 bg-panel p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Extracted candidate profile
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Confidence badges show how sure we are. Uncertain fields stay
+            editable.
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800"
+          onClick={onConfirm}
+        >
+          <CheckCircle2 aria-hidden="true" size={14} />
+          Apply high-confidence fields to profile
+        </button>
+      </div>
+      <dl className="mt-3 grid gap-2 md:grid-cols-2">
+        {rows.map((row) => (
+          <div
+            key={row.key}
+            className="rounded-md border border-slate-200 bg-white p-3"
+          >
+            <dt className="text-xs uppercase tracking-wide text-slate-500">
+              {row.label}
+            </dt>
+            <dd className="mt-1 flex items-center justify-between gap-2 text-sm text-slate-800">
+              <span className="truncate">{row.value || "—"}</span>
+              <ConfidenceBadge value={report.confidenceByField[row.key]} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+      {(profile.skills.length > 0 ||
+        profile.industries.length > 0 ||
+        profile.quantifiedAchievements.length > 0) && (
+        <div className="mt-3 grid gap-2 md:grid-cols-3">
+          <ListBlock label="Skills" items={profile.skills} />
+          <ListBlock label="Industries" items={profile.industries} />
+          <ListBlock label="Quantified wins" items={profile.quantifiedAchievements} />
+        </div>
+      )}
+      {(report.missingFields.length > 0 || report.ambiguousFields.length > 0) && (
+        <div className="mt-3 grid gap-2 md:grid-cols-2">
+          {report.missingFields.length > 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
+              <p className="font-semibold text-amber-900">Missing fields</p>
+              <ul className="mt-1 space-y-1 text-amber-800">
+                {report.missingFields.map((field) => (
+                  <li key={field}>• {field}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {report.ambiguousFields.length > 0 && (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
+              <p className="font-semibold text-amber-900">Ambiguous fields</p>
+              <ul className="mt-1 space-y-1 text-amber-800">
+                {report.ambiguousFields.map((field) => (
+                  <li key={field}>• {field}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AtsRiskCard({ report }: { report: ResumeIntelligenceReport }) {
+  const tone = atsToneClasses(report.atsRiskLevel);
+  return (
+    <div className={`rounded-md border ${tone.border} ${tone.background} p-4`}>
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex items-start gap-2">
+          <ShieldAlert
+            aria-hidden="true"
+            className={`mt-0.5 ${tone.icon}`}
+            size={17}
+          />
+          <div>
+            <p className={`text-sm font-semibold ${tone.title}`}>
+              ATS parse risk: {report.atsRiskLevel}
+            </p>
+            <p className="text-xs text-slate-700">
+              Risk score {Math.round(report.atsRiskScore)}/100. Lower is better.
+            </p>
+          </div>
+        </div>
+      </div>
+      {report.suggestedFixes.length > 0 && (
+        <ul className="mt-3 space-y-2">
+          {report.suggestedFixes.map((fix) => {
+            const fixTone = atsToneClasses(fix.severity);
+            return (
+              <li
+                key={`${fix.field}-${fix.message}`}
+                className={`rounded-md border ${fixTone.border} ${fixTone.background} p-3 text-xs`}
+              >
+                <p className={`font-semibold capitalize ${fixTone.title}`}>
+                  {fix.severity} · {fix.field}
+                </p>
+                <p className="mt-1 text-slate-800">{fix.message}</p>
+                {fix.recommendedAction && (
+                  <p className="mt-1 text-slate-700">{fix.recommendedAction}</p>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function JobTargetRecommendationCard({
+  recommendation,
+  draftRoles,
+  onToggleRole,
+  onConfirm
+}: {
+  recommendation: JobTargetRecommendation;
+  draftRoles: string[];
+  onToggleRole: (title: string) => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-panel p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Recommended job targets
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">
+            {recommendation.positioningSummary}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Confidence: {recommendation.confidence} · Adapter:{" "}
+            {statusLabel(recommendation.extractionMode)}
+          </p>
+        </div>
+        <button
+          type="button"
+          className="inline-flex min-h-9 items-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+          onClick={onConfirm}
+          disabled={draftRoles.length === 0}
+        >
+          <Target aria-hidden="true" size={14} />
+          Confirm targets ({draftRoles.length})
+        </button>
+      </div>
+
+      <RoleGroup
+        label="Strongest fit"
+        roles={recommendation.strongestRoles}
+        draftRoles={draftRoles}
+        onToggle={onToggleRole}
+        tone="good"
+      />
+      <RoleGroup
+        label="Adjacent"
+        roles={recommendation.adjacentRoles}
+        draftRoles={draftRoles}
+        onToggle={onToggleRole}
+        tone="neutral"
+      />
+      <RoleGroup
+        label="Stretch"
+        roles={recommendation.stretchRoles}
+        draftRoles={draftRoles}
+        onToggle={onToggleRole}
+        tone="warn"
+      />
+      {recommendation.rolesToAvoid.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Roles to avoid
+          </p>
+          <ul className="mt-2 space-y-1 text-xs text-slate-700">
+            {recommendation.rolesToAvoid.map((role) => (
+              <li key={role.title}>
+                <strong>{role.title}</strong> — {role.why}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-3">
+        <ListBlock
+          label="Recommended industries"
+          items={recommendation.recommendedIndustries}
+        />
+        <ListBlock
+          label="Search keywords"
+          items={recommendation.recommendedSearchKeywords}
+        />
+        <ListBlock
+          label="Positioning advice"
+          items={recommendation.resumePositioningAdvice}
+        />
+      </div>
+      {recommendation.skillGaps.length > 0 && (
+        <div className="mt-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Skill gaps
+          </p>
+          <ul className="mt-2 space-y-2">
+            {recommendation.skillGaps.map((gap) => (
+              <li
+                key={`${gap.skill}-${gap.importance}`}
+                className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900"
+              >
+                <p className="font-semibold capitalize">
+                  {gap.skill} ({gap.importance})
+                </p>
+                <p className="mt-1">{gap.reason}</p>
+                <p className="mt-1">{gap.howToClose}</p>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function RoleGroup({
+  label,
+  roles,
+  draftRoles,
+  onToggle,
+  tone
+}: {
+  label: string;
+  roles: RecommendedRole[];
+  draftRoles: string[];
+  onToggle: (title: string) => void;
+  tone: "good" | "warn" | "neutral";
+}) {
+  if (roles.length === 0) return null;
+  return (
+    <div className="mt-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        {label} ({roles.length})
+      </p>
+      <ul className="mt-2 space-y-2">
+        {roles.map((role) => {
+          const checked = draftRoles.includes(role.title);
+          const stretchLabel = role.fitLevel === "stretch" ? "Stretch · " : "";
+          return (
+            <li
+              key={`${role.title}-${role.fitLevel}`}
+              className="rounded-md border border-slate-200 bg-white p-3"
+            >
+              <label className="flex items-start gap-3 text-sm text-slate-800">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 rounded border-slate-300"
+                  checked={checked}
+                  onChange={() => onToggle(role.title)}
+                />
+                <span className="flex-1">
+                  <span className="flex flex-wrap items-center gap-2">
+                    <strong>{stretchLabel}{role.title}</strong>
+                    <ConfidenceBadge value={role.confidence} />
+                    <StatusPill tone={tone}>{role.fitLevel}</StatusPill>
+                  </span>
+                  <span className="mt-1 block text-xs text-slate-600">
+                    {role.why}
+                  </span>
+                  {role.evidenceFromResume.length > 0 && (
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Evidence: {role.evidenceFromResume.join("; ")}
+                    </span>
+                  )}
+                  {role.searchKeywords.length > 0 && (
+                    <span className="mt-1 block text-xs text-slate-500">
+                      Search keywords: {role.searchKeywords.join(", ")}
+                    </span>
+                  )}
+                  {role.suggestedResumeAngle && (
+                    <span className="mt-1 block text-xs text-emerald-800">
+                      Resume angle: {role.suggestedResumeAngle}
+                    </span>
+                  )}
+                </span>
+              </label>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
+function ListBlock({ label, items }: { label: string; items: string[] }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="rounded-md border border-slate-200 bg-white p-3 text-xs">
+      <p className="font-semibold uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <ul className="mt-1 space-y-1 text-slate-700">
+        {items.map((item) => (
+          <li key={item}>• {item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function ConfidenceBadge({ value }: { value: ResumeFieldConfidence }) {
+  const tone =
+    value === "high"
+      ? "bg-emerald-50 text-emerald-700"
+      : value === "medium"
+        ? "bg-amber-50 text-amber-700"
+        : "bg-slate-100 text-slate-700";
+  return (
+    <span
+      className={`shrink-0 rounded-md px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${tone}`}
+    >
+      {value}
+    </span>
+  );
+}
+
+function atsToneClasses(level: AtsRiskLevel): {
+  border: string;
+  background: string;
+  icon: string;
+  title: string;
+} {
+  if (level === "high") {
+    return {
+      border: "border-red-200",
+      background: "bg-red-50",
+      icon: "text-red-700",
+      title: "text-red-900"
+    };
+  }
+  if (level === "medium") {
+    return {
+      border: "border-amber-200",
+      background: "bg-amber-50",
+      icon: "text-amber-700",
+      title: "text-amber-900"
+    };
+  }
+  return {
+    border: "border-emerald-200",
+    background: "bg-emerald-50",
+    icon: "text-emerald-700",
+    title: "text-emerald-900"
+  };
 }
 
 function DetailBlock({

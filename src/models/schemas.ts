@@ -15,10 +15,15 @@ import {
   careerOpsRunModes,
   careerOpsRunStatuses,
   careerOpsScheduleModes,
+  atsRiskLevels,
   intelligenceConfidences,
   intelligenceSources,
   jobRiskSeverities,
   jobRiskSignalTypes,
+  recommendedRoleFitLevels,
+  resumeFieldConfidences,
+  resumeIntelligenceModes,
+  skillGapImportances,
   evalRunStatuses,
   evalRunSuites,
   evalStatuses,
@@ -414,6 +419,115 @@ export const extensionPageStructureSchema = z.object({
   hasCaptcha: z.boolean(),
   hasLoginChallenge: z.boolean(),
   capturedAt: isoDateSchema
+});
+
+export const extractedResumeProfileSchema = z.object({
+  fullName: z.string().trim().default(""),
+  email: z.string().trim().default(""),
+  phone: z.string().trim().default(""),
+  location: z.string().trim().default(""),
+  linkedinUrl: z.string().trim().default(""),
+  githubUrl: z.string().trim().default(""),
+  portfolioUrl: z.string().trim().default(""),
+  currentTitle: z.string().trim().default(""),
+  seniorityLevel: z.string().trim().default(""),
+  yearsOfExperience: z.number().nullable(),
+  industries: stringListSchema,
+  companies: stringListSchema,
+  jobTitles: stringListSchema,
+  education: stringListSchema,
+  certifications: stringListSchema,
+  skills: stringListSchema,
+  tools: stringListSchema,
+  projects: stringListSchema,
+  leadershipExamples: stringListSchema,
+  quantifiedAchievements: stringListSchema,
+  workAuthorization: z.string().trim().default(""),
+  resumeStrengths: stringListSchema,
+  resumeGaps: stringListSchema
+});
+
+export const resumeFieldConfidenceMapSchema = z.object({
+  fullName: z.enum(resumeFieldConfidences),
+  email: z.enum(resumeFieldConfidences),
+  phone: z.enum(resumeFieldConfidences),
+  location: z.enum(resumeFieldConfidences),
+  linkedinUrl: z.enum(resumeFieldConfidences),
+  githubUrl: z.enum(resumeFieldConfidences),
+  portfolioUrl: z.enum(resumeFieldConfidences),
+  currentTitle: z.enum(resumeFieldConfidences),
+  seniorityLevel: z.enum(resumeFieldConfidences),
+  yearsOfExperience: z.enum(resumeFieldConfidences),
+  skills: z.enum(resumeFieldConfidences),
+  industries: z.enum(resumeFieldConfidences)
+});
+
+export const resumeIntelligenceSuggestedFixSchema = z.object({
+  field: z.string().trim().min(1),
+  severity: z.enum(atsRiskLevels),
+  message: z.string().trim().min(1),
+  recommendedAction: z.string().trim().default("")
+});
+
+export const resumeIntelligenceReportSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  resumeId: idSchema,
+  extractionMode: z.enum(resumeIntelligenceModes),
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  extractedProfile: extractedResumeProfileSchema,
+  confidenceByField: resumeFieldConfidenceMapSchema,
+  missingFields: stringListSchema,
+  ambiguousFields: stringListSchema,
+  parsingWarnings: stringListSchema,
+  atsRiskScore: z.number().min(0).max(100),
+  atsRiskLevel: z.enum(atsRiskLevels),
+  suggestedFixes: z.array(resumeIntelligenceSuggestedFixSchema).default([]),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const recommendedRoleSchema = z.object({
+  title: z.string().trim().min(1),
+  fitLevel: z.enum(recommendedRoleFitLevels),
+  confidence: z.enum(resumeFieldConfidences),
+  why: z.string().trim().default(""),
+  evidenceFromResume: stringListSchema,
+  searchKeywords: stringListSchema,
+  suggestedResumeAngle: z.string().trim().default("")
+});
+
+export const skillGapSchema = z.object({
+  skill: z.string().trim().min(1),
+  importance: z.enum(skillGapImportances),
+  reason: z.string().trim().default(""),
+  howToClose: z.string().trim().default("")
+});
+
+export const jobTargetRecommendationSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  resumeId: idSchema,
+  reportId: idSchema,
+  strongestRoles: z.array(recommendedRoleSchema).default([]),
+  adjacentRoles: z.array(recommendedRoleSchema).default([]),
+  stretchRoles: z.array(recommendedRoleSchema).default([]),
+  rolesToAvoid: z.array(recommendedRoleSchema).default([]),
+  recommendedIndustries: stringListSchema,
+  recommendedSeniority: z.string().trim().default(""),
+  recommendedSearchKeywords: stringListSchema,
+  positioningSummary: z.string().trim().default(""),
+  resumePositioningAdvice: stringListSchema,
+  skillGaps: z.array(skillGapSchema).default([]),
+  confidence: z.enum(resumeFieldConfidences),
+  extractionMode: z.enum(resumeIntelligenceModes),
+  modelName: z.string().trim().min(1),
+  promptVersion: z.string().trim().min(1),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
 });
 
 export const onboardingStateSchema = z.object({
