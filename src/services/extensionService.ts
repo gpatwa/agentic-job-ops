@@ -954,6 +954,213 @@ export function extensionFillableView(
   }));
 }
 
+export function latestExtensionSession(
+  sessions: ExtensionSession[]
+): ExtensionSession | null {
+  if (sessions.length === 0) {
+    return null;
+  }
+  return [...sessions].sort(
+    (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
+  )[0];
+}
+
+export interface ExtensionSafetyStatus {
+  liveSubmit: "disabled";
+  defaultMode: "dry_run";
+  captchaBypass: "disabled";
+  credentialCapture: "disabled";
+  sensitiveAutofill: "disabled_unless_user_defaults";
+}
+
+export const extensionSafetyStatus: ExtensionSafetyStatus = {
+  liveSubmit: "disabled",
+  defaultMode: "dry_run",
+  captchaBypass: "disabled",
+  credentialCapture: "disabled",
+  sensitiveAutofill: "disabled_unless_user_defaults"
+};
+
+export interface ExtensionSubmitBlockedReason {
+  blocked: true;
+  code:
+    | "no_session"
+    | "session_not_submit_approved"
+    | "linked_package_not_approved"
+    | "captcha_or_login_pause_present"
+    | "session_disconnected_or_failed";
+  message: string;
+}
+
+export interface ExtensionSubmitAllowed {
+  blocked: false;
+}
+
+export type ExtensionSubmitGate =
+  | ExtensionSubmitBlockedReason
+  | ExtensionSubmitAllowed;
+
+export function extensionSubmitGate(
+  extensionSession: ExtensionSession | null,
+  applicationPackage?: ApplicationPackage | null
+): ExtensionSubmitGate {
+  if (!extensionSession) {
+    return {
+      blocked: true,
+      code: "no_session",
+      message: "No extension session is connected for this application."
+    };
+  }
+
+  if (
+    extensionSession.status === "disconnected" ||
+    extensionSession.status === "failed"
+  ) {
+    return {
+      blocked: true,
+      code: "session_disconnected_or_failed",
+      message: `Extension session is ${extensionSession.status.replace(/_/g, " ")}; reconnect or restart the flow before submitting.`
+    };
+  }
+
+  if (extensionSession.status !== "submit_approved") {
+    return {
+      blocked: true,
+      code: "session_not_submit_approved",
+      message: `Awaiting explicit user approval (current status: ${extensionSession.status.replace(/_/g, " ")}).`
+    };
+  }
+
+  if (extensionSession.applicationPackageId && applicationPackage) {
+    if (
+      applicationPackage.id !== extensionSession.applicationPackageId ||
+      applicationPackage.status !== "approved"
+    ) {
+      return {
+        blocked: true,
+        code: "linked_package_not_approved",
+        message:
+          "Linked application package is no longer approved. Re-approve the package before submitting."
+      };
+    }
+  }
+
+  if (
+    extensionSession.uncertainFields.some(
+      (field) => field.reason === "captcha" || field.reason === "login_challenge"
+    )
+  ) {
+    return {
+      blocked: true,
+      code: "captcha_or_login_pause_present",
+      message:
+        "CAPTCHA or login challenge must be resolved manually before submit can proceed."
+    };
+  }
+
+  return { blocked: false };
+}
+
+export interface ExtensionDiagnostics {
+  hasSession: boolean;
+  status: ExtensionSessionStatus | null;
+  pageUrl: string;
+  pageTitle: string;
+  hostname: string;
+  detectedFieldCount: number;
+  fillPlanCount: number;
+  fillCount: number;
+  pauseCount: number;
+  filledCount: number;
+  submit: ExtensionSubmitGate;
+  fillPlan: ExtensionFillableFieldsView;
+  pausedFields: ExtensionSession["uncertainFields"];
+  detectedFields: ExtensionSession["fieldsDetected"];
+  filledFields: ExtensionSession["fieldsFilled"];
+  lastUpdatedAt: string | null;
+}
+
+export function extensionDiagnostics(
+  extensionSession: ExtensionSession | null,
+  applicationPackage?: ApplicationPackage | null
+): ExtensionDiagnostics {
+  if (!extensionSession) {
+    return {
+      hasSession: false,
+      status: null,
+      pageUrl: "",
+      pageTitle: "",
+      hostname: "",
+      detectedFieldCount: 0,
+      fillPlanCount: 0,
+      fillCount: 0,
+      pauseCount: 0,
+      filledCount: 0,
+      submit: extensionSubmitGate(null),
+      fillPlan: [],
+      pausedFields: [],
+      detectedFields: [],
+      filledFields: [],
+      lastUpdatedAt: null
+    };
+  }
+
+  const fillCount = extensionSession.fillPlan.filter(
+    (item) => item.action === "fill" || item.action === "upload"
+  ).length;
+
+  return {
+    hasSession: true,
+    status: extensionSession.status,
+    pageUrl: extensionSession.pageUrl,
+    pageTitle: extensionSession.pageTitle,
+    hostname: extensionSession.hostname,
+    detectedFieldCount: extensionSession.fieldsDetected.length,
+    fillPlanCount: extensionSession.fillPlan.length,
+    fillCount,
+    pauseCount: extensionSession.uncertainFields.length,
+    filledCount: extensionSession.fieldsFilled.length,
+    submit: extensionSubmitGate(extensionSession, applicationPackage),
+    fillPlan: extensionFillableView(extensionSession),
+    pausedFields: extensionSession.uncertainFields,
+    detectedFields: extensionSession.fieldsDetected,
+    filledFields: extensionSession.fieldsFilled,
+    lastUpdatedAt: extensionSession.updatedAt
+  };
+}
+
+const EXTENSION_AUDIT_ACTIONS = new Set([
+  "extension_connection_requested",
+  "extension_connected",
+  "application_page_analyzed",
+  "fill_plan_created",
+  "user_approved_field_fill",
+  "extension_fields_filled",
+  "user_approved_extension_submit",
+  "extension_submit_completed",
+  "extension_disconnected",
+  "extension_session_failed",
+  "extension_manual_required",
+  "extension_submit_blocked"
+]);
+
+export function isExtensionAuditAction(action: string): boolean {
+  return EXTENSION_AUDIT_ACTIONS.has(action);
+}
+
+const EXTENSION_USAGE_EVENTS = new Set([
+  "extension_session_started",
+  "extension_page_analyzed",
+  "extension_fill_plan_created",
+  "extension_fields_filled",
+  "extension_submit_approved",
+  "extension_session_failed"
+]);
+
+export function isExtensionUsageEvent(eventType: string): boolean {
+  return EXTENSION_USAGE_EVENTS.has(eventType);
+}
+
 // Re-exports for convenience
 export type {
   DetectedApplicationField,

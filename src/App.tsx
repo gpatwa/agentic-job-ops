@@ -5,6 +5,7 @@ import {
   DatabaseZap,
   FileUp,
   LayoutDashboard,
+  Plug,
   UserCog,
   UserRound
 } from "lucide-react";
@@ -39,6 +40,7 @@ import { ApplicationTrackerPage } from "./pages/ApplicationTrackerPage";
 import { BrowserSessionReviewPage } from "./pages/BrowserSessionReviewPage";
 import { CareerProfilePage } from "./pages/CareerProfilePage";
 import { DashboardHome } from "./pages/DashboardHome";
+import { ExtensionSetupPage } from "./pages/ExtensionSetupPage";
 import { IngestionAdminPage } from "./pages/IngestionAdminPage";
 import { JobDashboardPage } from "./pages/JobDashboardPage";
 import { ProfileSetupPage } from "./pages/ProfileSetupPage";
@@ -132,6 +134,7 @@ type RouteId =
   | "jobs"
   | "tracker"
   | "admin"
+  | "extension-setup"
   | "package-review"
   | "browser-session";
 
@@ -143,6 +146,7 @@ const navigationItems: NavigationItem<RouteId>[] = [
   { id: "ingestion", label: "Ingestion", icon: DatabaseZap },
   { id: "jobs", label: "Job queues", icon: BriefcaseBusiness },
   { id: "tracker", label: "Tracker", icon: ClipboardList },
+  { id: "extension-setup", label: "Extension setup", icon: Plug },
   { id: "admin", label: "Admin", icon: BarChart3 }
 ];
 
@@ -1579,6 +1583,15 @@ export default function App() {
             onNotesChange={handleApplicationNotesChange}
             onOpenPackage={navigateToPackage}
             onOpenBrowserSession={navigateToBrowserSession}
+          />
+        );
+      case "extension-setup":
+        return (
+          <ExtensionSetupPage
+            extensionSessions={extensionSessions}
+            auditLogs={auditLogs}
+            usageEvents={usageEvents}
+            demoApplicationUrl="/extension/demo/demo-application.html"
           />
         );
       case "admin":
