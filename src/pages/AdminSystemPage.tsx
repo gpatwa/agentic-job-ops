@@ -121,6 +121,21 @@ export function AdminSystemPage({
   const outcomeCounts = summarizeApplicationOutcomes(outcomes);
   const aiMetadataCounts = summarizeAIOutputMetadata(aiOutputMetadata);
   const latestEval = summarizeLatestEvalRun(evalRuns, evalResults);
+  const latestEvalRunId = latestEval.latestRun?.id;
+  const latestEvalResults = latestEvalRunId
+    ? evalResults.filter((result) => result.evalRunId === latestEvalRunId)
+    : [];
+  const latestEvalSuites =
+    latestEval.latestRun && latestEvalResults.length > 0
+      ? Array.from(new Set(latestEvalResults.map((result) => result.suite)))
+      : latestEval.latestRun
+        ? [latestEval.latestRun.suite]
+        : [];
+  const latestEvalTimestamp = latestEval.latestRun
+    ? new Date(
+        latestEval.latestRun.finishedAt ?? latestEval.latestRun.startedAt
+      ).toLocaleString()
+    : "";
   const submittedCount = applications.filter(
     (application) => application.status === "submitted"
   ).length;
@@ -212,19 +227,64 @@ export function AdminSystemPage({
             Eval pass/fail
           </h3>
           {latestEval.latestRun ? (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
-                <p className="text-sm text-emerald-700">Passed</p>
-                <p className="mt-1 text-2xl font-semibold text-emerald-950">
-                  {latestEval.passCount}
+            <div className="mt-4 space-y-4">
+              <div className="rounded-md border border-slate-200 bg-panel p-3">
+                <p className="text-sm font-semibold text-slate-900">
+                  Latest run
+                </p>
+                <p className="mt-1 text-sm text-slate-600">
+                  {latestEvalTimestamp}
+                </p>
+                <p className="mt-2 text-xs capitalize text-slate-500">
+                  Suites: {latestEvalSuites.map(statusLabel).join(", ")}
                 </p>
               </div>
-              <div className="rounded-md border border-red-200 bg-red-50 p-3">
-                <p className="text-sm text-red-700">Failed</p>
-                <p className="mt-1 text-2xl font-semibold text-red-950">
-                  {latestEval.failCount}
-                </p>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3">
+                  <p className="text-sm text-emerald-700">Passed</p>
+                  <p className="mt-1 text-2xl font-semibold text-emerald-950">
+                    {latestEval.passCount}
+                  </p>
+                </div>
+                <div className="rounded-md border border-red-200 bg-red-50 p-3">
+                  <p className="text-sm text-red-700">Failed</p>
+                  <p className="mt-1 text-2xl font-semibold text-red-950">
+                    {latestEval.failCount}
+                  </p>
+                </div>
               </div>
+
+              {latestEval.failedResults.length > 0 ? (
+                <div className="rounded-md border border-red-100 bg-red-50 p-3">
+                  <p className="text-sm font-semibold text-red-950">
+                    Failed checks
+                  </p>
+                  <div className="mt-3 space-y-2">
+                    {latestEval.failedResults.slice(0, 6).map((result) => (
+                      <div key={result.id}>
+                        <p className="text-sm font-medium text-red-950">
+                          {result.name}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-red-800">
+                          {result.message}
+                        </p>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="flex items-start gap-2 rounded-md border border-emerald-100 bg-emerald-50 p-3">
+                  <CheckCircle2
+                    aria-hidden="true"
+                    className="mt-0.5 shrink-0 text-emerald-700"
+                    size={16}
+                  />
+                  <p className="text-sm text-emerald-800">
+                    No failed checks in the latest eval run.
+                  </p>
+                </div>
+              )}
             </div>
           ) : (
             <p className="mt-3 text-sm text-slate-500">No eval run yet.</p>

@@ -36,7 +36,7 @@ function statusDescription(status: ApplicationStatus): string {
     case "needs_review":
       return "Waiting for human review.";
     case "submitted":
-      return "Marked as manually applied by the user.";
+      return "Applications that were submitted manually or through the approved browser assistant.";
     case "rejected":
       return "Not moving forward, still retained for history.";
     case "offer":
@@ -62,7 +62,10 @@ function userFacingJobCopy(value: string): string {
   return value;
 }
 
-function packageStatusMessage(applicationPackage: ApplicationPackage): string {
+function packageStatusMessage(
+  applicationPackage: ApplicationPackage,
+  browserSession: BrowserApplicationSession | null
+): string {
   if (
     applicationPackage.status === "draft" ||
     applicationPackage.status === "ready_for_review"
@@ -71,6 +74,10 @@ function packageStatusMessage(applicationPackage: ApplicationPackage): string {
   }
 
   if (applicationPackage.status === "approved") {
+    if (browserSession) {
+      return "Approved application package is linked to this browser session.";
+    }
+
     return "Application package is ready for browser application assistant.";
   }
 
@@ -79,26 +86,14 @@ function packageStatusMessage(applicationPackage: ApplicationPackage): string {
 
 function browserSessionMessage(browserSession: BrowserApplicationSession): string {
   if (browserSession.status === "submitted") {
-    return "Browser assistant confirmed submission.";
+    return "Application was submitted through the approved browser assistant.";
   }
 
   if (browserSession.status === "manual_required") {
-    return "Browser assistant marked this application for manual completion.";
+    return "Browser assistant could not complete this application. Manual action is required.";
   }
 
-  if (browserSession.status === "approved_for_submit") {
-    return "Submit was approved and is waiting for the assistant submit action.";
-  }
-
-  if (browserSession.status === "ready_for_review") {
-    return "Browser session is ready for final human review.";
-  }
-
-  if (browserSession.status === "needs_user_input") {
-    return "Browser session is paused for human input.";
-  }
-
-  return "Browser session is in progress.";
+  return "Browser application session is in progress.";
 }
 
 function TrackerCard({
@@ -173,7 +168,7 @@ function TrackerCard({
       {applicationPackage && (
         <div className="mt-4 flex flex-col gap-3 rounded-md border border-slate-200 bg-panel p-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-sm leading-6 text-slate-600">
-            {packageStatusMessage(applicationPackage)}
+            {packageStatusMessage(applicationPackage, browserSession)}
           </p>
           <button
             className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
