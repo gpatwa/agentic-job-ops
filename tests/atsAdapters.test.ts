@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import type { ApplicationAnswer, ApplicationPackage, UserProfile } from "../src/models/domain";
+import type {
+  ApplicationAnswer,
+  ApplicationPackage,
+  BrowserApplicationSession,
+  UserProfile
+} from "../src/models/domain";
 import {
   GreenhouseATSAdapter,
   LeverATSAdapter,
@@ -156,4 +161,139 @@ describe("ATS adapters", () => {
     expect(result.submitted).toBe(false);
     expect(result.confirmationDetected).toBe(false);
   });
+
+  it("never reports submitted from executeFillPlan in dry_run or fill_only", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const page = greenhouseFixturePage();
+    const form = adapter.analyzeForm(page);
+    const plan = adapter.createFillPlan(profile(), applicationPackage(), form, {
+      answers: answers(),
+      mode: "dry_run"
+    });
+
+    const dryRun = adapter.executeFillPlan(page, plan, "dry_run");
+    expect(dryRun.submitted).toBe(false);
+    expect(dryRun.mode).toBe("dry_run");
+
+    const fillOnly = adapter.executeFillPlan(page, plan, "fill_only");
+    expect(fillOnly.submitted).toBe(false);
+    expect(fillOnly.mode).toBe("fill_only");
+  });
+
+  it("blocks submitAfterApproval when fillMode is dry_run", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const session: BrowserApplicationSession = makeSession({ fillMode: "dry_run" });
+    const result = adapter.submitAfterApproval(greenhouseFixturePage(), session);
+    expect(result.submitted).toBe(false);
+    expect(result.message).toContain("fill mode");
+  });
+
+  it("blocks submitAfterApproval when status is not approved_for_submit", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const session: BrowserApplicationSession = makeSession({
+      status: "ready_for_review",
+      fillMode: "submit_after_approval"
+    });
+    const result = adapter.submitAfterApproval(greenhouseFixturePage(), session);
+    expect(result.submitted).toBe(false);
+    expect(result.message).toContain("session status");
+  });
+
+  it("blocks submitAfterApproval against non-fixture pages even when status and mode are correct", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const session: BrowserApplicationSession = makeSession({
+      status: "approved_for_submit",
+      fillMode: "submit_after_approval"
+    });
+    const result = adapter.submitAfterApproval(
+      { url: "https://boards.greenhouse.io/example/jobs/123", html: "<form></form>" },
+      session
+    );
+    expect(result.submitted).toBe(false);
+    expect(result.message).toContain("live external submit is disabled");
+  });
+
+  it("never marks demographic fields as filled, regardless of profile data", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const form = adapter.analyzeForm(greenhouseFixturePage());
+    const plan = adapter.createFillPlan(profile(), applicationPackage(), form, {
+      answers: answers(),
+      mode: "dry_run"
+    });
+
+    expect(
+      plan.fieldsFilled.some(
+        (field) =>
+          field.sourceField === "demographic defaults" ||
+          field.label.toLowerCase().includes("gender") ||
+          field.label.toLowerCase().includes("veteran")
+      )
+    ).toBe(false);
+    expect(
+      plan.uncertainFields.some((field) => field.reason === "demographic")
+    ).toBe(true);
+  });
+
+  it("pauses salary fields when no salary preference is set on the profile", () => {
+    const adapter = new GreenhouseATSAdapter();
+    const page = {
+      url: "https://boards.greenhouse.io/example/jobs/789",
+      html: `
+        <form id="application_form">
+          <label for="first_name">First Name</label>
+          <input id="first_name" name="job_application[first_name]" required />
+          <label for="email">Email</label>
+          <input id="email" name="job_application[email]" type="email" required />
+          <label for="salary">Salary expectations</label>
+          <input id="salary" name="job_application[salary_expectations]" required />
+        </form>
+      `,
+      title: "Greenhouse fixture with salary",
+      safeFixture: true
+    };
+    const form = adapter.analyzeForm(page);
+    const plan = adapter.createFillPlan(
+      profile({ salaryTarget: null, salaryMin: null }),
+      applicationPackage(),
+      form,
+      { answers: [], mode: "dry_run" }
+    );
+
+    expect(
+      plan.fieldsFilled.some((field) =>
+        field.label.toLowerCase().includes("salary")
+      )
+    ).toBe(false);
+    expect(
+      plan.uncertainFields.some((field) => field.reason === "salary_missing")
+    ).toBe(true);
+  });
 });
+
+function makeSession(
+  overrides: Partial<BrowserApplicationSession> = {}
+): BrowserApplicationSession {
+  const now = new Date().toISOString();
+  return {
+    id: "browser_1",
+    tenantId: currentSession.tenant.id,
+    userId: currentSession.userId,
+    jobId: "job_1",
+    applicationRecordId: "app_1",
+    applicationPackageId: "pkg_1",
+    atsType: "greenhouse",
+    adapterName: "greenhouse-ats-adapter",
+    adapterConfidence: 0.95,
+    fillMode: "submit_after_approval",
+    status: "approved_for_submit",
+    fieldsDetected: [],
+    fieldsFilled: [],
+    uncertainFields: [],
+    fillPlan: [],
+    screenshotUrl: null,
+    errorMessage: "",
+    createdAt: now,
+    updatedAt: now,
+    ...overrides
+  };
+}

@@ -3,6 +3,7 @@ import { currentSession } from "../src/data/currentSession";
 import type {
   ApplicationAnswer,
   ApplicationPackage,
+  AuditLog,
   BrowserApplicationSession,
   NormalizedJob,
   Resume,
@@ -13,6 +14,7 @@ import {
   loadBrowserApplicationSessions,
   markBrowserSessionManualRequired,
   markBrowserSessionReadyForReview,
+  saveBrowserApplicationSessions,
   startBrowserApplicationSession,
   submitApprovedBrowserApplication
 } from "../src/services/browserApplicationAssistant";
@@ -21,9 +23,10 @@ import {
   saveApplicationPackages
 } from "../src/services/applicationPackage";
 import { loadApplications, upsertApplicationRecord } from "../src/services/applicationService";
-import { appendAuditLog } from "../src/services/auditLog";
+import { appendAuditLog, loadAuditLogs } from "../src/services/auditLog";
 import type { BrowserAuditEvent } from "../src/services/browserApplicationAssistant";
 import { createEmptyProfile } from "../src/services/profileService";
+import { scopedKey } from "../src/lib/storage";
 
 function installLocalStorageMock() {
   const store = new Map<string, string>();
@@ -170,6 +173,26 @@ function persistAuditEvents(events: BrowserAuditEvent[]) {
   });
 }
 
+function clearBlockingPauses(sessionId: string) {
+  const sessions = loadBrowserApplicationSessions(currentSession).map((item) =>
+    item.id === sessionId
+      ? {
+          ...item,
+          uncertainFields: item.uncertainFields.filter(
+            (field) =>
+              field.reason !== "captcha" && field.reason !== "login_challenge"
+          )
+        }
+      : item
+  );
+  saveBrowserApplicationSessions(currentSession, sessions);
+}
+
+function writeAuditLogsDirectly(logs: AuditLog[]) {
+  const key = scopedKey(currentSession.tenant.id, currentSession.userId, "audit_logs");
+  window.localStorage.setItem(key, JSON.stringify(logs));
+}
+
 async function setupReadySession(): Promise<{
   packageRecord: ApplicationPackage;
   readySession: BrowserApplicationSession;
@@ -292,6 +315,7 @@ describe("browser application assistant", () => {
       currentSession,
       started.session.id
     );
+    clearBlockingPauses(ready.session.id);
 
     expect(() =>
       approveBrowserSubmit(currentSession, ready.session.id, {
@@ -305,13 +329,19 @@ describe("browser application assistant", () => {
       approvedByUser: true
     });
     expect(approved.session.status).toBe("approved_for_submit");
+    expect(approved.session.fillMode).toBe("submit_after_approval");
     persistAuditEvents(approved.auditEvents);
 
-    const submitted = await submitApprovedBrowserApplication(currentSession, approved.session.id, {
-      name: "safe-fixture-submit-adapter",
-      runDetection: vi.fn(),
-      submit: vi.fn(async () => ({ submitted: true, confirmationDetected: true }))
-    });
+    const submitted = await submitApprovedBrowserApplication(
+      currentSession,
+      approved.session.id,
+      {
+        name: "safe-fixture-submit-adapter",
+        runDetection: vi.fn(),
+        submit: vi.fn(async () => ({ submitted: true, confirmationDetected: true }))
+      },
+      { actorUserId: currentSession.userId }
+    );
     expect(submitted.session.status).toBe("submitted");
     expect(loadApplications(currentSession)[0].status).toBe("submitted");
   });
@@ -385,23 +415,295 @@ describe("browser application assistant", () => {
 
   it("keeps application status unchanged when submit is not confirmed", async () => {
     const { readySession } = await setupReadySession();
+    clearBlockingPauses(readySession.id);
     const approved = approveBrowserSubmit(currentSession, readySession.id, {
       actorUserId: currentSession.userId,
       approvedByUser: true
     });
     persistAuditEvents(approved.auditEvents);
 
+    const submit = vi.fn(async () => ({ submitted: false }));
     const result = await submitApprovedBrowserApplication(
       currentSession,
       approved.session.id,
       {
         name: "test-adapter",
         runDetection: vi.fn(),
-        submit: vi.fn(async () => ({ submitted: false }))
+        submit
       }
     );
 
+    expect(submit).toHaveBeenCalledTimes(1);
     expect(result.session.status).toBe("manual_required");
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+  });
+
+  it("blocks submit when the approval audit was created by a different actor", async () => {
+    const { readySession } = await setupReadySession();
+    clearBlockingPauses(readySession.id);
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+
+    writeAuditLogsDirectly([
+      {
+        id: "audit_forged",
+        tenantId: currentSession.tenant.id,
+        actorUserId: "coach_user",
+        action: "user_approved_browser_submit",
+        resourceType: "BrowserApplicationSession",
+        resourceId: approved.session.id,
+        metadata: {
+          jobId: approved.session.jobId,
+          applicationRecordId: approved.session.applicationRecordId,
+          applicationPackageId: approved.session.applicationPackageId,
+          approvedFromStatus: "ready_for_review",
+          approvedByUserId: "coach_user"
+        },
+        createdAt: new Date().toISOString()
+      }
+    ]);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(
+        currentSession,
+        approved.session.id,
+        { name: "test-adapter", runDetection: vi.fn(), submit },
+        { actorUserId: currentSession.userId }
+      )
+    ).rejects.toThrow("persisted approval audit");
+    expect(submit).not.toHaveBeenCalled();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+  });
+
+  it("blocks submit when the actor is not the job seeker and records a blocked-submit audit", async () => {
+    const { readySession } = await setupReadySession();
+    clearBlockingPauses(readySession.id);
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    persistAuditEvents(approved.auditEvents);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(
+        currentSession,
+        approved.session.id,
+        { name: "test-adapter", runDetection: vi.fn(), submit },
+        { actorUserId: "coach_user" }
+      )
+    ).rejects.toThrow("Only the job seeker");
+    expect(submit).not.toHaveBeenCalled();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+
+    const blockedAudits = loadAuditLogs(currentSession).filter(
+      (log) =>
+        log.action === "browser_submit_blocked" &&
+        log.metadata.reason === "actor_not_job_seeker"
+    );
+    expect(blockedAudits.length).toBeGreaterThan(0);
+  });
+
+  it("records a browser_submit_blocked audit when submit is rejected for a missing approval audit", async () => {
+    const { readySession } = await setupReadySession();
+    clearBlockingPauses(readySession.id);
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(
+        currentSession,
+        approved.session.id,
+        { name: "test-adapter", runDetection: vi.fn(), submit },
+        { actorUserId: currentSession.userId }
+      )
+    ).rejects.toThrow("persisted approval audit");
+
+    const audits = loadAuditLogs(currentSession);
+    const blocked = audits.find(
+      (log) =>
+        log.action === "browser_submit_blocked" &&
+        log.metadata.reason === "missing_or_invalid_approval_audit"
+    );
+    expect(blocked).toBeTruthy();
+    expect(blocked?.metadata.applicationPackageId).toBe(
+      approved.session.applicationPackageId
+    );
+    expect(submit).not.toHaveBeenCalled();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+  });
+
+  it("forces manual_required when captcha or login pause is still present at submit", async () => {
+    const { readySession } = await setupReadySession();
+    expect(
+      readySession.uncertainFields.some((field) => field.reason === "captcha")
+    ).toBe(true);
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    persistAuditEvents(approved.auditEvents);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    const result = await submitApprovedBrowserApplication(
+      currentSession,
+      approved.session.id,
+      { name: "test-adapter", runDetection: vi.fn(), submit },
+      { actorUserId: currentSession.userId }
+    );
+
+    expect(submit).not.toHaveBeenCalled();
+    expect(result.session.status).toBe("manual_required");
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+
+    const blocked = loadAuditLogs(currentSession).find(
+      (log) =>
+        log.action === "browser_submit_blocked" &&
+        log.metadata.reason === "captcha_or_login_pause_present"
+    );
+    expect(blocked).toBeTruthy();
+  });
+
+  it("marks the session failed and keeps the application approved when the adapter throws", async () => {
+    const { readySession } = await setupReadySession();
+    clearBlockingPauses(readySession.id);
+    const approved = approveBrowserSubmit(currentSession, readySession.id, {
+      actorUserId: currentSession.userId,
+      approvedByUser: true
+    });
+    persistAuditEvents(approved.auditEvents);
+
+    const submit = vi.fn(async () => {
+      throw new Error("network unreachable");
+    });
+    const result = await submitApprovedBrowserApplication(
+      currentSession,
+      approved.session.id,
+      { name: "test-adapter", runDetection: vi.fn(), submit },
+      { actorUserId: currentSession.userId }
+    );
+
+    expect(result.session.status).toBe("failed");
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+
+    const blocked = loadAuditLogs(currentSession).find(
+      (log) =>
+        log.action === "browser_submit_blocked" &&
+        log.metadata.reason === "adapter_submit_threw"
+    );
+    expect(blocked).toBeTruthy();
+  });
+
+  it("blocks submit when fillMode is dry_run and never calls the adapter", async () => {
+    const { application, packageRecord } = setupApprovedPackage();
+    const started = await startBrowserApplicationSession({
+      session: currentSession,
+      actorUserId: currentSession.userId,
+      applicationPackage: packageRecord,
+      application,
+      job: job(),
+      profile: profile(),
+      resume: resume(),
+      answers: answers(packageRecord.id)
+    });
+    clearBlockingPauses(started.session.id);
+
+    saveBrowserApplicationSessions(
+      currentSession,
+      loadBrowserApplicationSessions(currentSession).map((item) =>
+        item.id === started.session.id
+          ? { ...item, status: "approved_for_submit" as const, fillMode: "dry_run" as const }
+          : item
+      )
+    );
+    persistAuditEvents([
+      {
+        action: "user_approved_browser_submit",
+        resourceType: "BrowserApplicationSession",
+        resourceId: started.session.id,
+        metadata: {
+          jobId: started.session.jobId,
+          applicationRecordId: started.session.applicationRecordId,
+          applicationPackageId: started.session.applicationPackageId,
+          approvedFromStatus: "ready_for_review",
+          approvedByUserId: currentSession.userId
+        }
+      }
+    ]);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(
+        currentSession,
+        started.session.id,
+        { name: "test-adapter", runDetection: vi.fn(), submit },
+        { actorUserId: currentSession.userId }
+      )
+    ).rejects.toThrow("submit_after_approval");
+    expect(submit).not.toHaveBeenCalled();
+
+    const blocked = loadAuditLogs(currentSession).find(
+      (log) =>
+        log.action === "browser_submit_blocked" &&
+        log.metadata.reason === "fill_mode_not_submit_after_approval"
+    );
+    expect(blocked).toBeTruthy();
+    expect(loadApplications(currentSession)[0].status).toBe("approved");
+  });
+
+  it("blocks submit when fillMode is fill_only and never calls the adapter", async () => {
+    const { application, packageRecord } = setupApprovedPackage();
+    const started = await startBrowserApplicationSession({
+      session: currentSession,
+      actorUserId: currentSession.userId,
+      applicationPackage: packageRecord,
+      application,
+      job: job(),
+      profile: profile(),
+      resume: resume(),
+      answers: answers(packageRecord.id)
+    });
+    clearBlockingPauses(started.session.id);
+
+    saveBrowserApplicationSessions(
+      currentSession,
+      loadBrowserApplicationSessions(currentSession).map((item) =>
+        item.id === started.session.id
+          ? { ...item, status: "approved_for_submit" as const, fillMode: "fill_only" as const }
+          : item
+      )
+    );
+    persistAuditEvents([
+      {
+        action: "user_approved_browser_submit",
+        resourceType: "BrowserApplicationSession",
+        resourceId: started.session.id,
+        metadata: {
+          jobId: started.session.jobId,
+          applicationRecordId: started.session.applicationRecordId,
+          applicationPackageId: started.session.applicationPackageId,
+          approvedFromStatus: "ready_for_review",
+          approvedByUserId: currentSession.userId
+        }
+      }
+    ]);
+
+    const submit = vi.fn(async () => ({ submitted: true }));
+    await expect(
+      submitApprovedBrowserApplication(
+        currentSession,
+        started.session.id,
+        { name: "test-adapter", runDetection: vi.fn(), submit },
+        { actorUserId: currentSession.userId }
+      )
+    ).rejects.toThrow("submit_after_approval");
+    expect(submit).not.toHaveBeenCalled();
     expect(loadApplications(currentSession)[0].status).toBe("approved");
   });
 

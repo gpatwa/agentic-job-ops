@@ -1101,8 +1101,17 @@ export default function App() {
   }
 
   async function handleSubmitApprovedBrowserApplication(sessionId: string) {
-    const result = await submitApprovedBrowserApplication(currentSession, sessionId);
-    recordBrowserResult(result);
+    try {
+      const result = await submitApprovedBrowserApplication(
+        currentSession,
+        sessionId,
+        undefined,
+        { actorUserId: currentSession.userId }
+      );
+      recordBrowserResult(result);
+    } finally {
+      setAuditLogs(loadAuditLogs(currentSession).slice(0, 50));
+    }
   }
 
   function handleMarkBrowserSessionManualRequired(sessionId: string) {

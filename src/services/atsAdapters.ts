@@ -682,6 +682,15 @@ abstract class BaseATSAdapter implements ATSAdapter {
     fillPlan: FillPlan,
     mode: BrowserFillMode
   ): FillResult {
+    if (mode === "submit_after_approval") {
+      return {
+        mode,
+        fieldsFilled: [],
+        fieldsSkipped: fillPlan.items.length,
+        submitted: false
+      };
+    }
+
     const fillable =
       mode === "dry_run"
         ? fillPlan.fieldsFilled
@@ -708,15 +717,28 @@ abstract class BaseATSAdapter implements ATSAdapter {
     page: ATSPageSnapshot,
     session: BrowserApplicationSession
   ): SubmitResult {
-    if (
-      session.status !== "approved_for_submit" ||
-      session.fillMode !== "submit_after_approval" ||
-      !page.safeFixture
-    ) {
+    if (session.status !== "approved_for_submit") {
       return {
         submitted: false,
         confirmationDetected: false,
-        message: "Live submit is disabled unless an approved safe fixture submit is configured."
+        message: `Submit blocked: session status is ${session.status}, expected approved_for_submit.`
+      };
+    }
+
+    if (session.fillMode !== "submit_after_approval") {
+      return {
+        submitted: false,
+        confirmationDetected: false,
+        message: `Submit blocked: fill mode is ${session.fillMode}, expected submit_after_approval.`
+      };
+    }
+
+    if (!page.safeFixture) {
+      return {
+        submitted: false,
+        confirmationDetected: false,
+        message:
+          "Submit blocked: live external submit is disabled unless a safe fixture submit is configured."
       };
     }
 

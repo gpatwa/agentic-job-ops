@@ -19,7 +19,7 @@ import { browserApplicationSessionSchema } from "../models/schemas";
 import { readJson, scopedKey, writeJson } from "../lib/storage";
 import { loadApplicationPackages } from "./applicationPackage";
 import { loadApplications, updateApplicationStatus } from "./applicationService";
-import { loadAuditLogs } from "./auditLog";
+import { appendAuditLog, loadAuditLogs } from "./auditLog";
 import {
   defaultATSAdapters,
   greenhouseFixturePage,
@@ -155,6 +155,28 @@ function createEvent(
   };
 }
 
+function recordBlockedSubmit(
+  appSession: AppSession,
+  browserSession: BrowserApplicationSession | null,
+  reason: string,
+  extra: AuditMetadata = {}
+): void {
+  appendAuditLog(appSession, {
+    action: "browser_submit_blocked",
+    resourceType: "BrowserApplicationSession",
+    resourceId: browserSession?.id ?? "unknown_session",
+    metadata: {
+      reason,
+      jobId: browserSession?.jobId ?? null,
+      applicationRecordId: browserSession?.applicationRecordId ?? null,
+      applicationPackageId: browserSession?.applicationPackageId ?? null,
+      sessionStatus: browserSession?.status ?? null,
+      sessionFillMode: browserSession?.fillMode ?? null,
+      ...extra
+    }
+  });
+}
+
 function assertPackageStillApproved(
   session: AppSession,
   browserSession: BrowserApplicationSession
@@ -164,6 +186,9 @@ function assertPackageStillApproved(
   );
 
   if (!applicationPackage || applicationPackage.status !== "approved") {
+    recordBlockedSubmit(session, browserSession, "package_not_approved", {
+      packageStatus: applicationPackage?.status ?? "missing"
+    });
     throw new Error("The assistant cannot submit unless the package is approved.");
   }
 
@@ -171,31 +196,39 @@ function assertPackageStillApproved(
     applicationPackage.jobId !== browserSession.jobId ||
     applicationPackage.applicationRecordId !== browserSession.applicationRecordId
   ) {
+    recordBlockedSubmit(session, browserSession, "package_session_mismatch");
     throw new Error("Browser session no longer matches the approved package.");
   }
 }
 
 function hasApprovalAuditForSession(
-  session: AppSession,
-  browserSession: BrowserApplicationSession
+  appSession: AppSession,
+  browserSession: BrowserApplicationSession,
+  submitAttemptedAt: string
 ): boolean {
-  return loadAuditLogs(session).some(
+  return loadAuditLogs(appSession).some(
     (log) =>
       log.action === "user_approved_browser_submit" &&
       log.resourceType === "BrowserApplicationSession" &&
       log.resourceId === browserSession.id &&
+      log.actorUserId === appSession.userId &&
+      log.tenantId === appSession.tenant.id &&
       log.metadata.jobId === browserSession.jobId &&
       log.metadata.applicationRecordId === browserSession.applicationRecordId &&
       log.metadata.applicationPackageId === browserSession.applicationPackageId &&
-      log.metadata.approvedFromStatus === "ready_for_review"
+      log.metadata.approvedFromStatus === "ready_for_review" &&
+      log.metadata.approvedByUserId === appSession.userId &&
+      new Date(log.createdAt).getTime() <= new Date(submitAttemptedAt).getTime()
   );
 }
 
 function assertPersistedApprovalAudit(
-  session: AppSession,
-  browserSession: BrowserApplicationSession
+  appSession: AppSession,
+  browserSession: BrowserApplicationSession,
+  submitAttemptedAt: string
 ): void {
-  if (!hasApprovalAuditForSession(session, browserSession)) {
+  if (!hasApprovalAuditForSession(appSession, browserSession, submitAttemptedAt)) {
+    recordBlockedSubmit(appSession, browserSession, "missing_or_invalid_approval_audit");
     throw new Error(
       "The assistant cannot submit without a persisted approval audit for this session."
     );
@@ -901,6 +934,7 @@ export function approveBrowserSubmit(
   const updated = browserApplicationSessionSchema.parse({
     ...existing,
     status: "approved_for_submit",
+    fillMode: "submit_after_approval",
     updatedAt: nowIso()
   });
   const sessions = replaceSession(session, updated);
@@ -913,7 +947,9 @@ export function approveBrowserSubmit(
     applications: loadApplications(session),
     auditEvents: [
       createEvent("user_approved_browser_submit", updated, {
-        approvedFromStatus: existing.status
+        approvedFromStatus: existing.status,
+        approvedByUserId: input.actorUserId,
+        previousFillMode: existing.fillMode
       })
     ]
   };
@@ -922,24 +958,94 @@ export function approveBrowserSubmit(
 export async function submitApprovedBrowserApplication(
   session: AppSession,
   browserSessionId: string,
-  adapter: BrowserAutomationAdapter = createATSBrowserAutomationAdapter()
+  adapter: BrowserAutomationAdapter = createATSBrowserAutomationAdapter(),
+  input: { actorUserId?: string } = {}
 ): Promise<BrowserApplicationResult> {
+  const submitAttemptedAt = nowIso();
+  const actorUserId = input.actorUserId ?? session.userId;
+
   const existing = loadBrowserApplicationSessions(session).find(
     (item) => item.id === browserSessionId
   );
   if (!existing) {
+    recordBlockedSubmit(session, null, "session_not_found", {
+      requestedSessionId: browserSessionId
+    });
     throw new Error("Browser application session was not found.");
   }
 
+  if (
+    existing.tenantId !== session.tenant.id ||
+    existing.userId !== session.userId
+  ) {
+    recordBlockedSubmit(session, existing, "session_tenant_or_user_mismatch", {
+      sessionTenantId: existing.tenantId,
+      sessionUserId: existing.userId
+    });
+    throw new Error("Browser application session does not belong to this tenant or user.");
+  }
+
+  if (actorUserId !== session.userId) {
+    recordBlockedSubmit(session, existing, "actor_not_job_seeker", {
+      actorUserId
+    });
+    throw new Error("Only the job seeker can submit a browser application.");
+  }
+
   if (existing.status !== "approved_for_submit") {
+    recordBlockedSubmit(session, existing, "session_not_approved_for_submit");
     throw new Error("The assistant cannot submit before explicit user approval.");
   }
 
-  assertPackageStillApproved(session, existing);
-  assertPersistedApprovalAudit(session, existing);
+  if (existing.fillMode !== "submit_after_approval") {
+    recordBlockedSubmit(session, existing, "fill_mode_not_submit_after_approval");
+    throw new Error(
+      "The assistant cannot submit unless fill mode is submit_after_approval."
+    );
+  }
 
-  const submitResult = await adapter.submit(existing);
+  assertPackageStillApproved(session, existing);
+  assertPersistedApprovalAudit(session, existing, submitAttemptedAt);
+
+  const blockingPause = existing.uncertainFields.find(
+    (field) =>
+      field.reason === "captcha" ||
+      field.reason === "login_challenge"
+  );
+  if (blockingPause) {
+    recordBlockedSubmit(session, existing, "captcha_or_login_pause_present", {
+      pauseReason: blockingPause.reason,
+      pauseFieldId: blockingPause.fieldId
+    });
+    return markBrowserSessionManualRequired(
+      session,
+      browserSessionId,
+      `Manual completion required: ${blockingPause.reason} pause was still present at submit time.`
+    );
+  }
+
+  let submitResult: { submitted: boolean; confirmationDetected?: boolean; message?: string };
+  try {
+    submitResult = await adapter.submit(existing);
+  } catch (error) {
+    const errorMessage =
+      error instanceof Error ? error.message : "Adapter threw a non-Error value.";
+    recordBlockedSubmit(session, existing, "adapter_submit_threw", {
+      adapterName: existing.adapterName,
+      errorLength: errorMessage.length
+    });
+    return failBrowserSession(
+      session,
+      browserSessionId,
+      "Adapter failed during submit; application status was not changed."
+    );
+  }
+
   if (!submitResult.submitted) {
+    recordBlockedSubmit(session, existing, "adapter_submit_not_confirmed", {
+      adapterName: existing.adapterName,
+      messageLength: (submitResult.message ?? "").length
+    });
     return markBrowserSessionManualRequired(
       session,
       browserSessionId,
