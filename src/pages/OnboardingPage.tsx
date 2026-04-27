@@ -295,14 +295,30 @@ export function OnboardingPage({
     onGenerateRecommendations(selectedRoles);
   }
 
+  // Render every role the user might want to keep checked: the
+  // generic suggestions, anything pulled from their profile, AND
+  // the current selection (which includes both the confirmed
+  // LLM-recommended roles and any custom roles the user typed).
+  // Without `selectedRoles` in this union, custom roles added via
+  // the "Add role" button vanished — they were saved to state but
+  // never got a chip, so the input cleared and the click looked
+  // like a no-op.
   const allSuggestedAndProfile = useMemo(() => {
-    const set = new Set<string>([...profileTargetTitles, ...SUGGESTED_ROLES]);
+    const set = new Set<string>([
+      ...profileTargetTitles,
+      ...SUGGESTED_ROLES,
+      ...selectedRoles
+    ]);
     return Array.from(set);
-  }, [profileTargetTitles]);
+  }, [profileTargetTitles, selectedRoles]);
 
   const onboardingComplete = Boolean(state.onboardingCompletedAt);
 
-  const headlineCopy = headlineForStep(currentStep, Boolean(lastResult));
+  const headlineCopy = adjustHeadlineForJobsResult(
+    headlineForStep(currentStep, Boolean(lastResult)),
+    lastResult,
+    currentStep
+  );
   const showResumeStep = currentStep === "resume";
   const showIntelligenceStep =
     currentStep === "intelligence" ||
@@ -573,6 +589,11 @@ function headlineForStep(
     };
   }
   if (hasJobs) {
+    // Honest only when there are real strong/possible matches.
+    // adjustHeadlineForJobsResult overrides the title when the
+    // run actually returned 0 strong + 0 possible matches so the
+    // user doesn't see the contradictory "We found jobs" / "We
+    // couldn't find a great match" pair on the same screen.
     return {
       title: "We found jobs you can apply to now.",
       subtitle:
@@ -582,6 +603,34 @@ function headlineForStep(
   return {
     title: "We're lining up jobs to show you",
     subtitle: "Confirm targets above and we'll show jobs in seconds."
+  };
+}
+
+/**
+ * Override the cheery "We found jobs" headline when the run
+ * actually returned zero strong + zero possible matches (the
+ * common case for a senior leadership resume against the demo
+ * job seed). Without this, the page renders a contradictory pair:
+ * top headline says "we found jobs", banner below says "we
+ * couldn't find a great match".
+ */
+function adjustHeadlineForJobsResult(
+  base: { title: string; subtitle: string },
+  lastResult: OnboardingRecommendationResult | null,
+  currentStep: OnboardingStepId
+): { title: string; subtitle: string } {
+  if (currentStep !== "jobs" || !lastResult) return base;
+  const strongCount =
+    lastResult.groups.find((group) => group.label === "Strong matches")
+      ?.matches.length ?? 0;
+  const possibleCount =
+    lastResult.groups.find((group) => group.label === "Possible matches")
+      ?.matches.length ?? 0;
+  if (strongCount > 0 || possibleCount > 0) return base;
+  return {
+    title: "No strong matches yet — add a real job source.",
+    subtitle:
+      "We could only seed off-target demo jobs for your selected roles. Add a real source on the Ingestion page (or paste a specific job URL above) to see real matches."
   };
 }
 
@@ -2220,7 +2269,11 @@ function ExtractedProfileCard({
         <div className="mt-3 grid gap-2 md:grid-cols-3">
           <ListBlock label="Skills" items={profile.skills} />
           <ListBlock label="Industries" items={profile.industries} />
-          <ListBlock label="Quantified wins" items={profile.quantifiedAchievements} />
+          <ListBlock
+            label="Quantified wins"
+            items={profile.quantifiedAchievements}
+            limit={8}
+          />
         </div>
       )}
       {(report.missingFields.length > 0 || report.ambiguousFields.length > 0) && (
@@ -2742,23 +2795,47 @@ function RoleGroup({
   );
 }
 
-function ListBlock({ label, items }: { label: string; items: string[] }) {
+function ListBlock({
+  label,
+  items,
+  limit
+}: {
+  label: string;
+  items: string[];
+  /**
+   * Optional cap so very long lists (e.g. 40-bullet "Quantified
+   * wins" extracted from a 20-year senior resume) don't dominate
+   * the entire panel. Caller can omit when display length is
+   * already bounded.
+   */
+  limit?: number;
+}) {
   // Strip any leading bullet markers from the source string so the UI's
   // own "•" glyph doesn't double up into "• -" / "• •".
   const cleaned = items
     .map((item) => item.replace(/^[\s]*[-*•·●◦▪▫–—]+[\s]+/, "").trim())
     .filter((item) => item.length > 0);
   if (cleaned.length === 0) return null;
+  const displayed =
+    typeof limit === "number" && cleaned.length > limit
+      ? cleaned.slice(0, limit)
+      : cleaned;
+  const overflow = cleaned.length - displayed.length;
   return (
     <div className="rounded-md border border-slate-200 bg-white p-3 text-xs">
       <p className="font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </p>
       <ul className="mt-1 space-y-1 text-slate-700">
-        {cleaned.map((item) => (
+        {displayed.map((item) => (
           <li key={item}>• {item}</li>
         ))}
       </ul>
+      {overflow > 0 && (
+        <p className="mt-2 text-[11px] text-slate-500">
+          + {overflow} more — full list available in the resume preview.
+        </p>
+      )}
     </div>
   );
 }
