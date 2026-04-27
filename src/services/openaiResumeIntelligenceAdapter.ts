@@ -312,7 +312,17 @@ class OpenAIResumeIntelligenceAdapter implements ResumeIntelligenceAdapter {
       // `max_tokens` field and require `max_completion_tokens`.
       // The newer name also works on gpt-4.x models, so use it
       // unconditionally.
-      max_completion_tokens: this.options.maxTokens ?? 2400,
+      //
+      // Default of 8000 is sized for the full resume-intelligence
+      // schema: extractedProfile + confidenceByField + recommendation
+      // (strongest/adjacent/stretch/avoid + skillGaps + positioning
+      // advice) routinely runs 4-7k completion tokens. A 2.4k cap
+      // (the previous default) silently truncated the JSON mid-
+      // object, which the schema validator caught as
+      // "OpenAI response content was not valid JSON" and the route
+      // layer then mis-attributed to a generic "primary failed"
+      // before falling back to deterministic.
+      max_completion_tokens: this.options.maxTokens ?? 8000,
       messages: [
         { role: "system" as const, content: SYSTEM_PROMPT },
         { role: "user" as const, content: buildUserPrompt(resumeText) }

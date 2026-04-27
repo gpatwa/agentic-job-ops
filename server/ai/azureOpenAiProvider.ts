@@ -67,7 +67,10 @@ export function createAzureOpenAiResumeProvider(
         // the legacy `max_tokens` field and require
         // `max_completion_tokens` — same migration as OpenAI public
         // API. The newer name also works on gpt-4.x deployments.
-        max_completion_tokens: 2400,
+        // 8000 is sized for the full resume-intelligence schema —
+        // see the rationale on the OpenAI provider; smaller caps
+        // truncate the JSON mid-object and trip schema validation.
+        max_completion_tokens: 8000,
         messages: [
           { role: "system" as const, content: RESUME_INTELLIGENCE_SYSTEM_PROMPT },
           {
