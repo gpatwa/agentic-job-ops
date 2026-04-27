@@ -231,6 +231,42 @@ describe("resumeImprovementService", () => {
       ).toBeLessThanOrEqual(reanalyzed.draft.originalRiskScore);
     });
 
+    it("appends a regression warning when re-analysing the improved draft yields a worse risk", async () => {
+      // The original RICH_RESUME has low ATS risk. We replace the draft
+      // with a deliberately barren plain-text version, save it, then
+      // re-analyse — the improved score should be higher and the
+      // service must surface that loudly so the UI never silently
+      // promotes a worse resume.
+      const resume = await seedAndAnalyze(RICH_RESUME, "regression");
+      const draft = await generateResumeImprovementDraft(currentSession, resume.id);
+      const worse = editResumeImprovementDraft(
+        currentSession,
+        draft.draft.id,
+        "Jane Doe"
+      );
+      const saved = saveResumeImprovementDraft(currentSession, worse.draft.id);
+      const reanalyzed = await reanalyzeImprovedResume(
+        currentSession,
+        saved.draft.id
+      );
+      expect(reanalyzed.draft.improvedRiskScore ?? 0).toBeGreaterThan(
+        reanalyzed.draft.originalRiskScore
+      );
+      expect(reanalyzed.draft.warningsRemaining[0]).toBe(
+        "This draft did not improve ATS risk. Review before using."
+      );
+      // Defense-in-depth: re-analysing twice must not duplicate the warning.
+      const reanalyzedAgain = await reanalyzeImprovedResume(
+        currentSession,
+        saved.draft.id
+      );
+      const regressionWarnings = reanalyzedAgain.draft.warningsRemaining.filter(
+        (line) =>
+          line === "This draft did not improve ATS risk. Review before using."
+      );
+      expect(regressionWarnings).toHaveLength(1);
+    });
+
     it("describeBeforeAfter computes the risk delta after re-analysis", async () => {
       const resume = await seedAndAnalyze(PIPED_RESUME, "delta");
       const draft = await generateResumeImprovementDraft(currentSession, resume.id);

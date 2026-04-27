@@ -1118,13 +1118,10 @@ function ResumeIntelligenceSection({
                 {isAnalyzing ? "Refreshing…" : "Refresh analysis"}
               </button>
             )}
-            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700">
-              Adapter:{" "}
-              {report
-                ? statusLabel(report.extractionMode)
-                : "deterministic fallback"}
-            </span>
+            <ResumeIntelligenceModeBadge report={report} />
           </div>
+
+          {report && <ResumeIntelligenceModeCallout report={report} />}
 
           {report && (
             <div className="mt-5 space-y-4">
@@ -1420,6 +1417,25 @@ function ResumeImprovementCard({
               </StatusPill>
             )}
           </div>
+
+          {beforeAfter?.improved !== null &&
+            beforeAfter !== null &&
+            (beforeAfter.delta ?? 0) <= 0 && (
+              <div
+                data-testid="improvement-risk-regressed-banner"
+                className="rounded-md border border-amber-300 bg-amber-50 p-3 text-xs text-amber-900"
+              >
+                <p className="font-semibold">
+                  This draft did not improve ATS risk.
+                </p>
+                <p className="mt-1 leading-5">
+                  Re-analysis shows the improved resume scores at least as
+                  high a risk as the original. Review the draft carefully
+                  before using it on a real application — your original
+                  resume is preserved in version history.
+                </p>
+              </div>
+            )}
 
           {draft.changesSummary.length > 0 && (
             <div>
@@ -1740,17 +1756,71 @@ function RoleGroup({
 }
 
 function ListBlock({ label, items }: { label: string; items: string[] }) {
-  if (items.length === 0) return null;
+  // Strip any leading bullet markers from the source string so the UI's
+  // own "•" glyph doesn't double up into "• -" / "• •".
+  const cleaned = items
+    .map((item) => item.replace(/^[\s]*[-*•·●◦▪▫–—]+[\s]+/, "").trim())
+    .filter((item) => item.length > 0);
+  if (cleaned.length === 0) return null;
   return (
     <div className="rounded-md border border-slate-200 bg-white p-3 text-xs">
       <p className="font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </p>
       <ul className="mt-1 space-y-1 text-slate-700">
-        {items.map((item) => (
+        {cleaned.map((item) => (
           <li key={item}>• {item}</li>
         ))}
       </ul>
+    </div>
+  );
+}
+
+function ResumeIntelligenceModeBadge({
+  report
+}: {
+  report: ResumeIntelligenceReport | null;
+}) {
+  const mode = report?.extractionMode ?? "deterministic";
+  const isLlm = mode === "llm";
+  return (
+    <span
+      data-testid="resume-intelligence-source-badge"
+      className={
+        isLlm
+          ? "rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
+          : "rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700"
+      }
+    >
+      Source: {isLlm ? "OpenAI LLM" : "deterministic fallback"}
+    </span>
+  );
+}
+
+function ResumeIntelligenceModeCallout({
+  report
+}: {
+  report: ResumeIntelligenceReport;
+}) {
+  const isLlm = report.extractionMode === "llm";
+  const headline = isLlm ? "AI resume analysis" : "Basic local analysis";
+  const body = isLlm
+    ? "Powered by OpenAI. Review all extracted facts before using them — the model can still misread sections."
+    : "No LLM key is configured. This uses deterministic extraction for local testing and may be limited.";
+  return (
+    <div
+      data-testid="resume-intelligence-mode-callout"
+      className={
+        isLlm
+          ? "mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"
+          : "mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
+      }
+    >
+      <p className="font-semibold">{headline}</p>
+      <p className="mt-1 leading-5">{body}</p>
+      <p className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">
+        Model: {report.modelName} · Prompt: {report.promptVersion}
+      </p>
     </div>
   );
 }

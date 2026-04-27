@@ -170,6 +170,106 @@ describe("resumeIntelligenceService", () => {
       });
     });
 
+    it("strips leading bullet glyphs (including messy '- •' interleavings) from quantified, leadership and project lines", async () => {
+      // Source resume uses real-world messy bullet styles users paste in:
+      // "- • " (dash + bullet), "• " (bullet only), "* " (asterisk). The
+      // UI prepends its own glyph, so the deterministic adapter must
+      // hand back lines with no leading bullet markers at all.
+      const messy = `Jane Doe
+Senior Product Manager
+Remote
+jane@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+
+Experience
+Senior Product Manager — DemoLabs — 2022 - 2026
+- • Led B2B SaaS workflow automation roadmap; +20% activation, +12% retention.
+• Shipped 3 product launches reaching 1000 users.
+* Built customer discovery framework adopted by 12 teams.
+
+Skills
+Product Management, Roadmap, Customer Discovery`;
+      const adapter = createDeterministicResumeIntelligenceAdapter();
+      const out = await adapter.analyze({ resume: makeResume(messy) });
+      const noLeadingBullet = /^[\s]*[-*•·●◦▪▫–—]/;
+      out.extractedProfile.quantifiedAchievements.forEach((line) => {
+        expect(line).not.toMatch(noLeadingBullet);
+      });
+      out.extractedProfile.leadershipExamples.forEach((line) => {
+        expect(line).not.toMatch(noLeadingBullet);
+      });
+      out.extractedProfile.projects.forEach((line) => {
+        expect(line).not.toMatch(noLeadingBullet);
+      });
+      // Sanity: at least one of each helper should have picked up a line —
+      // otherwise the no-leading-bullet check trivially passes on empty.
+      expect(out.extractedProfile.quantifiedAchievements.length).toBeGreaterThan(
+        0
+      );
+      expect(out.extractedProfile.leadershipExamples.length).toBeGreaterThan(0);
+      expect(out.extractedProfile.projects.length).toBeGreaterThan(0);
+    });
+
+    it("dedupes role titles across strongest/adjacent/stretch buckets so the UI never shows the same title twice", async () => {
+      // Resume activates Product (primary) AND Leadership (secondary).
+      // Without the dedupe pass, "Director of Product" would appear in
+      // both the Product stretch list and the Leadership stretch list.
+      const text = `Jane Doe
+Director of Product
+Remote
+jane@example.com
++1 555-555-0100
+https://www.linkedin.com/in/janedoe
+
+Experience
+Director of Product — DemoLabs — 2022 - 2026
+Led B2B SaaS workflow automation roadmap; partnered with engineering and design.
+Head of product analytics; managed 4 PMs.
+Shipped roadmap; +20% activation, +12% retention.
+Customer discovery interviews; stakeholder reviews.
+
+Skills
+Product Management, Roadmap, Customer Discovery, Leadership`;
+      const adapter = createDeterministicResumeIntelligenceAdapter();
+      const out = await adapter.analyze({ resume: makeResume(text) });
+      const allTitles = [
+        ...out.recommendation.strongestRoles,
+        ...out.recommendation.adjacentRoles,
+        ...out.recommendation.stretchRoles
+      ].map((role) => role.title.trim().toLowerCase());
+      expect(new Set(allTitles).size).toBe(allTitles.length);
+    });
+
+    it("does not label any role 'strong' when family evidence is weak (≤2 keywords)", async () => {
+      // Only "roadmap" + "pm " hit Product family — below the 3-keyword
+      // bar required for high confidence. Deterministic adapter must
+      // demote everything that would have been Strong into Adjacent, so
+      // we never hand the user a confidently-wrong "Strong" label.
+      const weak = `Alex Lee
+Manager
+Remote
+alex@example.com
++1 555-555-0101
+https://www.linkedin.com/in/alex
+
+Experience
+Manager — Acme — 2022 - 2026
+Worked on roadmap items.
+
+Skills
+Roadmap, PM `;
+      const adapter = createDeterministicResumeIntelligenceAdapter();
+      const out = await adapter.analyze({ resume: makeResume(weak) });
+      expect(out.recommendation.strongestRoles).toEqual([]);
+      expect(out.recommendation.adjacentRoles.length).toBeGreaterThan(0);
+      // Every adjacent role must be honestly labelled adjacent (no
+      // sneaking "strong" through the demotion path).
+      out.recommendation.adjacentRoles.forEach((role) => {
+        expect(role.fitLevel).toBe("adjacent");
+      });
+    });
+
     it("recommends data roles for a data resume and AI roles for an AI resume", async () => {
       const adapter = createDeterministicResumeIntelligenceAdapter();
       const dataText = `Jane Doe

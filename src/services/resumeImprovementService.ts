@@ -636,10 +636,27 @@ export async function reanalyzeImprovedResume(
   }
   const analysis = await analyzeResumeIntelligence(session, improvedResume);
   const timestamp = nowIso();
+  // Safety: if the re-analysis says the improved draft is at least as
+  // risky as the original, surface that loudly in warningsRemaining so
+  // the UI can refuse to silently promote a worse resume. We never
+  // auto-promote — the user has already saved the draft as a new resume
+  // version explicitly, but they should see the regression before they
+  // act on it.
+  const RISK_REGRESSION_WARNING =
+    "This draft did not improve ATS risk. Review before using.";
+  const riskRegressed =
+    analysis.report.atsRiskScore >= existing.originalRiskScore;
+  const dedupedWarnings = existing.warningsRemaining.filter(
+    (line) => line !== RISK_REGRESSION_WARNING
+  );
+  const warningsRemaining = riskRegressed
+    ? [RISK_REGRESSION_WARNING, ...dedupedWarnings]
+    : dedupedWarnings;
   const updated = resumeImprovementDraftSchema.parse({
     ...existing,
     improvedRiskLevel: analysis.report.atsRiskLevel,
     improvedRiskScore: analysis.report.atsRiskScore,
+    warningsRemaining,
     updatedAt: timestamp
   });
   persistDraft(session, updated);

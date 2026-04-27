@@ -19,6 +19,7 @@ import {
   resumeIntelligenceReportSchema
 } from "../models/schemas";
 import { readJson, scopedKey, writeJson } from "../lib/storage";
+import { pickOpenAIAdapterIfConfigured } from "./openaiResumeIntelligenceAdapter";
 
 type AuditMetadata = AuditLog["metadata"];
 
@@ -434,6 +435,18 @@ function yearsExperienceFromText(text: string): number | null {
   return null;
 }
 
+/**
+ * Strip leading bullet markers (e.g. "- ", "• ", "* ") from a line so
+ * the UI's own bullet glyph doesn't double up into "• -" or "- •". Handles
+ * interleaved bullets+spaces ("- • Led ...") by consuming groups of
+ * (bullet, optional whitespace) repeatedly. Keeps other punctuation
+ * untouched and never strips lines that don't start with a bullet glyph,
+ * so legitimate leading whitespace-only content survives unchanged.
+ */
+function stripLeadingBullet(line: string): string {
+  return line.replace(/^[\s]*(?:[-*•·●◦▪▫–—][\s]*)+/, "").trim();
+}
+
 function quantifiedAchievementsFromText(text: string): string[] {
   const lines = text
     .split(/\r?\n/)
@@ -441,6 +454,8 @@ function quantifiedAchievementsFromText(text: string): string[] {
     .filter((line) => line.length > 0);
   return lines
     .filter((line) => /(\d+\s*%)|\$\d|\d{2,}\s*(users|customers|hires|teams)/i.test(line))
+    .map(stripLeadingBullet)
+    .filter((line) => line.length > 0)
     .slice(0, 5);
 }
 
@@ -453,6 +468,8 @@ function leadershipExamplesFromText(text: string): string[] {
     .filter((line) =>
       /(led|managed|grew|scaled|hired|owned|partnered with|founded)/i.test(line)
     )
+    .map(stripLeadingBullet)
+    .filter((line) => line.length > 0)
     .slice(0, 5);
 }
 
@@ -465,6 +482,8 @@ function projectsFromText(text: string): string[] {
     .filter((line) =>
       /(launched|shipped|built|introduced|migrated|delivered)/i.test(line)
     )
+    .map(stripLeadingBullet)
+    .filter((line) => line.length > 0)
     .slice(0, 5);
 }
 
@@ -867,15 +886,24 @@ function buildRoleRecommendations(
     family.topSkillGaps.forEach((gap) => skillGaps.push(gap));
     positioningAdvice.push(family.positioningHint);
 
-    const strongRoles = family.strongRoles.map((title) =>
+    // Strong fit requires high-confidence evidence (≥3 family keywords)
+    // AND the family must be the primary match. Anything weaker is at
+    // most "adjacent". This keeps the deterministic fallback honest:
+    // a role labelled "Strong" should mean strong evidence, not just
+    // "we matched a family loosely".
+    const isPrimary = index === 0;
+    const strongFitAllowed = isPrimary && confidence === "high";
+    const strongLikeRoles = family.strongRoles.map((title) =>
       buildRecommendedRole(
         title,
-        "strong",
+        strongFitAllowed ? "strong" : "adjacent",
         evidenceLines,
         family.searchKeywords,
         family.positioningHint,
-        `Resume shows clear ${family.name} signal (${evidence.length} keyword${evidence.length === 1 ? "" : "s"}).`,
-        confidence
+        strongFitAllowed
+          ? `Resume shows clear ${family.name} signal (${evidence.length} keyword${evidence.length === 1 ? "" : "s"}).`
+          : `Adjacent ${family.name} role; resume signal partially supports it (${evidence.length} keyword${evidence.length === 1 ? "" : "s"}).`,
+        strongFitAllowed ? confidence : confidence === "high" ? "medium" : confidence
       )
     );
     const adjacentRoles = family.adjacentRoles.map((title) =>
@@ -901,14 +929,33 @@ function buildRoleRecommendations(
       )
     );
 
-    if (index === 0) {
-      strongest.push(...strongRoles);
+    if (strongFitAllowed) {
+      strongest.push(...strongLikeRoles);
       adjacent.push(...adjacentRoles);
     } else {
-      adjacent.push(...strongRoles);
+      // Weak primary match or non-primary family — every role that would
+      // have been "strong" is treated as adjacent so we never overclaim.
+      adjacent.push(...strongLikeRoles, ...adjacentRoles);
     }
     stretch.push(...stretchRoles);
   }
+
+  // Defense-in-depth: a title may legitimately appear in multiple
+  // families (e.g. "Director of Product"). Dedupe across buckets,
+  // keeping the higher-confidence appearance: strong > adjacent >
+  // stretch > avoid.
+  const seenTitles = new Set<string>();
+  function dedupeBucket(roles: RecommendedRole[]): RecommendedRole[] {
+    return roles.filter((role) => {
+      const key = role.title.trim().toLowerCase();
+      if (seenTitles.has(key)) return false;
+      seenTitles.add(key);
+      return true;
+    });
+  }
+  const dedupedStrongest = dedupeBucket(strongest);
+  const dedupedAdjacent = dedupeBucket(adjacent);
+  const dedupedStretch = dedupeBucket(stretch);
 
   // Roles to avoid: surface every other family that did NOT match, with a
   // clear reason. Do not invent — only mark "no evidence" honestly.
@@ -935,16 +982,30 @@ function buildRoleRecommendations(
         ? "medium"
         : "low";
 
+  // Dedupe avoid by title (without consuming seenTitles — avoid-only
+  // titles can legitimately differ from primary buckets).
+  const avoidSeen = new Set<string>();
+  const dedupedAvoid = avoid.filter((role) => {
+    const key = role.title.trim().toLowerCase();
+    if (avoidSeen.has(key)) return false;
+    avoidSeen.add(key);
+    return true;
+  });
+
+  // Dedupe positioning advice — multiple matched families can produce
+  // the same hint.
+  const dedupedPositioningAdvice = Array.from(new Set(positioningAdvice));
+
   return {
-    strongestRoles: strongest,
-    adjacentRoles: adjacent,
-    stretchRoles: stretch,
-    rolesToAvoid: avoid,
+    strongestRoles: dedupedStrongest,
+    adjacentRoles: dedupedAdjacent,
+    stretchRoles: dedupedStretch,
+    rolesToAvoid: dedupedAvoid,
     recommendedIndustries: Array.from(industries),
     recommendedSeniority: profile.seniorityLevel || "",
     recommendedSearchKeywords: Array.from(searchKeywords),
     positioningSummary: `Estimated only. Strongest fit: ${matched[0].family.name}.`,
-    resumePositioningAdvice: positioningAdvice,
+    resumePositioningAdvice: dedupedPositioningAdvice,
     skillGaps,
     confidence: overallConfidence
   };
@@ -1032,6 +1093,24 @@ export function createDeterministicResumeIntelligenceAdapter(): ResumeIntelligen
   return new DeterministicResumeIntelligenceAdapter();
 }
 
+/**
+ * Pick the best resume-intelligence adapter for the current environment.
+ *
+ * - When `OPENAI_API_KEY` is set in a Node context, return the OpenAI
+ *   adapter so the user sees real LLM analysis.
+ * - In a browser bundle (Vite) `process` is undefined, so this always
+ *   returns the deterministic adapter and the API key never reaches the
+ *   client.
+ * - Tests can opt into either path explicitly by passing `adapter` to
+ *   `analyzeResumeIntelligence`.
+ */
+export function selectResumeIntelligenceAdapter(): ResumeIntelligenceAdapter {
+  return (
+    pickOpenAIAdapterIfConfigured() ??
+    createDeterministicResumeIntelligenceAdapter()
+  );
+}
+
 function event(
   action: string,
   resourceType: string,
@@ -1044,7 +1123,7 @@ function event(
 export async function analyzeResumeIntelligence(
   session: AppSession,
   resume: Resume,
-  adapter: ResumeIntelligenceAdapter = createDeterministicResumeIntelligenceAdapter()
+  adapter: ResumeIntelligenceAdapter = selectResumeIntelligenceAdapter()
 ): Promise<AnalyzeResumeResult> {
   const startedAt = nowIso();
   const auditEvents: ResumeIntelligenceAuditEvent[] = [
