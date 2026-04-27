@@ -183,6 +183,12 @@ Hard rules:
     "avoid"    = no evidence at all; surface this only with a clear
                  "no evidence" reason and never as a recommended target.
   When in doubt, prefer "adjacent" or "stretch" over "strong".
+- ALWAYS include the candidate's current title (or a close variant
+  at the same seniority — e.g. "Senior Engineering Leader" → also
+  "Senior Engineering Manager") as a strongestRole when the resume
+  shows direct evidence of doing that work today. Do not skip the
+  candidate's own current level just to surface aspirational
+  upward roles. Aspirational upward roles belong in stretch.
 - Output JSON only. No prose, no markdown. The JSON must conform to the
   schema described in the user message.`;
 

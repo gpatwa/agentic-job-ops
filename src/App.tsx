@@ -126,6 +126,7 @@ import {
   type OnboardingJobImportOverrides,
   type OnboardingJobImportResult
 } from "./services/onboardingJobUrlImport";
+import { synthesizeProfileWithResumeFallback } from "./services/userProfileFromResume";
 import {
   loadAIOutputMetadata,
   recordAIOutputMetadata
@@ -2504,9 +2505,21 @@ export default function App() {
   async function handleOnboardingGenerate(roles: string[]) {
     setIsOnboardingRecommending(true);
     try {
+      // Synthesize a stand-in profile from the latest resume
+      // intelligence report when the saved UserProfile is empty
+      // so the matcher stops claiming "Profile is incomplete;
+      // missing Full name, Email, Location" while those fields
+      // are clearly visible in the Resume Intelligence panel.
+      // The synthesized profile is for ranking only — never
+      // persisted to UserProfile until the user clicks
+      // "Apply high-confidence fields to profile".
+      const profileForScoring = synthesizeProfileWithResumeFallback(
+        profile,
+        resumeIntelligenceReports[0] ?? null
+      );
       const result = await recommendApplyReadyJobs(currentSession, {
         targetRoles: roles,
-        profile,
+        profile: profileForScoring,
         allowDemoJobs: true
       });
       setOnboardingState(result.state);
@@ -2582,9 +2595,13 @@ export default function App() {
     // Score against the current profile so the UI can immediately
     // show a match score / reasons / gaps. Pass only the imported
     // job so we don't redundantly re-score the rest of the queue.
+    const profileForScoring = synthesizeProfileWithResumeFallback(
+      profile,
+      resumeIntelligenceReports[0] ?? null
+    );
     const scoringResult = await scoreJobsForProfile(
       currentSession,
-      profile,
+      profileForScoring,
       [importResult.job],
       jobMatches
     );
@@ -2614,9 +2631,13 @@ export default function App() {
   ): Promise<void> {
     const updated = applyManualJobOverrides(currentSession, jobId, overrides);
     setNormalizedJobs(loadNormalizedJobs(currentSession));
+    const profileForScoring = synthesizeProfileWithResumeFallback(
+      profile,
+      resumeIntelligenceReports[0] ?? null
+    );
     const scoringResult = await scoreJobsForProfile(
       currentSession,
-      profile,
+      profileForScoring,
       [updated],
       jobMatches
     );

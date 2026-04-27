@@ -419,35 +419,74 @@ export function OnboardingPage({
                 Confirm your target roles
               </h3>
               <p className="mt-1 text-sm leading-6 text-slate-600">
-                We pre-selected from your resume. Add or remove roles, then
-                show jobs you can act on now.
+                {jobTargetRecommendation &&
+                jobTargetRecommendation.strongestRoles.length > 0
+                  ? "Your confirmed targets from the AI analysis are checked below. Add or remove roles, or type a custom one."
+                  : "We pre-selected from your resume. Add or remove roles, then show jobs you can act on now."}
               </p>
 
-              {profileTargetTitles.length > 0 && (
-                <p className="mt-3 text-xs uppercase tracking-wide text-slate-500">
-                  From your profile
-                </p>
+              {/*
+                When the AI has provided focused recommendations,
+                the generic SUGGESTED_ROLES chip set (Senior PM,
+                Senior Software Engineer, Senior Data Scientist…)
+                is noise — they don't apply to a senior leadership
+                resume and just dilute the user's actual selection.
+                In that case we render only the currently-selected
+                chips (which include the AI-confirmed roles + any
+                custom roles typed via the input below) so the user
+                sees what they're actually committing to.
+              */}
+              {jobTargetRecommendation &&
+              jobTargetRecommendation.strongestRoles.length > 0 ? (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {selectedRoles.length === 0 ? (
+                    <p className="text-xs text-slate-500">
+                      No targets selected. Re-confirm in the AI analysis above
+                      or add a custom role below.
+                    </p>
+                  ) : (
+                    selectedRoles.map((role) => (
+                      <button
+                        key={role}
+                        type="button"
+                        className="rounded-full border border-emerald-700 bg-emerald-50 px-3 py-1 text-sm font-medium text-emerald-800"
+                        onClick={() => toggleRole(role)}
+                        title="Click to remove"
+                      >
+                        ✓ {role}
+                      </button>
+                    ))
+                  )}
+                </div>
+              ) : (
+                <>
+                  {profileTargetTitles.length > 0 && (
+                    <p className="mt-3 text-xs uppercase tracking-wide text-slate-500">
+                      From your profile
+                    </p>
+                  )}
+                  <div className="mt-2 flex flex-wrap gap-2">
+                    {allSuggestedAndProfile.map((role) => {
+                      const checked = selectedRoles.includes(role);
+                      return (
+                        <button
+                          key={role}
+                          type="button"
+                          className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
+                            checked
+                              ? "border-emerald-700 bg-emerald-50 text-emerald-800"
+                              : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                          onClick={() => toggleRole(role)}
+                        >
+                          {checked ? "✓ " : ""}
+                          {role}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </>
               )}
-              <div className="mt-2 flex flex-wrap gap-2">
-                {allSuggestedAndProfile.map((role) => {
-                  const checked = selectedRoles.includes(role);
-                  return (
-                    <button
-                      key={role}
-                      type="button"
-                      className={`rounded-full border px-3 py-1 text-sm font-medium transition ${
-                        checked
-                          ? "border-emerald-700 bg-emerald-50 text-emerald-800"
-                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
-                      }`}
-                      onClick={() => toggleRole(role)}
-                    >
-                      {checked ? "✓ " : ""}
-                      {role}
-                    </button>
-                  );
-                })}
-              </div>
 
               <div className="mt-4 flex flex-wrap items-center gap-2">
                 <input

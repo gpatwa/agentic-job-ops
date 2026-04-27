@@ -422,9 +422,17 @@ export async function recommendApplyReadyJobs(
         templateMatchesRole(template, role)
       );
       if (matchingTemplates.length === 0) {
-        // Fall back to the product-manager template so the user always sees
-        // at least one demo job to interact with.
-        matchingTemplates.push(DEMO_JOB_LIBRARY[0]);
+        // Skip this role — no plausible template in the local
+        // demo catalog. Previously we fell back to
+        // DEMO_JOB_LIBRARY[0] (a Product Manager template) so
+        // the user always saw at least one demo job. That
+        // produced the off-target "Senior Software Engineer at
+        // DemoEngine" recommendations on a senior leadership
+        // resume — confusing more than it helped. With the
+        // fallback dropped, the recommendations panel renders
+        // the honest "We couldn't find a great match — add a
+        // job source" empty state instead.
+        continue;
       }
       for (const template of matchingTemplates) {
         if (newDemoJobs.length >= maxDemoJobs) break;
