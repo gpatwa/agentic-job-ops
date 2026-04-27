@@ -1028,6 +1028,23 @@ export interface ResumeImprovementDraft {
 export const resumeIntelligenceModes = ["deterministic", "llm"] as const;
 export type ResumeIntelligenceMode = (typeof resumeIntelligenceModes)[number];
 
+/**
+ * Concrete AI provider identifier — finer-grained than
+ * `ResumeIntelligenceMode`. Lets the UI distinguish the OpenAI
+ * public API from Azure OpenAI even though both run in "llm" mode.
+ *
+ * The persisted report schema accepts this as optional (with a
+ * "deterministic" default) so records written before this field
+ * existed continue to load cleanly.
+ */
+export const resumeIntelligenceProviders = [
+  "openai",
+  "azure_openai",
+  "deterministic"
+] as const;
+export type ResumeIntelligenceProvider =
+  (typeof resumeIntelligenceProviders)[number];
+
 export const resumeFieldConfidences = ["high", "medium", "low"] as const;
 export type ResumeFieldConfidence = (typeof resumeFieldConfidences)[number];
 
@@ -1099,6 +1116,12 @@ export interface ResumeIntelligenceReport {
   userId: string;
   resumeId: string;
   extractionMode: ResumeIntelligenceMode;
+  /**
+   * Concrete AI provider that produced this report. Optional on the
+   * type so legacy persisted records (written before this field
+   * existed) load cleanly via the schema's default.
+   */
+  provider?: ResumeIntelligenceProvider;
   modelName: string;
   promptVersion: string;
   extractedProfile: ExtractedResumeProfile;

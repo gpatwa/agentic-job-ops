@@ -43,7 +43,17 @@ import type {
  *   be classified as `adjacent` or `stretch`, never `strong`.
  */
 
-const PROMPT_VERSION = "resume-intelligence-openai-v1";
+/**
+ * Public, stable identifier for the LLM resume-intelligence prompt.
+ * Both the OpenAI provider and the server-side Azure OpenAI provider
+ * use the same prompt + schema, so this version moves in lock-step
+ * with both. Bump it whenever the prompt or schema changes shape.
+ */
+export const RESUME_INTELLIGENCE_PROMPT_VERSION =
+  "resume-intelligence-openai-v1";
+
+/** Backwards-compatible alias for the constant the file used to keep local. */
+const PROMPT_VERSION = RESUME_INTELLIGENCE_PROMPT_VERSION;
 const DEFAULT_MODEL = "gpt-4.1-mini";
 const DEFAULT_ENDPOINT = "https://api.openai.com/v1/chat/completions";
 
@@ -78,6 +88,25 @@ const llmResponseSchema = z.object({
 });
 
 export type OpenAIResumeIntelligenceResponse = z.infer<typeof llmResponseSchema>;
+
+/**
+ * Re-exported schema for any provider that produces the same JSON
+ * shape (Azure OpenAI, future Anthropic / Bedrock providers, etc.).
+ */
+export const llmResumeIntelligenceResponseSchema = llmResponseSchema;
+export type LlmResumeIntelligenceResponse = z.infer<typeof llmResponseSchema>;
+
+/**
+ * Re-exported post-processor that converts a validated LLM response
+ * into the canonical `ResumeIntelligenceAdapterOutput` (with the
+ * defense-in-depth dedupe + fitLevel enforcement applied).
+ */
+export function mapValidatedLlmResponseToOutput(
+  llm: LlmResumeIntelligenceResponse,
+  model: string
+): ResumeIntelligenceAdapterOutput {
+  return mapLlmResponseToOutput(llm, model);
+}
 
 export class OpenAIResumeIntelligenceAdapterError extends Error {
   constructor(
@@ -124,7 +153,13 @@ export function openaiAdapterAvailable(
   return Boolean(key && key.trim().length > 0);
 }
 
-const SYSTEM_PROMPT = `You are a careful resume analysis assistant for a job search platform.
+/**
+ * System prompt used by every LLM-backed resume-intelligence
+ * provider (OpenAI, Azure OpenAI, future server-side adapters).
+ * Re-exported so the Azure provider can issue the same prompt
+ * without duplicating the safety contract.
+ */
+export const RESUME_INTELLIGENCE_SYSTEM_PROMPT = `You are a careful resume analysis assistant for a job search platform.
 
 Hard rules:
 - Use ONLY evidence present in the resume text the user provides. Do NOT
@@ -150,6 +185,18 @@ Hard rules:
   When in doubt, prefer "adjacent" or "stretch" over "strong".
 - Output JSON only. No prose, no markdown. The JSON must conform to the
   schema described in the user message.`;
+
+/** Backwards-compatible alias for the local SYSTEM_PROMPT name. */
+const SYSTEM_PROMPT = RESUME_INTELLIGENCE_SYSTEM_PROMPT;
+
+/**
+ * Build the user-message portion of the resume-intelligence prompt.
+ * Re-exported so the Azure provider can reuse the same instructions
+ * verbatim.
+ */
+export function buildResumeIntelligenceUserPrompt(resumeText: string): string {
+  return buildUserPrompt(resumeText);
+}
 
 function buildUserPrompt(resumeText: string): string {
   return `Analyze the following resume text and return a single JSON object with this exact shape (TypeScript-style for clarity):
@@ -384,6 +431,7 @@ function mapLlmResponseToOutput(
     modelName: model,
     promptVersion: PROMPT_VERSION,
     extractionMode: "llm" as ResumeIntelligenceMode,
+    provider: "openai",
     extractedProfile: llm.extractedProfile,
     confidenceByField: llm.confidenceByField,
     missingFields: llm.missingFields,

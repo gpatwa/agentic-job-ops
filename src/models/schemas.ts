@@ -51,6 +51,7 @@ import {
   matchRecommendations,
   queueTypes,
   remotePreferences,
+  resumeIntelligenceProviders,
   resumeStatuses,
   scanRunStatuses,
   scanSchedules,
@@ -489,6 +490,13 @@ export const resumeIntelligenceReportSchema = z.object({
   userId: idSchema,
   resumeId: idSchema,
   extractionMode: z.enum(resumeIntelligenceModes),
+  // Optional with a deterministic default so reports persisted
+  // before this field existed continue to load cleanly. New writes
+  // always populate it via the active adapter.
+  provider: z
+    .enum(resumeIntelligenceProviders)
+    .optional()
+    .default("deterministic"),
   modelName: z.string().trim().min(1),
   promptVersion: z.string().trim().min(1),
   extractedProfile: extractedResumeProfileSchema,

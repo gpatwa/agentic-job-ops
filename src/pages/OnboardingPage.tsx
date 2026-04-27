@@ -2446,8 +2446,16 @@ function ResumeIntelligenceModeBadge({
 }: {
   report: ResumeIntelligenceReport | null;
 }) {
-  const mode = report?.extractionMode ?? "deterministic";
-  const isLlm = mode === "llm";
+  const provider =
+    report?.provider ??
+    (report?.extractionMode === "llm" ? "openai" : "deterministic");
+  const label =
+    provider === "openai"
+      ? "OpenAI LLM"
+      : provider === "azure_openai"
+        ? "Azure OpenAI"
+        : "deterministic fallback";
+  const isLlm = provider !== "deterministic";
   return (
     <span
       data-testid="resume-intelligence-source-badge"
@@ -2457,7 +2465,7 @@ function ResumeIntelligenceModeBadge({
           : "rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700"
       }
     >
-      Source: {isLlm ? "OpenAI LLM" : "deterministic fallback"}
+      Source: {label}
     </span>
   );
 }
@@ -2467,11 +2475,17 @@ function ResumeIntelligenceModeCallout({
 }: {
   report: ResumeIntelligenceReport;
 }) {
-  const isLlm = report.extractionMode === "llm";
+  const provider =
+    report.provider ??
+    (report.extractionMode === "llm" ? "openai" : "deterministic");
+  const isLlm = provider !== "deterministic";
   const headline = isLlm ? "AI resume analysis" : "Basic local analysis";
-  const body = isLlm
-    ? "Powered by OpenAI. Review all extracted facts before using them — the model can still misread sections."
-    : "No LLM key is configured. This uses deterministic extraction for local testing and may be limited.";
+  const body =
+    provider === "openai"
+      ? "Powered by OpenAI through the local AI API server. Review all extracted facts before using them — the model can still misread sections."
+      : provider === "azure_openai"
+        ? "Powered by Azure OpenAI through the local AI API server. Review all extracted facts before using them — the model can still misread sections."
+        : "The AI API server is offline or no LLM provider is configured. Using deterministic extraction locally; this may be limited.";
   return (
     <div
       data-testid="resume-intelligence-mode-callout"

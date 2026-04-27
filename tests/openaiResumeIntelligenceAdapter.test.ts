@@ -12,11 +12,9 @@ import {
   selectResumeIntelligenceAdapter
 } from "../src/services/resumeIntelligenceService";
 
-// Local ambient declaration so this test file can mutate process.env in
-// Node without pulling in @types/node project-wide. The adapter itself
-// reads env defensively via globalThis (see openaiResumeIntelligenceAdapter
-// readEnv) so this is purely a TypeScript convenience.
-declare const process: { env: Record<string, string | undefined> };
+// process.env is now globally typed via @types/node (added when the
+// AI API server slice landed). The adapter itself still reads env
+// defensively via globalThis so it stays safe in browser bundles.
 
 function makeResume(text: string, id = "resume_openai_test"): Resume {
   return {

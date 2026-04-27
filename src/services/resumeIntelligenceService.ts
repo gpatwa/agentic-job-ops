@@ -9,6 +9,7 @@ import type {
   Resume,
   ResumeFieldConfidenceMap,
   ResumeIntelligenceMode,
+  ResumeIntelligenceProvider,
   ResumeIntelligenceReport,
   ResumeIntelligenceSuggestedFix,
   SkillGap,
@@ -20,6 +21,11 @@ import {
 } from "../models/schemas";
 import { readJson, scopedKey, writeJson } from "../lib/storage";
 import { pickOpenAIAdapterIfConfigured } from "./openaiResumeIntelligenceAdapter";
+import {
+  ApiResumeIntelligenceUnavailableError,
+  callResumeIntelligenceApi,
+  type ApiClientOptions
+} from "./resumeIntelligenceApiClient";
 
 type AuditMetadata = AuditLog["metadata"];
 
@@ -45,6 +51,12 @@ export interface ResumeIntelligenceAdapterOutput {
   modelName: string;
   promptVersion: string;
   extractionMode: ResumeIntelligenceMode;
+  /**
+   * Concrete provider that produced this output. Lets the UI
+   * distinguish OpenAI from Azure OpenAI even though both run in
+   * `extractionMode: "llm"`.
+   */
+  provider: ResumeIntelligenceProvider;
   extractedProfile: ExtractedResumeProfile;
   confidenceByField: ResumeFieldConfidenceMap;
   missingFields: string[];
@@ -1065,6 +1077,7 @@ class DeterministicResumeIntelligenceAdapter
       modelName: "deterministic-resume-intelligence-fallback",
       promptVersion: "resume-intelligence-v1",
       extractionMode: "deterministic",
+      provider: "deterministic",
       extractedProfile: profile,
       confidenceByField,
       missingFields: ats.missingFields,
@@ -1094,17 +1107,67 @@ export function createDeterministicResumeIntelligenceAdapter(): ResumeIntelligen
 }
 
 /**
+ * API-backed adapter for the browser. Calls the local AI API server
+ * (which is the only thing that holds the OpenAI / Azure OpenAI
+ * key) and falls back to running the deterministic adapter in-
+ * process when the server is unreachable / errors out / returns a
+ * non-2xx response. The browser never sees the upstream API key.
+ *
+ * The fallback is silent for the user experience but the caller can
+ * inspect `output.provider` to know which path actually ran.
+ */
+export function createApiBackedResumeIntelligenceAdapter(
+  apiOptions: ApiClientOptions = {}
+): ResumeIntelligenceAdapter {
+  const fallback = createDeterministicResumeIntelligenceAdapter();
+  return {
+    name: "api-backed-resume-intelligence-adapter",
+    async analyze(input: { resume: Resume }): Promise<ResumeIntelligenceAdapterOutput> {
+      try {
+        const response = await callResumeIntelligenceApi(
+          {
+            resumeId: input.resume.id,
+            resumeText: input.resume.parsedText ?? ""
+          },
+          apiOptions
+        );
+        // The server already returns a canonical
+        // ResumeIntelligenceAdapterOutput shape — pass it through
+        // with the provider stamped from the server response so the
+        // UI badge reflects the real backend (OpenAI vs Azure
+        // OpenAI vs deterministic).
+        return { ...response.report, provider: response.provider };
+      } catch (error) {
+        if (error instanceof ApiResumeIntelligenceUnavailableError) {
+          return fallback.analyze(input);
+        }
+        // Unknown errors still degrade gracefully — never let an
+        // analyze call throw out to the caller in the browser.
+        return fallback.analyze(input);
+      }
+    }
+  };
+}
+
+/**
  * Pick the best resume-intelligence adapter for the current environment.
  *
- * - When `OPENAI_API_KEY` is set in a Node context, return the OpenAI
- *   adapter so the user sees real LLM analysis.
- * - In a browser bundle (Vite) `process` is undefined, so this always
- *   returns the deterministic adapter and the API key never reaches the
- *   client.
- * - Tests can opt into either path explicitly by passing `adapter` to
- *   `analyzeResumeIntelligence`.
+ * - In the **browser** (window/document defined): use the API-backed
+ *   adapter, which calls /api/resume-intelligence and silently falls
+ *   back to deterministic if the API is offline. The OpenAI / Azure
+ *   OpenAI key never enters the browser bundle.
+ * - In **Node** (vitest, scripts) with `OPENAI_API_KEY` set: use the
+ *   in-process OpenAI adapter directly so server-side tests can
+ *   exercise the real prompt + schema path.
+ * - Otherwise (Node without a key): deterministic.
+ *
+ * Tests can opt into a specific adapter by passing `adapter` to
+ * `analyzeResumeIntelligence`.
  */
 export function selectResumeIntelligenceAdapter(): ResumeIntelligenceAdapter {
+  if (typeof window !== "undefined" && typeof document !== "undefined") {
+    return createApiBackedResumeIntelligenceAdapter();
+  }
   return (
     pickOpenAIAdapterIfConfigured() ??
     createDeterministicResumeIntelligenceAdapter()
@@ -1154,6 +1217,7 @@ export async function analyzeResumeIntelligence(
     userId: session.userId,
     resumeId: resume.id,
     extractionMode: output.extractionMode,
+    provider: output.provider,
     modelName: output.modelName,
     promptVersion: output.promptVersion,
     extractedProfile: output.extractedProfile,

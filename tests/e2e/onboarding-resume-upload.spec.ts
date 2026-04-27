@@ -1,12 +1,8 @@
 import { expect, test } from "@playwright/test";
 
-// Local ambient so this Playwright spec can use Node's Buffer without
-// pulling in @types/node project-wide. Playwright always runs the spec
-// file in Node, so Buffer is real at runtime.
-declare const Buffer: {
-  from(input: string, encoding?: string): ArrayBuffer;
-  from(input: number[]): ArrayBuffer;
-};
+// Buffer is now globally typed via @types/node (added when the AI
+// API server slice landed). Playwright always runs the spec in Node
+// so the runtime symbol is also real.
 
 const resumeKey = "ajo:tenant_local_demo:user_local_demo:resume";
 

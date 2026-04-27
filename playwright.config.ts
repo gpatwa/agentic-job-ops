@@ -19,7 +19,11 @@ export default defineConfig({
     trace: "on-first-retry"
   },
   webServer: {
-    command: `npm run dev -- --host 127.0.0.1 --port ${port}`,
+    // Use dev:web (just Vite) — qa:mvp must pass without the API
+    // server running, so the e2e suite explicitly does not spin up
+    // the AI backend. The frontend's deterministic fallback keeps
+    // the happy-path test fully offline.
+    command: `npm run dev:web -- --host 127.0.0.1 --port ${port}`,
     url: baseURL,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000
