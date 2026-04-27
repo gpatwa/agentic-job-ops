@@ -113,6 +113,8 @@ import {
   createResumeFromText,
   createResumeUpload,
   loadResume,
+  parseUploadedResumeFile,
+  promoteResumeAsActive,
   saveResume
 } from "./services/resumeService";
 import {
@@ -934,6 +936,61 @@ export default function App() {
         hasLocalFile: true
       }
     });
+  }
+
+  /**
+   * Onboarding-side upload: takes a real File from the file input,
+   * parses TXT/MD content directly or records PDF/DOC/DOCX metadata
+   * with `extractionPending`. If a resume already exists, the prior
+   * one is preserved in version history via promoteResumeAsActive.
+   *
+   * Returns extraction info so the calling component can show an
+   * honest "uploaded · text extraction pending" status without
+   * having to duplicate the extension heuristic.
+   *
+   * Never logs the file contents or the file object.
+   */
+  async function handleUploadOnboardingResumeFile(
+    file: File
+  ): Promise<{ extractionPending: boolean; fileName: string; extension: string }> {
+    const parsed = await parseUploadedResumeFile(currentSession, file);
+    const previous = loadResume(currentSession);
+    const replacing = Boolean(previous && previous.id !== parsed.resume.id);
+    if (replacing) {
+      const promoted = promoteResumeAsActive(currentSession, parsed.resume);
+      setResume(promoted.active);
+    } else {
+      const saved = saveResume(currentSession, parsed.resume);
+      setResume(saved);
+    }
+    recordAudit({
+      action: "resume.uploaded",
+      resourceType: "Resume",
+      resourceId: parsed.resume.id,
+      metadata: {
+        status: parsed.resume.status,
+        fileExtension: parsed.extension,
+        hasLocalFile: true,
+        extractionPending: parsed.extractionPending,
+        replacedPriorResume: replacing,
+        source: "onboarding_upload"
+      }
+    });
+    recordUsage({
+      eventType: "resume_uploaded",
+      resourceType: "Resume",
+      resourceId: parsed.resume.id,
+      metadata: {
+        fileExtension: parsed.extension,
+        extractionPending: parsed.extractionPending,
+        source: "onboarding_upload"
+      }
+    });
+    return {
+      extractionPending: parsed.extractionPending,
+      fileName: parsed.resume.originalFileName,
+      extension: parsed.extension
+    };
   }
 
   function handlePlaceholderResume() {
@@ -3211,6 +3268,7 @@ export default function App() {
             onReanalyzeImprovement={handleReanalyzeResumeImprovement}
             onRejectImprovement={handleRejectResumeImprovement}
             onPasteResumeText={handlePasteResumeText}
+            onUploadResumeFile={handleUploadOnboardingResumeFile}
             onTryDemoProfile={handleTryDemoProfile}
             onTryRealisticDemo={handleTryRealisticDemo}
             onAnalyzeResume={handleAnalyzeResumeIntelligence}

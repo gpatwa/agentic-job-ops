@@ -12,6 +12,11 @@ test("MVP happy path keeps submit blocked until explicit approval", async ({
 
   await page.goto("/#onboarding");
 
+  // Step 1 must always offer a real file upload control alongside paste/demo.
+  await expect(
+    page.getByTestId("onboarding-resume-file-input")
+  ).toBeAttached();
+
   await page.getByTestId("try-realistic-demo").click();
   await expect(page).toHaveURL(/#action-center$/);
   await expect(page.getByTestId("action-center")).toBeVisible();

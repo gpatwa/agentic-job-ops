@@ -6,6 +6,7 @@ import {
   CheckCircle2,
   Eye,
   FileText,
+  FileUp,
   RefreshCw,
   Rocket,
   ShieldAlert,
@@ -50,6 +51,9 @@ interface OnboardingPageProps {
   onReanalyzeImprovement: () => void;
   onRejectImprovement: () => void;
   onPasteResumeText: (text: string) => void;
+  onUploadResumeFile: (
+    file: File
+  ) => Promise<{ extractionPending: boolean; fileName: string; extension: string }>;
   onTryDemoProfile: () => void;
   onTryRealisticDemo: () => void;
   onAnalyzeResume: () => void;
@@ -163,6 +167,7 @@ export function OnboardingPage({
   onReanalyzeImprovement,
   onRejectImprovement,
   onPasteResumeText,
+  onUploadResumeFile,
   onTryDemoProfile,
   onTryRealisticDemo,
   onAnalyzeResume,
@@ -313,17 +318,18 @@ export function OnboardingPage({
         <ResumeStartCard
           isAnalyzing={isAnalyzingResume}
           onPasteResumeText={onPasteResumeText}
+          onUploadResumeFile={onUploadResumeFile}
           onTryDemoProfile={onTryDemoProfile}
           onTryRealisticDemo={onTryRealisticDemo}
           onSkipToManualSetup={onNavigateProfile}
         />
       ) : (
         resume && (
-          <CompletedStepBanner
-            label="Resume"
-            value={resume.originalFileName}
-            actionLabel="Manage resume"
-            onAction={onNavigateResume}
+          <ExistingResumeBanner
+            resume={resume}
+            onUploadResumeFile={onUploadResumeFile}
+            onNavigateResume={onNavigateResume}
+            isAnalyzing={isAnalyzingResume}
           />
         )
       )}
@@ -602,34 +608,83 @@ function CompletedStepBanner({
   );
 }
 
+/** File extensions accepted by the onboarding upload control. */
+const ONBOARDING_RESUME_ACCEPT = ".pdf,.doc,.docx,.txt,.md";
+
+function formatFileSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+interface UploadStatusState {
+  fileName: string;
+  extractionPending: boolean;
+}
+
 function ResumeStartCard({
   isAnalyzing,
   onPasteResumeText,
+  onUploadResumeFile,
   onTryDemoProfile,
   onTryRealisticDemo,
   onSkipToManualSetup
 }: {
   isAnalyzing: boolean;
   onPasteResumeText: (text: string) => void;
+  onUploadResumeFile: (
+    file: File
+  ) => Promise<{ extractionPending: boolean; fileName: string; extension: string }>;
   onTryDemoProfile: () => void;
   onTryRealisticDemo: () => void;
   onSkipToManualSetup: () => void;
 }) {
   const [draft, setDraft] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [pasteError, setPasteError] = useState<string | null>(null);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatusState | null>(
+    null
+  );
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  async function handleUpload() {
+    if (!selectedFile) return;
+    setUploadError(null);
+    setIsUploading(true);
+    try {
+      const result = await onUploadResumeFile(selectedFile);
+      setUploadStatus({
+        fileName: result.fileName,
+        extractionPending: result.extractionPending
+      });
+      setSelectedFile(null);
+    } catch (error) {
+      setUploadStatus(null);
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "We couldn't read that file. Use a PDF, DOC, DOCX, TXT, or MD resume."
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  }
 
   function handlePaste() {
     const trimmed = draft.trim();
     if (trimmed.length < 50) {
-      setError(
+      setPasteError(
         "Paste at least a few lines of resume text so the analyzer has something to work with."
       );
       return;
     }
-    setError(null);
+    setPasteError(null);
     onPasteResumeText(trimmed);
     setDraft("");
   }
+
+  const uploadDisabled = !selectedFile || isAnalyzing || isUploading;
 
   return (
     <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
@@ -642,27 +697,95 @@ function ResumeStartCard({
             Add your resume
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Paste your resume text below — we keep it private, never log it,
-            and analyse it locally with a deterministic adapter. Or try a
-            realistic demo workspace to see the full flow.
+            Upload a resume file or paste text. We use it to recommend roles
+            and prepare applications. We keep it private and never log the
+            content.
           </p>
-          <textarea
-            className="mt-3 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-sm leading-6"
-            placeholder="Paste resume text here…"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-          />
-          {error && <p className="mt-1 text-xs text-red-700">{error}</p>}
-          <div className="mt-3 flex flex-wrap gap-2">
-            <button
-              type="button"
-              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
-              onClick={handlePaste}
-              disabled={isAnalyzing || draft.trim().length === 0}
-            >
-              <Sparkles aria-hidden="true" size={15} />
-              Save resume and continue
-            </button>
+
+          <div className="mt-4 rounded-md border border-slate-200 bg-panel p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Upload a resume file
+            </p>
+            <label className="mt-2 flex cursor-pointer flex-col items-start gap-2 rounded-md border border-dashed border-slate-300 bg-white p-3 hover:border-emerald-500">
+              <span className="flex items-center gap-2 text-sm font-semibold text-slate-800">
+                <FileUp aria-hidden="true" size={16} />
+                {selectedFile
+                  ? `${selectedFile.name} · ${formatFileSize(selectedFile.size)}`
+                  : "Choose a resume file"}
+              </span>
+              <span className="text-xs text-slate-500">
+                Accepted: PDF, DOC, DOCX, TXT, MD. TXT/MD are parsed locally;
+                PDF/DOC/DOCX record metadata and mark text extraction as
+                pending until a parser runs.
+              </span>
+              <input
+                className="sr-only"
+                type="file"
+                accept={ONBOARDING_RESUME_ACCEPT}
+                data-testid="onboarding-resume-file-input"
+                onChange={(event) => {
+                  setUploadError(null);
+                  setSelectedFile(event.target.files?.[0] ?? null);
+                }}
+              />
+            </label>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                data-testid="onboarding-upload-resume"
+                onClick={handleUpload}
+                disabled={uploadDisabled}
+              >
+                <FileUp aria-hidden="true" size={15} />
+                {isUploading ? "Uploading…" : "Upload resume"}
+              </button>
+              {uploadError && (
+                <p className="text-xs text-red-700" role="alert">
+                  {uploadError}
+                </p>
+              )}
+            </div>
+            {uploadStatus && (
+              <p
+                className="mt-2 text-xs text-emerald-800"
+                data-testid="onboarding-resume-upload-status"
+              >
+                ✓ Uploaded {uploadStatus.fileName}
+                {uploadStatus.extractionPending
+                  ? " · text extraction pending"
+                  : " · text parsed locally"}
+              </p>
+            )}
+          </div>
+
+          <div className="mt-4 rounded-md border border-slate-200 bg-panel p-4">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Or paste resume text
+            </p>
+            <textarea
+              className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-sm leading-6"
+              placeholder="Paste resume text here…"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+            />
+            {pasteError && (
+              <p className="mt-1 text-xs text-red-700">{pasteError}</p>
+            )}
+            <div className="mt-2 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                onClick={handlePaste}
+                disabled={isAnalyzing || draft.trim().length === 0}
+              >
+                <Sparkles aria-hidden="true" size={15} />
+                Save resume and continue
+              </button>
+            </div>
+          </div>
+
+          <div className="mt-4 flex flex-wrap gap-2">
             <button
               type="button"
               className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-amber-300 bg-amber-50 px-3 text-sm font-semibold text-amber-900 hover:bg-amber-100"
@@ -689,6 +812,133 @@ function ResumeStartCard({
             </button>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Banner shown on Step 1 when a resume already exists. Lets the user
+ * replace it inline (preserving the prior version in history via the
+ * upload handler's promoteResumeAsActive call) or jump to the dedicated
+ * Resume page to manage versions.
+ */
+function ExistingResumeBanner({
+  resume,
+  onUploadResumeFile,
+  onNavigateResume,
+  isAnalyzing
+}: {
+  resume: Resume;
+  onUploadResumeFile: (
+    file: File
+  ) => Promise<{ extractionPending: boolean; fileName: string; extension: string }>;
+  onNavigateResume: () => void;
+  isAnalyzing: boolean;
+}) {
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [uploadStatus, setUploadStatus] = useState<UploadStatusState | null>(
+    null
+  );
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+
+  async function handleReplace() {
+    if (!selectedFile) return;
+    setUploadError(null);
+    setIsUploading(true);
+    try {
+      const result = await onUploadResumeFile(selectedFile);
+      setUploadStatus({
+        fileName: result.fileName,
+        extractionPending: result.extractionPending
+      });
+      setSelectedFile(null);
+    } catch (error) {
+      setUploadStatus(null);
+      setUploadError(
+        error instanceof Error
+          ? error.message
+          : "We couldn't read that file. Use a PDF, DOC, DOCX, TXT, or MD resume."
+      );
+    } finally {
+      setIsUploading(false);
+    }
+  }
+
+  const replaceDisabled = !selectedFile || isAnalyzing || isUploading;
+
+  return (
+    <section
+      className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
+      data-testid="onboarding-resume-completed"
+    >
+      <div className="flex flex-wrap items-center gap-2">
+        <CheckCircle2 aria-hidden="true" size={14} />
+        <span className="font-semibold uppercase tracking-wide">Resume</span>
+        <span className="truncate text-emerald-800">
+          {resume.originalFileName}
+        </span>
+        <button
+          type="button"
+          className="ml-auto text-xs font-semibold text-emerald-800 underline-offset-2 hover:underline"
+          onClick={onNavigateResume}
+        >
+          Manage resume versions
+        </button>
+      </div>
+      <div className="mt-3 rounded-md border border-emerald-200 bg-white p-3 text-slate-700">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Replace or upload an improved resume
+        </p>
+        <label className="mt-2 flex cursor-pointer items-center gap-2 rounded-md border border-dashed border-slate-300 px-3 py-2 text-xs font-semibold text-slate-800 hover:border-emerald-500">
+          <FileUp aria-hidden="true" size={14} />
+          {selectedFile
+            ? `${selectedFile.name} · ${formatFileSize(selectedFile.size)}`
+            : "Choose a different resume file"}
+          <input
+            className="sr-only"
+            type="file"
+            accept={ONBOARDING_RESUME_ACCEPT}
+            data-testid="onboarding-resume-file-input"
+            onChange={(event) => {
+              setUploadError(null);
+              setSelectedFile(event.target.files?.[0] ?? null);
+            }}
+          />
+        </label>
+        <p className="mt-2 text-xs text-slate-500">
+          Replacing keeps the prior version accessible from Manage resume
+          versions. We never log the file contents.
+        </p>
+        <div className="mt-2 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-xs font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            data-testid="onboarding-replace-resume"
+            onClick={handleReplace}
+            disabled={replaceDisabled}
+          >
+            <FileUp aria-hidden="true" size={13} />
+            {isUploading ? "Replacing…" : "Replace resume"}
+          </button>
+          {uploadError && (
+            <p className="text-xs text-red-700" role="alert">
+              {uploadError}
+            </p>
+          )}
+        </div>
+        {uploadStatus && (
+          <p
+            className="mt-2 text-xs text-emerald-800"
+            data-testid="onboarding-resume-upload-status"
+          >
+            ✓ Uploaded {uploadStatus.fileName}
+            {uploadStatus.extractionPending
+              ? " · text extraction pending"
+              : " · text parsed locally"}
+          </p>
+        )}
       </div>
     </section>
   );

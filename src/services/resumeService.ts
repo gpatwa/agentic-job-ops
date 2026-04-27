@@ -67,6 +67,110 @@ export function createResumeFromText(
   return resumeSchema.parse(resume);
 }
 
+/**
+ * Extensions whose text content can be read directly in the browser via
+ * `File.text()`. PDF / DOC / DOCX need binary parsers we do not bundle in
+ * the local MVP — those go through the metadata-only path with an
+ * `extractionPending` signal so the UI can be honest about it.
+ */
+const TEXT_EXTRACTABLE_EXTENSIONS = new Set(["txt", "md"]);
+const BINARY_EXTRACTION_PENDING_EXTENSIONS = new Set(["pdf", "doc", "docx"]);
+
+const RESUME_EXTRACTION_PENDING_TEXT =
+  "Resume text extraction has not run yet. Add verified facts in the career profile before using this resume for application drafts.";
+
+export interface ParsedUploadedResume {
+  /** Persisted Resume record. Caller is responsible for `saveResume`. */
+  resume: Resume;
+  /**
+   * True when the file was a binary format we cannot parse locally
+   * (pdf/doc/docx). The Resume's parsedText is a placeholder and the
+   * UI should surface "text extraction pending" instead of pretending
+   * the resume is fully ingested.
+   */
+  extractionPending: boolean;
+  /** Lower-cased file extension actually used (without the leading dot). */
+  extension: string;
+}
+
+export class UnsupportedResumeFileError extends Error {
+  constructor(
+    public readonly extension: string,
+    public readonly fileName: string
+  ) {
+    super(
+      `Unsupported resume file type: .${extension}. Use PDF, DOC, DOCX, TXT, or MD.`
+    );
+    this.name = "UnsupportedResumeFileError";
+  }
+}
+
+/**
+ * Parse an uploaded File into a Resume record.
+ *
+ * - .txt / .md  → reads file text in browser via File.text() and stores
+ *                  the full content as parsedText (status = "parsed").
+ * - .pdf / .doc / .docx → records metadata only, stores a placeholder
+ *                  parsedText, and flags extractionPending so the UI can
+ *                  show "text extraction pending" honestly. status =
+ *                  "uploaded" so the resume domain enum reflects that
+ *                  parsing has not actually completed.
+ * - anything else → throws UnsupportedResumeFileError.
+ *
+ * Never logs the file contents or the file object. Caller passes the
+ * File directly; the function reads it via the standard web API.
+ */
+export async function parseUploadedResumeFile(
+  session: AppSession,
+  file: File
+): Promise<ParsedUploadedResume> {
+  const fileName = file.name.trim() || "uploaded-resume";
+  const extension = fileExtension(fileName);
+
+  if (TEXT_EXTRACTABLE_EXTENSIONS.has(extension)) {
+    const text = (await file.text()).trim();
+    const id = createId("resume");
+    const resume: Resume = {
+      id,
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      originalFileName: fileName,
+      fileUrl: `local-upload://resume/${id}.${extension}`,
+      parsedText: text,
+      status: "parsed",
+      createdAt: new Date().toISOString()
+    };
+    return {
+      resume: resumeSchema.parse(resume),
+      extractionPending: false,
+      extension
+    };
+  }
+
+  if (BINARY_EXTRACTION_PENDING_EXTENSIONS.has(extension)) {
+    const id = createId("resume");
+    const resume: Resume = {
+      id,
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      originalFileName: fileName,
+      fileUrl: `local-upload://resume/${id}.${extension}`,
+      parsedText: RESUME_EXTRACTION_PENDING_TEXT,
+      // "uploaded" (not "parsed") so the domain enum is honest: the file
+      // is on disk but text has not been extracted yet.
+      status: "uploaded",
+      createdAt: new Date().toISOString()
+    };
+    return {
+      resume: resumeSchema.parse(resume),
+      extractionPending: true,
+      extension
+    };
+  }
+
+  throw new UnsupportedResumeFileError(extension, fileName);
+}
+
 export const DEMO_RESUME_TEXT = `Jane Doe
 Senior Product Manager
 Remote
