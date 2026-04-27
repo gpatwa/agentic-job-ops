@@ -5,7 +5,7 @@ import {
   primaryNavigationItems,
   resolveRouteFromHash,
   routeAfterDashboardRedirect
-} from "../src/App";
+} from "../src/appNavigation";
 
 describe("B2C navigation", () => {
   it("defaults new users to onboarding and onboarded users to Action Center", () => {
