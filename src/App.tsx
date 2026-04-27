@@ -117,6 +117,10 @@ import {
 } from "./services/resumeService";
 import type { ApiParseDiagnostic } from "./services/resumeParseApiClient";
 import {
+  fetchAiProbe,
+  type ApiAiProbe
+} from "./services/resumeIntelligenceApiClient";
+import {
   applyManualJobOverrides,
   importOnboardingJobFromUrl,
   type OnboardingJobImportOverrides,
@@ -355,6 +359,22 @@ export default function App() {
   // a parser explanation.
   const [lastParseDiagnostic, setLastParseDiagnostic] =
     useState<ApiParseDiagnostic | null>(null);
+  // Boot-time AI round-trip probe. Lets the customer-facing
+  // LLM-unavailable card show the specific failure category
+  // (timeout / http_4xx / json_parse / etc.) instead of the
+  // generic "currently unavailable" copy.
+  const [aiProbe, setAiProbe] = useState<ApiAiProbe | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAiProbe().then((result) => {
+      if (cancelled) return;
+      setAiProbe(result);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -3284,6 +3304,7 @@ export default function App() {
             onReanalyzeImprovement={handleReanalyzeResumeImprovement}
             onRejectImprovement={handleRejectResumeImprovement}
             lastParseDiagnostic={lastParseDiagnostic}
+            aiProbe={aiProbe}
             onPasteResumeText={handlePasteResumeText}
             onUploadResumeFile={handleUploadOnboardingResumeFile}
             onTryDemoProfile={handleTryDemoProfile}

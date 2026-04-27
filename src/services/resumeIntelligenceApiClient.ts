@@ -172,3 +172,56 @@ export async function fetchAiStatus(
     return null;
   }
 }
+
+/**
+ * AI round-trip probe. Snapshot of `/api/ai/probe` with the
+ * categorised error model (timeout / http_4xx / etc.) so the
+ * Admin diagnostics + the customer-facing "AI unavailable" card
+ * can carry the actionable detail.
+ */
+export type ApiAiProbeErrorCategory =
+  | "not_configured"
+  | "network"
+  | "timeout"
+  | "http_4xx"
+  | "http_5xx"
+  | "json_parse"
+  | "unknown";
+
+export interface ApiAiProbe {
+  ok: boolean;
+  provider: ResumeIntelligenceProvider;
+  model: string;
+  latencyMs: number;
+  observedAt: string;
+  errorCategory?: ApiAiProbeErrorCategory;
+  errorDetail?: string;
+  cached: boolean;
+  staleAfterMs: number;
+}
+
+/**
+ * Issue a probe via `/api/ai/probe`. Returns null when the API
+ * server is unreachable — callers should treat that as
+ * "AI service offline" with no specific category. Defaults to
+ * the cached server-side result; pass `force: true` to bypass.
+ */
+export async function fetchAiProbe(
+  options: ApiClientOptions & { force?: boolean } = {}
+): Promise<ApiAiProbe | null> {
+  const basePath = options.path ?? "/api/ai/probe";
+  const path = options.force
+    ? `${basePath}?force=1`
+    : basePath;
+  const fetchImpl =
+    options.fetchImpl ?? (typeof fetch !== "undefined" ? fetch : undefined);
+  if (!fetchImpl) return null;
+  try {
+    const response = await fetchImpl(path);
+    if (!response.ok) return null;
+    const body = (await response.json()) as ApiAiProbe;
+    return body;
+  } catch {
+    return null;
+  }
+}

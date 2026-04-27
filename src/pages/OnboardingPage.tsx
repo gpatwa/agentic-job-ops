@@ -39,6 +39,7 @@ import {
   type ResumeTextQuality
 } from "../services/resumeTextQuality";
 import type { ApiParseDiagnostic } from "../services/resumeParseApiClient";
+import type { ApiAiProbe } from "../services/resumeIntelligenceApiClient";
 import type {
   OnboardingJobImportOverrides,
   OnboardingJobImportResult
@@ -70,6 +71,14 @@ interface OnboardingPageProps {
    * when present).
    */
   lastParseDiagnostic: ApiParseDiagnostic | null;
+  /**
+   * Latest AI round-trip probe (cached on the server for 60 s).
+   * Threaded into the LLM-unavailable card so the customer sees
+   * the specific failure category (timeout / http_4xx /
+   * json_parse / etc.) instead of generic "currently
+   * unavailable" copy.
+   */
+  aiProbe: ApiAiProbe | null;
   onPasteResumeText: (text: string) => void;
   onUploadResumeFile: (
     file: File
@@ -186,6 +195,7 @@ export function OnboardingPage({
   onReanalyzeImprovement,
   onRejectImprovement,
   lastParseDiagnostic,
+  aiProbe,
   onPasteResumeText,
   onUploadResumeFile,
   onTryDemoProfile,
@@ -365,6 +375,7 @@ export function OnboardingPage({
           isAnalyzing={isAnalyzingResume}
           isImproving={isImprovingResume}
           parseDiagnostic={lastParseDiagnostic}
+          aiProbe={aiProbe}
           onAnalyzeResume={onAnalyzeResume}
           onPasteResumeText={onPasteResumeText}
           onGenerateImprovement={onGenerateImprovement}
@@ -1039,6 +1050,33 @@ function OnboardingJobUrlImport({
       </div>
     </section>
   );
+}
+
+/**
+ * Customer-friendly explanation of an AI probe error category.
+ * The diagnostic detail (model name, raw HTTP body) lives in the
+ * Probe pill below — this copy is the "what should I do" summary.
+ */
+function unavailableCopyForCategory(
+  category: NonNullable<ApiAiProbe["errorCategory"]>
+): string {
+  switch (category) {
+    case "not_configured":
+      return "AI service has no provider configured on the server. Set OPENAI_API_KEY (or the Azure equivalents) and restart the API.";
+    case "network":
+      return "We couldn't reach the AI provider — the API server may be offline or there's no internet connection from it. Try again shortly.";
+    case "timeout":
+      return "The AI provider didn't respond in time. Try again — if it keeps timing out, switch to a faster model.";
+    case "http_4xx":
+      return "The AI provider rejected our request — usually a configuration mismatch (wrong model name, deprecated parameter, missing permission). Operator action required.";
+    case "http_5xx":
+      return "The AI provider returned a server error. This is usually transient — try again in a moment.";
+    case "json_parse":
+      return "The AI provider returned a malformed response. The output may have been truncated. Try again; if it persists, raise the completion-token limit.";
+    case "unknown":
+    default:
+      return "AI analysis is currently unavailable for an unrecognised reason. Try again in a moment, or contact your operator.";
+  }
 }
 
 /** File extensions accepted by the onboarding upload control. */
@@ -1883,6 +1921,7 @@ interface ResumeIntelligenceSectionProps {
   isAnalyzing: boolean;
   isImproving: boolean;
   parseDiagnostic: ApiParseDiagnostic | null;
+  aiProbe: ApiAiProbe | null;
   onAnalyzeResume: () => void;
   onPasteResumeText: (text: string) => void;
   onGenerateImprovement: () => void;
@@ -1907,6 +1946,7 @@ function ResumeIntelligenceSection({
   isAnalyzing,
   isImproving,
   parseDiagnostic,
+  aiProbe,
   onAnalyzeResume,
   onPasteResumeText,
   onGenerateImprovement,
@@ -2037,11 +2077,18 @@ function ResumeIntelligenceSection({
                   AI resume analysis is currently unavailable.
                 </p>
                 <p className="mt-1 leading-5">
-                  We couldn't reach the analysis service. This usually
-                  means the local AI API server is offline or the
-                  configured model isn't available. Try analysis again
-                  in a moment, or pick a different role manually below.
+                  {aiProbe && !aiProbe.ok && aiProbe.errorCategory
+                    ? unavailableCopyForCategory(aiProbe.errorCategory)
+                    : "We couldn't reach the analysis service. Try analysis again in a moment, or pick a different role manually below."}
                 </p>
+                {aiProbe && !aiProbe.ok && aiProbe.errorDetail && (
+                  <p
+                    className="mt-2 text-[11px] uppercase tracking-wide text-amber-700"
+                    data-testid="resume-intelligence-llm-unavailable-detail"
+                  >
+                    Probe: {aiProbe.errorCategory ?? "unknown"} · {aiProbe.errorDetail}
+                  </p>
+                )}
                 <button
                   type="button"
                   className="mt-3 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-amber-400 bg-white px-3 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"

@@ -7,8 +7,10 @@ import {
 } from "../../src/services/openaiResumeIntelligenceAdapter";
 import type { ResumeIntelligenceAdapterOutput } from "../../src/services/resumeIntelligenceService";
 import type { ServerConfig } from "../config/env";
+import { redactErrorForLog } from "../security/redaction";
 import {
   AiProviderError,
+  type AiProbeResult,
   type AiResumeProvider,
   type ResumeIntelligenceProviderInput,
   type ResumeIntelligenceProviderResult
@@ -160,6 +162,117 @@ export function createAzureOpenAiResumeProvider(
       // from without leaking endpoint/host info.
       output.promptVersion = RESUME_INTELLIGENCE_PROMPT_VERSION;
       return { output, provider: "azure_openai", fallbackUsed: false };
+    },
+    async probe(): Promise<AiProbeResult> {
+      const azure = config.azureOpenai;
+      const observedAt = new Date().toISOString();
+      if (
+        azure.apiKey.length === 0 ||
+        azure.endpoint.length === 0 ||
+        azure.resumeDeployment.length === 0
+      ) {
+        return {
+          ok: false,
+          provider: "azure_openai",
+          model: azure.resumeDeployment || "(not configured)",
+          latencyMs: 0,
+          observedAt,
+          errorCategory: "not_configured",
+          errorDetail:
+            "Azure OpenAI is missing endpoint, key, or deployment."
+        };
+      }
+      const trimmedEndpoint = azure.endpoint.replace(/\/+$/, "");
+      const url =
+        `${trimmedEndpoint}/openai/deployments/${encodeURIComponent(
+          azure.resumeDeployment
+        )}/chat/completions?api-version=${encodeURIComponent(azure.apiVersion)}`;
+      const startedAt = Date.now();
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 8000);
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "POST",
+          headers: {
+            "api-key": azure.apiKey,
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify({
+            temperature: 0,
+            response_format: { type: "json_object" as const },
+            max_completion_tokens: 20,
+            messages: [
+              {
+                role: "system" as const,
+                content:
+                  "You output JSON only. Reply with the JSON object {\"ok\":true}."
+              },
+              { role: "user" as const, content: "ping" }
+            ]
+          }),
+          signal: controller.signal
+        });
+      } catch (cause) {
+        clearTimeout(timer);
+        const aborted =
+          cause instanceof Error &&
+          (cause.name === "AbortError" || cause.message.includes("aborted"));
+        return {
+          ok: false,
+          provider: "azure_openai",
+          model: azure.resumeDeployment,
+          latencyMs: Date.now() - startedAt,
+          observedAt,
+          errorCategory: aborted ? "timeout" : "network",
+          errorDetail: aborted
+            ? "Azure OpenAI did not respond within 8 s."
+            : redactErrorForLog(cause).message
+        };
+      }
+      clearTimeout(timer);
+      const latencyMs = Date.now() - startedAt;
+      if (!response.ok) {
+        let detail = `HTTP ${response.status}`;
+        try {
+          const text = await response.text();
+          detail = `HTTP ${response.status}: ${
+            redactErrorForLog(new Error(text.slice(0, 240))).message
+          }`;
+        } catch {
+          /* keep generic detail */
+        }
+        return {
+          ok: false,
+          provider: "azure_openai",
+          model: azure.resumeDeployment,
+          latencyMs,
+          observedAt,
+          errorCategory:
+            response.status >= 500 ? "http_5xx" : "http_4xx",
+          errorDetail: detail
+        };
+      }
+      try {
+        await response.json();
+      } catch {
+        return {
+          ok: false,
+          provider: "azure_openai",
+          model: azure.resumeDeployment,
+          latencyMs,
+          observedAt,
+          errorCategory: "json_parse",
+          errorDetail: "Azure OpenAI response was not valid JSON."
+        };
+      }
+      return {
+        ok: true,
+        provider: "azure_openai",
+        model: azure.resumeDeployment,
+        latencyMs,
+        observedAt
+      };
     }
   };
 }

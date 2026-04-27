@@ -1,5 +1,6 @@
 import { createDeterministicResumeIntelligenceAdapter } from "../../src/services/resumeIntelligenceService";
 import type {
+  AiProbeResult,
   AiResumeProvider,
   ResumeIntelligenceProviderInput,
   ResumeIntelligenceProviderResult
@@ -41,6 +42,18 @@ export function createDeterministicResumeProvider(): AiResumeProvider {
         output,
         provider: "deterministic",
         fallbackUsed: false
+      };
+    },
+    async probe(): Promise<AiProbeResult> {
+      // Deterministic provider has no network dependency — always
+      // available. Latency is recorded as 0ms to make it visually
+      // distinct from real LLM probes in the Admin diagnostics.
+      return {
+        ok: true,
+        provider: "deterministic",
+        model: "deterministic-resume-intelligence-fallback",
+        latencyMs: 0,
+        observedAt: new Date().toISOString()
       };
     }
   };

@@ -11,7 +11,9 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
+  fetchAiProbe,
   fetchAiStatus,
+  type ApiAiProbe,
   type ApiAiStatus
 } from "../services/resumeIntelligenceApiClient";
 import type {
@@ -434,6 +436,9 @@ function AiDiagnosticsSection({
 }) {
   const [status, setStatus] = useState<ApiAiStatus | null>(null);
   const [statusLoaded, setStatusLoaded] = useState(false);
+  const [probe, setProbe] = useState<ApiAiProbe | null>(null);
+  const [probeLoaded, setProbeLoaded] = useState(false);
+  const [isReprobing, setIsReprobing] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -442,10 +447,28 @@ function AiDiagnosticsSection({
       setStatus(result);
       setStatusLoaded(true);
     });
+    fetchAiProbe().then((result) => {
+      if (cancelled) return;
+      setProbe(result);
+      setProbeLoaded(true);
+    });
     return () => {
       cancelled = true;
     };
   }, []);
+
+  async function handleReprobe() {
+    setIsReprobing(true);
+    try {
+      // force=1 bypasses the 60 s server-side cache so an operator
+      // can confirm a config change took effect immediately.
+      const result = await fetchAiProbe({ force: true });
+      setProbe(result);
+      setProbeLoaded(true);
+    } finally {
+      setIsReprobing(false);
+    }
+  }
 
   // Pick the most recent LLM-mode entry as a "last analysis" anchor.
   // Falls back to the most recent metadata entry of any mode.
@@ -556,6 +579,67 @@ function AiDiagnosticsSection({
               testId="ai-diagnostics-last-error"
             />
           </dl>
+
+          {/* LLM round-trip probe — actually calls the provider
+              with a tiny request shaped like the real call so
+              parameter-shape regressions trip immediately. The
+              status above only inspects local env. */}
+          <div
+            className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3"
+            data-testid="ai-diagnostics-probe"
+          >
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <p className="text-xs uppercase tracking-wide text-slate-500">
+                LLM round-trip probe
+              </p>
+              <button
+                type="button"
+                className="inline-flex min-h-7 items-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-50"
+                onClick={handleReprobe}
+                disabled={isReprobing}
+                data-testid="ai-diagnostics-probe-retry"
+              >
+                <RefreshCw
+                  aria-hidden="true"
+                  size={11}
+                  className={isReprobing ? "animate-spin" : ""}
+                />
+                {isReprobing ? "Probing…" : "Re-probe"}
+              </button>
+            </div>
+            {!probeLoaded && (
+              <p className="mt-2 text-xs text-slate-500">checking…</p>
+            )}
+            {probeLoaded && !probe && (
+              <p className="mt-2 text-xs text-slate-500">
+                API server unreachable — start it with{" "}
+                <code className="rounded bg-slate-200 px-1">npm run dev:api</code>.
+              </p>
+            )}
+            {probeLoaded && probe && (
+              <p
+                className={`mt-2 text-sm font-semibold ${
+                  probe.ok ? "text-emerald-800" : "text-amber-900"
+                }`}
+                data-testid="ai-diagnostics-probe-summary"
+              >
+                {probe.ok ? "✓" : "✗"} {probe.provider} · {probe.model} ·{" "}
+                {probe.ok
+                  ? `${probe.latencyMs} ms`
+                  : (probe.errorCategory ?? "unknown")}{" "}
+                · {probe.cached ? "cached" : "fresh"} ·{" "}
+                {new Date(probe.observedAt).toLocaleTimeString()}
+              </p>
+            )}
+            {probeLoaded && probe && !probe.ok && probe.errorDetail && (
+              <p
+                className="mt-1 text-xs text-amber-900"
+                data-testid="ai-diagnostics-probe-detail"
+              >
+                {probe.errorDetail}
+              </p>
+            )}
+          </div>
         </div>
       </div>
     </section>

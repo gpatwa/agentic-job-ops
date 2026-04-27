@@ -3,6 +3,7 @@ import { hydrateEnvFromFile, getServerConfig } from "./config/env";
 import { redactErrorForLog } from "./security/redaction";
 import { getHealthResponse } from "./routes/healthRoute";
 import { getAiStatusResponse } from "./routes/aiStatusRoute";
+import { handleAiProbe } from "./routes/aiProbeRoute";
 import { handleResumeIntelligence } from "./routes/resumeIntelligenceRoute";
 import { handleResumeParse } from "./routes/resumeParseRoute";
 
@@ -125,6 +126,27 @@ export function createApiServer(config = getServerConfig()) {
           method,
           path,
           status,
+          durationMs: Date.now() - startedAt
+        });
+        return;
+      }
+
+      if (method === "GET" && path === "/api/ai/probe") {
+        const force = url.searchParams.get("force") === "1";
+        const result = await handleAiProbe({ force });
+        writeJson(res, result.status, result.body, corsOrigin);
+        logRequest("ai.probe", {
+          ok: result.body.ok,
+          provider: result.body.provider,
+          model: result.body.model,
+          latencyMs: result.body.latencyMs,
+          cached: result.body.cached,
+          errorCategory: result.body.errorCategory ?? "ok"
+        });
+        logRequest("http.request", {
+          method,
+          path,
+          status: result.status,
           durationMs: Date.now() - startedAt
         });
         return;

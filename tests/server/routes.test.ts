@@ -87,6 +87,18 @@ function makeProvider(
         fallbackUsed: false,
         output: { ...result.output, provider: id }
       };
+    },
+    async probe() {
+      // Routes tests don't exercise the probe surface — return a
+      // minimally valid shape so the AiResumeProvider interface
+      // is satisfied.
+      return {
+        ok: true,
+        provider: id,
+        model: "mock-model",
+        latencyMs: 0,
+        observedAt: new Date().toISOString()
+      };
     }
   };
 }
