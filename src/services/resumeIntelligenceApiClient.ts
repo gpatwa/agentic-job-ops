@@ -15,7 +15,18 @@ import type { ResumeIntelligenceAdapterOutput } from "./resumeIntelligenceServic
  */
 
 const DEFAULT_PATH = "/api/resume-intelligence";
-const DEFAULT_TIMEOUT_MS = 15_000;
+// Real OpenAI calls for the full resume-intelligence schema
+// (extractedProfile + confidenceByField + recommendation with
+// strongest/adjacent/stretch/avoid + skillGaps + positioning
+// advice) routinely run 15-20 s on gpt-5.x-mini because the model
+// generates ~5-8k completion tokens. The previous 15 s ceiling
+// was killing every call mid-flight via AbortController, which
+// the apiBackedAdapter then logged as
+// ApiResumeIntelligenceUnavailableError and silently swapped for
+// the local deterministic fallback. 60 s gives comfortable
+// headroom; the server-side OpenAI call has its own timeout
+// hooks so we won't hang forever even on real outages.
+const DEFAULT_TIMEOUT_MS = 60_000;
 
 export class ApiResumeIntelligenceUnavailableError extends Error {
   constructor(
