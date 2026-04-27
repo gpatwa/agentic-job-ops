@@ -5,7 +5,7 @@ import type {
   Resume,
   ResumeIntelligenceReport
 } from "../src/models/domain";
-import { computeOnboardingStep } from "../src/pages/OnboardingPage";
+import { computeOnboardingStep } from "../src/pages/onboardingStep";
 import {
   createDemoResume,
   createResumeFromText,

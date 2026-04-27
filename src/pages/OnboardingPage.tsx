@@ -32,6 +32,7 @@ import type {
 import type { OnboardingRecommendationResult } from "../services/onboardingJobRecommendationService";
 import { isDemoJob } from "../services/onboardingJobRecommendationService";
 import { selectionFromRecommendation } from "../services/resumeIntelligenceService";
+import { computeOnboardingStep, type OnboardingStepId } from "./onboardingStep";
 
 interface OnboardingPageProps {
   profile: UserProfile | null;
@@ -76,21 +77,6 @@ interface OnboardingPageProps {
   onNavigateResume: () => void;
   onNavigateDashboard: () => void;
   onNavigateJobQueue: () => void;
-}
-
-export type OnboardingStepId = "resume" | "intelligence" | "targets" | "jobs";
-
-export function computeOnboardingStep(input: {
-  resume: Resume | null;
-  report: ResumeIntelligenceReport | null;
-  state: OnboardingState;
-  hasJobsShown: boolean;
-}): OnboardingStepId {
-  if (!input.resume) return "resume";
-  if (!input.report) return "intelligence";
-  if (input.state.selectedTargetRoles.length === 0) return "targets";
-  if (input.hasJobsShown || input.state.firstApplyReadyJobsShown) return "jobs";
-  return "targets";
 }
 
 const STEP_ORDER: OnboardingStepId[] = ["resume", "intelligence", "targets", "jobs"];
