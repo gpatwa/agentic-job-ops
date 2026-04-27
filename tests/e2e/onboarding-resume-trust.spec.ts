@@ -40,7 +40,12 @@ test.describe("Onboarding resume parsing trust", () => {
     // NOT the analyse button or a fake report.
     const issueCard = page.getByTestId("resume-parsing-issue-card");
     await expect(issueCard).toBeVisible();
-    await expect(issueCard).toContainText("couldn't read enough text");
+    // The card's headline copy varies by source: the local fallback
+    // says "couldn't read enough text from this resume", the
+    // server-side parse diagnostic (when the API is up) says
+    // "couldn't read text from this PDF". Accept either by
+    // matching the substring they share.
+    await expect(issueCard).toContainText(/couldn't read.*text/i);
     await expect(issueCard).toContainText("Paste your resume text");
     await expect(
       page.getByTestId("resume-parsing-issue-paste-input")

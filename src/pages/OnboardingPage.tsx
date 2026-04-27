@@ -2017,7 +2017,52 @@ function ResumeIntelligenceSection({
             <ResumeAnalysisStatusCallout quality={quality} />
           )}
 
-          {report && analysisAllowed && (
+          {/* LLM-only customer view: when the analysis fell back to
+              the deterministic provider (LLM unreachable, key invalid,
+              etc.) we no longer surface keyword-counted "results" as
+              if they were real analysis. Instead show an explicit
+              unavailable card with a retry button so the user knows
+              to retry / fix configuration. The deterministic
+              adapter still runs server-side as a test fallback so
+              qa:mvp keeps working without an LLM key. */}
+          {report &&
+            analysisAllowed &&
+            report.provider !== "openai" &&
+            report.provider !== "azure_openai" && (
+              <div
+                className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+                data-testid="resume-intelligence-llm-unavailable"
+              >
+                <p className="font-semibold">
+                  AI resume analysis is currently unavailable.
+                </p>
+                <p className="mt-1 leading-5">
+                  We couldn't reach the analysis service. This usually
+                  means the local AI API server is offline or the
+                  configured model isn't available. Try analysis again
+                  in a moment, or pick a different role manually below.
+                </p>
+                <button
+                  type="button"
+                  className="mt-3 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-amber-400 bg-white px-3 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                  onClick={onAnalyzeResume}
+                  disabled={isAnalyzing}
+                  data-testid="resume-intelligence-llm-retry"
+                >
+                  <RefreshCw
+                    aria-hidden="true"
+                    size={13}
+                    className={isAnalyzing ? "animate-spin" : ""}
+                  />
+                  {isAnalyzing ? "Retrying…" : "Retry analysis"}
+                </button>
+              </div>
+            )}
+
+          {report &&
+            analysisAllowed &&
+            (report.provider === "openai" ||
+              report.provider === "azure_openai") && (
             <div className="mt-5 space-y-4">
               <ExtractedProfileCard
                 profile={report.extractedProfile}
@@ -2490,8 +2535,7 @@ function JobTargetRecommendationCard({
             {recommendation.positioningSummary}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            Confidence: {recommendation.confidence} · Adapter:{" "}
-            {statusLabel(recommendation.extractionMode)}
+            Confidence: {recommendation.confidence}
           </p>
         </div>
         <button

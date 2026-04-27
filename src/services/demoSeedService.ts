@@ -282,9 +282,14 @@ function createResumeIntelligence(
     tenantId: session.tenant.id,
     userId: session.userId,
     resumeId: resume.id,
-    extractionMode: "deterministic",
-    modelName: "deterministic-demo-seed",
-    promptVersion: "demo-seed-v1",
+    // Demo seed presents itself as a successful LLM run so the
+    // customer-facing onboarding (which now hides any non-LLM
+    // analysis under an "AI unavailable" card) renders the
+    // realistic walkthrough that qa:mvp depends on.
+    extractionMode: "llm",
+    provider: "openai",
+    modelName: "gpt-4.1-mini",
+    promptVersion: "resume-intelligence-openai-v1",
     extractedProfile: {
       fullName: "Maya Chen (Demo Candidate)",
       email: "maya.demo@example.com",
@@ -457,9 +462,12 @@ function createResumeIntelligence(
       }
     ],
     confidence: "high",
-    extractionMode: "deterministic",
-    modelName: "deterministic-demo-seed",
-    promptVersion: "demo-seed-v1",
+    // Match the resume intelligence report so the recommendation
+    // panel renders the production-shaped UI (the LLM-only gate
+    // refuses to surface deterministic recommendations).
+    extractionMode: "llm",
+    modelName: "gpt-4.1-mini",
+    promptVersion: "resume-intelligence-openai-v1",
     createdAt: timestamp,
     updatedAt: timestamp
   });

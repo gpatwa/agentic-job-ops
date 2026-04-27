@@ -308,7 +308,11 @@ class OpenAIResumeIntelligenceAdapter implements ResumeIntelligenceAdapter {
       model,
       temperature: 0,
       response_format: { type: "json_object" as const },
-      max_tokens: this.options.maxTokens ?? 2400,
+      // Newer OpenAI models (gpt-5.x and later) reject the legacy
+      // `max_tokens` field and require `max_completion_tokens`.
+      // The newer name also works on gpt-4.x models, so use it
+      // unconditionally.
+      max_completion_tokens: this.options.maxTokens ?? 2400,
       messages: [
         { role: "system" as const, content: SYSTEM_PROMPT },
         { role: "user" as const, content: buildUserPrompt(resumeText) }
