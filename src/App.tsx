@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import {
   browserSessionIdFromHash,
@@ -365,6 +365,11 @@ export default function App() {
   // (timeout / http_4xx / json_parse / etc.) instead of the
   // generic "currently unavailable" copy.
   const [aiProbe, setAiProbe] = useState<ApiAiProbe | null>(null);
+  // Tracks whether we've already auto-retried a stale-report
+  // analysis this session. Without the guard, an analysis that
+  // stays stuck on "deterministic" (e.g. LLM keeps timing out)
+  // would loop forever.
+  const hasAutoRetriedAnalysisRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -2826,6 +2831,35 @@ export default function App() {
       setIsAnalyzingResume(false);
     }
   }
+
+  // Auto-retry analysis when the persisted report was generated
+  // by the deterministic fallback (LLM was offline / parameter-
+  // shape regression) but the live probe now reports the LLM is
+  // healthy. Removes the manual "Click Retry analysis" friction
+  // that the LLM-unavailable card otherwise requires. Guarded by
+  // a ref so we only ever auto-retry once per session — if the
+  // retry itself produces another deterministic report (real
+  // outage), the user keeps the explicit Retry button and we
+  // don't loop.
+  useEffect(() => {
+    if (hasAutoRetriedAnalysisRef.current) return;
+    if (!resume) return;
+    if (!aiProbe || !aiProbe.ok) return;
+    if (isAnalyzingResume) return;
+    const latestReport = resumeIntelligenceReports.find(
+      (r) => r.resumeId === resume.id
+    );
+    if (!latestReport) return;
+    if (
+      latestReport.provider === "openai" ||
+      latestReport.provider === "azure_openai"
+    ) {
+      return;
+    }
+    hasAutoRetriedAnalysisRef.current = true;
+    void handleAnalyzeResumeIntelligence();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resume?.id, resumeIntelligenceReports, aiProbe, isAnalyzingResume]);
 
   function handleConfirmResumeProfile() {
     if (!resume) return;
