@@ -2079,7 +2079,9 @@ function ResumeIntelligenceSection({
                 <p className="mt-1 leading-5">
                   {aiProbe && !aiProbe.ok && aiProbe.errorCategory
                     ? unavailableCopyForCategory(aiProbe.errorCategory)
-                    : "We couldn't reach the analysis service. Try analysis again in a moment, or pick a different role manually below."}
+                    : aiProbe && aiProbe.ok
+                      ? "AI service is back up — the result you're seeing was generated when it was offline. Click Retry analysis to refresh with the live model."
+                      : "We couldn't reach the analysis service. Try analysis again in a moment, or pick a different role manually below."}
                 </p>
                 {aiProbe && !aiProbe.ok && aiProbe.errorDetail && (
                   <p
