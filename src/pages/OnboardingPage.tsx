@@ -38,6 +38,7 @@ import {
   describeResumeQualityForCustomer,
   type ResumeTextQuality
 } from "../services/resumeTextQuality";
+import type { ApiParseDiagnostic } from "../services/resumeParseApiClient";
 import type {
   OnboardingJobImportOverrides,
   OnboardingJobImportResult
@@ -61,6 +62,14 @@ interface OnboardingPageProps {
   onSaveImprovement: () => void;
   onReanalyzeImprovement: () => void;
   onRejectImprovement: () => void;
+  /**
+   * Latest server-side parse diagnostic. Threaded through to the
+   * Resume Intelligence section so the parsing-issue card can show
+   * the structured likely-cause / recommended-fix from the server
+   * (overriding the locally-derived assessResumeTextQuality copy
+   * when present).
+   */
+  lastParseDiagnostic: ApiParseDiagnostic | null;
   onPasteResumeText: (text: string) => void;
   onUploadResumeFile: (
     file: File
@@ -176,6 +185,7 @@ export function OnboardingPage({
   onSaveImprovement,
   onReanalyzeImprovement,
   onRejectImprovement,
+  lastParseDiagnostic,
   onPasteResumeText,
   onUploadResumeFile,
   onTryDemoProfile,
@@ -354,6 +364,7 @@ export function OnboardingPage({
           improvementDraft={resumeImprovementDraft}
           isAnalyzing={isAnalyzingResume}
           isImproving={isImprovingResume}
+          parseDiagnostic={lastParseDiagnostic}
           onAnalyzeResume={onAnalyzeResume}
           onPasteResumeText={onPasteResumeText}
           onGenerateImprovement={onGenerateImprovement}
@@ -1749,10 +1760,18 @@ function ResumeAnalysisStatusCallout({
  */
 function ResumeParsingIssueCard({
   quality,
+  parseDiagnostic,
   onPasteResumeText,
   onNavigateResume
 }: {
   quality: ResumeTextQuality;
+  /**
+   * Server-side parse diagnostic (when available). Overrides the
+   * locally-computed quality copy because it carries the
+   * specific issueType (e.g. scanned_or_image_pdf) the local
+   * pass cannot detect.
+   */
+  parseDiagnostic: ApiParseDiagnostic | null;
   onPasteResumeText: (text: string) => void;
   onNavigateResume: () => void;
 }) {
@@ -1780,13 +1799,33 @@ function ResumeParsingIssueCard({
       <div className="flex items-start gap-2">
         <AlertTriangle aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
         <div className="flex-1">
-          <p className="font-semibold">
-            We couldn't read enough text from this resume.
+          <p className="font-semibold" data-testid="resume-parsing-issue-headline">
+            {parseDiagnostic?.userExplanation ??
+              "We couldn't read enough text from this resume."}
           </p>
-          {quality.recommendedFix && (
-            <p className="mt-1 leading-5">{quality.recommendedFix}</p>
+          {parseDiagnostic ? (
+            parseDiagnostic.recommendedFix && (
+              <p
+                className="mt-1 leading-5"
+                data-testid="resume-parsing-issue-fix"
+              >
+                {parseDiagnostic.recommendedFix}
+              </p>
+            )
+          ) : (
+            quality.recommendedFix && (
+              <p className="mt-1 leading-5">{quality.recommendedFix}</p>
+            )
           )}
-          {quality.warnings.length > 0 && (
+          {parseDiagnostic && parseDiagnostic.issueType !== "ok" && (
+            <p
+              className="mt-2 text-[11px] uppercase tracking-wide text-amber-700"
+              data-testid="resume-parsing-issue-cause"
+            >
+              Likely cause: {parseDiagnostic.likelyCause}
+            </p>
+          )}
+          {!parseDiagnostic && quality.warnings.length > 0 && (
             <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-900">
               {quality.warnings.slice(0, 3).map((line) => (
                 <li key={line}>• {line}</li>
@@ -1843,6 +1882,7 @@ interface ResumeIntelligenceSectionProps {
   improvementDraft: ResumeImprovementDraft | null;
   isAnalyzing: boolean;
   isImproving: boolean;
+  parseDiagnostic: ApiParseDiagnostic | null;
   onAnalyzeResume: () => void;
   onPasteResumeText: (text: string) => void;
   onGenerateImprovement: () => void;
@@ -1866,6 +1906,7 @@ function ResumeIntelligenceSection({
   improvementDraft,
   isAnalyzing,
   isImproving,
+  parseDiagnostic,
   onAnalyzeResume,
   onPasteResumeText,
   onGenerateImprovement,
@@ -1966,6 +2007,7 @@ function ResumeIntelligenceSection({
           {resume && quality && !analysisAllowed && (
             <ResumeParsingIssueCard
               quality={quality}
+              parseDiagnostic={parseDiagnostic}
               onPasteResumeText={onPasteResumeText}
               onNavigateResume={onNavigateResume}
             />

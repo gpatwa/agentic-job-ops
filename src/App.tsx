@@ -111,9 +111,11 @@ import {
   createResumeUpload,
   loadResume,
   parseUploadedResumeFile,
+  parseUploadedResumeFileViaApi,
   promoteResumeAsActive,
   saveResume
 } from "./services/resumeService";
+import type { ApiParseDiagnostic } from "./services/resumeParseApiClient";
 import {
   applyManualJobOverrides,
   importOnboardingJobFromUrl,
@@ -347,6 +349,12 @@ export default function App() {
     ResumeImprovementDraft[]
   >(() => loadResumeImprovementDrafts(currentSession));
   const [isImprovingResume, setIsImprovingResume] = useState(false);
+  // Latest server-side parse diagnostic. Set by the upload handler
+  // when the AI API server returns a structured result; cleared
+  // by paste/demo flows that produce text locally and don't need
+  // a parser explanation.
+  const [lastParseDiagnostic, setLastParseDiagnostic] =
+    useState<ApiParseDiagnostic | null>(null);
   const [jobSourceConfigs, setJobSourceConfigs] = useState(() =>
     loadJobSourceConfigs(currentSession)
   );
@@ -839,7 +847,7 @@ export default function App() {
   async function handleUploadOnboardingResumeFile(
     file: File
   ): Promise<{ extractionPending: boolean; fileName: string; extension: string }> {
-    const parsed = await parseUploadedResumeFile(currentSession, file);
+    const parsed = await parseUploadedResumeFileViaApi(currentSession, file);
     const previous = loadResume(currentSession);
     const replacing = Boolean(previous && previous.id !== parsed.resume.id);
     if (replacing) {
@@ -849,6 +857,7 @@ export default function App() {
       const saved = saveResume(currentSession, parsed.resume);
       setResume(saved);
     }
+    setLastParseDiagnostic(parsed.parseDiagnostic ?? null);
     recordAudit({
       action: "resume.uploaded",
       resourceType: "Resume",
@@ -859,7 +868,15 @@ export default function App() {
         hasLocalFile: true,
         extractionPending: parsed.extractionPending,
         replacedPriorResume: replacing,
-        source: "onboarding_upload"
+        source: "onboarding_upload",
+        // Metadata only — never includes the extracted text. Lets
+        // operators correlate parser-driven failures from audit
+        // events without exposing PII.
+        parseStatus: parsed.parseDiagnostic?.status ?? "n/a",
+        parseIssueType: parsed.parseDiagnostic?.issueType ?? "n/a",
+        parseSource: parsed.parseDiagnostic?.extractedFrom ?? "n/a",
+        parseCharacterCount:
+          parsed.parseDiagnostic?.characterCount ?? 0
       }
     });
     recordUsage({
@@ -869,7 +886,8 @@ export default function App() {
       metadata: {
         fileExtension: parsed.extension,
         extractionPending: parsed.extractionPending,
-        source: "onboarding_upload"
+        source: "onboarding_upload",
+        parseStatus: parsed.parseDiagnostic?.status ?? "n/a"
       }
     });
     return {
@@ -2695,6 +2713,8 @@ export default function App() {
   function handlePasteResumeText(text: string) {
     const next = saveResume(currentSession, createResumeFromText(currentSession, text));
     setResume(next);
+    // Pasted text supersedes any prior parse diagnostic.
+    setLastParseDiagnostic(null);
     recordAudit({
       action: "resume.pasted",
       resourceType: "Resume",
@@ -2712,6 +2732,7 @@ export default function App() {
   function handleTryDemoProfile() {
     const next = saveResume(currentSession, createDemoResume(currentSession));
     setResume(next);
+    setLastParseDiagnostic(null);
     recordAudit({
       action: "resume.demo_seeded",
       resourceType: "Resume",
@@ -3262,6 +3283,7 @@ export default function App() {
             onSaveImprovement={handleSaveResumeImprovement}
             onReanalyzeImprovement={handleReanalyzeResumeImprovement}
             onRejectImprovement={handleRejectResumeImprovement}
+            lastParseDiagnostic={lastParseDiagnostic}
             onPasteResumeText={handlePasteResumeText}
             onUploadResumeFile={handleUploadOnboardingResumeFile}
             onTryDemoProfile={handleTryDemoProfile}

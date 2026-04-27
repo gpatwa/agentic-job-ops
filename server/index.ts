@@ -4,6 +4,7 @@ import { redactErrorForLog } from "./security/redaction";
 import { getHealthResponse } from "./routes/healthRoute";
 import { getAiStatusResponse } from "./routes/aiStatusRoute";
 import { handleResumeIntelligence } from "./routes/resumeIntelligenceRoute";
+import { handleResumeParse } from "./routes/resumeParseRoute";
 
 /**
  * Agentic Job Ops AI API server.
@@ -20,7 +21,10 @@ import { handleResumeIntelligence } from "./routes/resumeIntelligenceRoute";
  *   written to stdout/stderr.
  */
 
-const MAX_BODY_BYTES = 1_500_000; // ~1.5 MB; resume payloads should be far smaller.
+// Body limit needs to fit a Base64-encoded resume PDF / DOCX
+// (≈4/3 the raw size). 8 MB request → ~6 MB raw file, well above
+// the 5 MB extract limit enforced inside resumeParser.
+const MAX_BODY_BYTES = 8 * 1024 * 1024;
 
 // Hydrate .env early so getServerConfig() always sees the file values.
 hydrateEnvFromFile();
@@ -121,6 +125,39 @@ export function createApiServer(config = getServerConfig()) {
           method,
           path,
           status,
+          durationMs: Date.now() - startedAt
+        });
+        return;
+      }
+
+      if (method === "POST" && path === "/api/resume/parse") {
+        let parsed: unknown;
+        try {
+          parsed = await readJsonBody(req);
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message === "REQUEST_BODY_TOO_LARGE"
+              ? "Request body exceeds the configured limit."
+              : "Invalid JSON in request body.";
+          writeJson(res, 400, { error: message }, corsOrigin);
+          logRequest("http.request", {
+            method,
+            path,
+            status: 400,
+            durationMs: Date.now() - startedAt,
+            kind: "body_parse_failed"
+          });
+          return;
+        }
+        const result = await handleResumeParse(parsed);
+        writeJson(res, result.status, result.body, corsOrigin);
+        for (const entry of result.logs) {
+          logRequest(entry.message, entry.fields);
+        }
+        logRequest("http.request", {
+          method,
+          path,
+          status: result.status,
           durationMs: Date.now() - startedAt
         });
         return;

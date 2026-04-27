@@ -1,6 +1,13 @@
 import type { AppSession, Resume } from "../models/domain";
 import { resumeSchema } from "../models/schemas";
 import { readJson, scopedKey, writeJson } from "../lib/storage";
+import {
+  ApiResumeParseUnavailableError,
+  type ApiParseDiagnostic,
+  type ApiResumeParseRequest,
+  type ApiResumeParseResponse,
+  type ParseApiClientOptions
+} from "./resumeParseApiClient";
 
 interface ResumeUploadInput {
   fileName: string;
@@ -169,6 +176,134 @@ export async function parseUploadedResumeFile(
   }
 
   throw new UnsupportedResumeFileError(extension, fileName);
+}
+
+/**
+ * API-backed variant of `parseUploadedResumeFile` — for PDF/DOCX/
+ * DOC, asks the local AI API server to extract real text via
+ * pdf-parse / mammoth instead of just stamping placeholder text.
+ * Falls back silently to the local placeholder path when the API
+ * is unreachable so the UI's parsing-issue card + paste-text
+ * recovery still works without a backend.
+ *
+ * Returns the resulting Resume + (when available) the structured
+ * parseDiagnostic from the server. The diagnostic is what powers
+ * the new "likely cause / recommended fix" copy in the parsing-
+ * issue card; null when we couldn't reach the API.
+ */
+export async function parseUploadedResumeFileViaApi(
+  session: AppSession,
+  file: File,
+  options: {
+    callResumeParseApi?: (
+      request: ApiResumeParseRequest,
+      options?: ParseApiClientOptions
+    ) => Promise<ApiResumeParseResponse>;
+    fileToBase64?: (file: File) => Promise<string>;
+    apiOptions?: ParseApiClientOptions;
+  } = {}
+): Promise<ParsedUploadedResume & { parseDiagnostic: ApiParseDiagnostic | null }> {
+  const fileName = file.name.trim() || "uploaded-resume";
+  const extension = fileExtension(fileName);
+
+  // TXT/MD have no benefit from the API — read in the browser.
+  if (TEXT_EXTRACTABLE_EXTENSIONS.has(extension)) {
+    const local = await parseUploadedResumeFile(session, file);
+    return { ...local, parseDiagnostic: null };
+  }
+
+  if (
+    !BINARY_EXTRACTION_PENDING_EXTENSIONS.has(extension) &&
+    extension !== "doc"
+  ) {
+    // Unknown extension — let the existing local function throw
+    // with the canonical UnsupportedResumeFileError.
+    const local = await parseUploadedResumeFile(session, file);
+    return { ...local, parseDiagnostic: null };
+  }
+
+  const apiCall = options.callResumeParseApi ?? defaultCallResumeParseApi;
+  const toBase64 = options.fileToBase64 ?? defaultFileToBase64;
+
+  let base64Content: string;
+  try {
+    base64Content = await toBase64(file);
+  } catch {
+    // Fall back to the placeholder path if reading the File blob
+    // failed in the browser (rare).
+    const local = await parseUploadedResumeFile(session, file);
+    return { ...local, parseDiagnostic: null };
+  }
+
+  let apiResponse: ApiResumeParseResponse | null = null;
+  try {
+    apiResponse = await apiCall(
+      {
+        filename: fileName,
+        mimeType: file.type || mimeTypeForExtension(extension),
+        base64Content
+      },
+      options.apiOptions
+    );
+  } catch (error) {
+    if (error instanceof ApiResumeParseUnavailableError) {
+      apiResponse = null;
+    } else {
+      throw error;
+    }
+  }
+
+  if (apiResponse && apiResponse.parseDiagnostic.canRunIntelligence) {
+    const id = createId("resume");
+    const resume: Resume = {
+      id,
+      tenantId: session.tenant.id,
+      userId: session.userId,
+      originalFileName: fileName,
+      fileUrl: `local-upload://resume/${id}.${extension}`,
+      parsedText: apiResponse.extractedText,
+      status: "parsed",
+      createdAt: new Date().toISOString()
+    };
+    return {
+      resume: resumeSchema.parse(resume),
+      extractionPending: false,
+      extension,
+      parseDiagnostic: apiResponse.parseDiagnostic
+    };
+  }
+
+  // API unreachable, parse failed, OR returned poor/unreadable
+  // text — fall back to placeholder + surface diagnostic.
+  const local = await parseUploadedResumeFile(session, file);
+  return {
+    ...local,
+    parseDiagnostic: apiResponse?.parseDiagnostic ?? null
+  };
+}
+
+function mimeTypeForExtension(ext: string): string {
+  if (ext === "pdf") return "application/pdf";
+  if (ext === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (ext === "doc") return "application/msword";
+  if (ext === "txt") return "text/plain";
+  if (ext === "md") return "text/markdown";
+  return "application/octet-stream";
+}
+
+async function defaultCallResumeParseApi(
+  request: ApiResumeParseRequest,
+  options?: ParseApiClientOptions
+): Promise<ApiResumeParseResponse> {
+  const { callResumeParseApi } = await import("./resumeParseApiClient");
+  return callResumeParseApi(request, options);
+}
+
+async function defaultFileToBase64(file: File): Promise<string> {
+  const { fileToBase64 } = await import("./resumeParseApiClient");
+  return fileToBase64(file);
 }
 
 export const DEMO_RESUME_TEXT = `Jane Doe
