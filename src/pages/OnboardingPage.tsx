@@ -32,6 +32,12 @@ import type {
 import type { OnboardingRecommendationResult } from "../services/onboardingJobRecommendationService";
 import { isDemoJob } from "../services/onboardingJobRecommendationService";
 import { selectionFromRecommendation } from "../services/resumeIntelligenceService";
+import {
+  assessResumeTextQuality,
+  canRunResumeIntelligence,
+  describeResumeQualityForCustomer,
+  type ResumeTextQuality
+} from "../services/resumeTextQuality";
 import type {
   OnboardingJobImportOverrides,
   OnboardingJobImportResult
@@ -349,6 +355,7 @@ export function OnboardingPage({
           isAnalyzing={isAnalyzingResume}
           isImproving={isImprovingResume}
           onAnalyzeResume={onAnalyzeResume}
+          onPasteResumeText={onPasteResumeText}
           onGenerateImprovement={onGenerateImprovement}
           onEditImprovement={onEditImprovement}
           onSaveImprovement={onSaveImprovement}
@@ -1675,6 +1682,160 @@ function RecommendationCard({
   );
 }
 
+/**
+ * Customer-facing quality pill. Intentionally carries no provider
+ * or model detail — those live in Admin/System only.
+ */
+function ResumeQualityBadge({ quality }: { quality: ResumeTextQuality }) {
+  const tone =
+    quality.status === "good"
+      ? "bg-emerald-50 text-emerald-800"
+      : quality.status === "partial"
+        ? "bg-amber-50 text-amber-900"
+        : "bg-red-50 text-red-800";
+  return (
+    <span
+      className={`rounded-md px-2 py-1 text-xs font-semibold ${tone}`}
+      data-testid="resume-quality-badge"
+    >
+      {describeResumeQualityForCustomer(quality)}
+    </span>
+  );
+}
+
+/**
+ * Customer-facing analysis-result headline. Replaces the older
+ * "Source: OpenAI LLM" / "Source: deterministic fallback" badge so
+ * the user sees an outcome (analysis complete, review uncertain
+ * fields) rather than implementation detail.
+ */
+function ResumeAnalysisStatusCallout({
+  quality
+}: {
+  quality: ResumeTextQuality;
+}) {
+  let headline: string;
+  let body: string;
+  if (quality.status === "good") {
+    headline = "Resume analysis complete";
+    body =
+      "We extracted the major sections from your resume. Review the details below before applying.";
+  } else if (quality.status === "partial") {
+    headline = "Review uncertain fields before applying";
+    body =
+      "Some signals were limited because we could not read the resume fully. Confirm or correct anything that looks off.";
+  } else {
+    headline = "Limited analysis";
+    body =
+      "Some fields may be limited because we could not read the resume fully.";
+  }
+  return (
+    <div
+      className="mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
+      data-testid="resume-analysis-status-callout"
+    >
+      <p className="font-semibold text-slate-900">{headline}</p>
+      <p className="mt-1 leading-5">{body}</p>
+    </div>
+  );
+}
+
+/**
+ * Parsing-issue gate. Shown instead of the analyse CTA when the
+ * resume text quality is poor / unreadable so we never run the
+ * deterministic + LLM pipelines on placeholder PDF text and surface
+ * a confidently-wrong analysis. Includes an inline paste textarea
+ * so the user can recover without leaving onboarding.
+ */
+function ResumeParsingIssueCard({
+  quality,
+  onPasteResumeText,
+  onNavigateResume
+}: {
+  quality: ResumeTextQuality;
+  onPasteResumeText: (text: string) => void;
+  onNavigateResume: () => void;
+}) {
+  const [pasteDraft, setPasteDraft] = useState("");
+  const [pasteError, setPasteError] = useState<string | null>(null);
+
+  function handlePaste() {
+    const trimmed = pasteDraft.trim();
+    if (trimmed.length < 50) {
+      setPasteError(
+        "Paste at least a few lines of resume text so the analyzer has something to work with."
+      );
+      return;
+    }
+    setPasteError(null);
+    onPasteResumeText(trimmed);
+    setPasteDraft("");
+  }
+
+  return (
+    <div
+      className="mt-4 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900"
+      data-testid="resume-parsing-issue-card"
+    >
+      <div className="flex items-start gap-2">
+        <AlertTriangle aria-hidden="true" size={16} className="mt-0.5 shrink-0" />
+        <div className="flex-1">
+          <p className="font-semibold">
+            We couldn't read enough text from this resume.
+          </p>
+          {quality.recommendedFix && (
+            <p className="mt-1 leading-5">{quality.recommendedFix}</p>
+          )}
+          {quality.warnings.length > 0 && (
+            <ul className="mt-2 space-y-1 text-xs leading-5 text-amber-900">
+              {quality.warnings.slice(0, 3).map((line) => (
+                <li key={line}>• {line}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 rounded-md border border-amber-200 bg-white p-3">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Paste resume text to continue
+        </p>
+        <textarea
+          className="mt-2 min-h-32 w-full rounded-md border border-slate-300 px-3 py-2 text-sm leading-6"
+          placeholder="Paste resume text here…"
+          value={pasteDraft}
+          onChange={(event) => setPasteDraft(event.target.value)}
+          data-testid="resume-parsing-issue-paste-input"
+        />
+        {pasteError && (
+          <p className="mt-1 text-xs text-red-700" role="alert">
+            {pasteError}
+          </p>
+        )}
+        <div className="mt-2 flex flex-wrap gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+            data-testid="resume-parsing-issue-paste-submit"
+            onClick={handlePaste}
+            disabled={pasteDraft.trim().length === 0}
+          >
+            <Sparkles aria-hidden="true" size={15} />
+            Save pasted text and continue
+          </button>
+          <button
+            type="button"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+            onClick={onNavigateResume}
+          >
+            Upload a different file
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 interface ResumeIntelligenceSectionProps {
   resume: Resume | null;
   report: ResumeIntelligenceReport | null;
@@ -1683,6 +1844,7 @@ interface ResumeIntelligenceSectionProps {
   isAnalyzing: boolean;
   isImproving: boolean;
   onAnalyzeResume: () => void;
+  onPasteResumeText: (text: string) => void;
   onGenerateImprovement: () => void;
   onEditImprovement: (markdown: string) => void;
   onSaveImprovement: () => void;
@@ -1705,6 +1867,7 @@ function ResumeIntelligenceSection({
   isAnalyzing,
   isImproving,
   onAnalyzeResume,
+  onPasteResumeText,
   onGenerateImprovement,
   onEditImprovement,
   onSaveImprovement,
@@ -1714,6 +1877,14 @@ function ResumeIntelligenceSection({
   onConfirmRecommendedTargets,
   onNavigateResume
 }: ResumeIntelligenceSectionProps) {
+  // Compute quality once per render. The quality gate decides
+  // whether to show the analyse button, the parsing-issue card,
+  // or the report itself — see the JSX below for the branches.
+  const quality = useMemo(
+    () => (resume ? assessResumeTextQuality(resume) : null),
+    [resume]
+  );
+  const analysisAllowed = quality ? canRunResumeIntelligence(quality) : false;
   const baselineRoles = useMemo(
     () => (recommendation ? selectionFromRecommendation(recommendation).selectedRoles : []),
     [recommendation]
@@ -1748,7 +1919,7 @@ function ResumeIntelligenceSection({
             extraction is marked low confidence.
           </p>
 
-          <div className="mt-4 flex flex-wrap gap-2">
+          <div className="mt-4 flex flex-wrap items-center gap-2">
             {!resume ? (
               <button
                 type="button"
@@ -1758,7 +1929,7 @@ function ResumeIntelligenceSection({
                 Upload a resume to start
                 <ArrowRight aria-hidden="true" size={15} />
               </button>
-            ) : !report ? (
+            ) : analysisAllowed && !report ? (
               <button
                 type="button"
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
@@ -1772,7 +1943,7 @@ function ResumeIntelligenceSection({
                 )}
                 {isAnalyzing ? "Analyzing resume…" : "Analyze resume"}
               </button>
-            ) : (
+            ) : analysisAllowed && report ? (
               <button
                 type="button"
                 className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
@@ -1782,13 +1953,29 @@ function ResumeIntelligenceSection({
                 <RefreshCw aria-hidden="true" size={15} />
                 {isAnalyzing ? "Refreshing…" : "Refresh analysis"}
               </button>
-            )}
-            <ResumeIntelligenceModeBadge report={report} />
+            ) : null}
+            {quality && <ResumeQualityBadge quality={quality} />}
           </div>
 
-          {report && <ResumeIntelligenceModeCallout report={report} />}
+          {/* Quality gate: when text quality is poor / unreadable,
+              we never run the analysis pipelines — they would
+              produce confidently-wrong output (the original bug).
+              Instead show a parsing-issue card with an inline
+              paste-text option so the user can recover without
+              leaving onboarding. */}
+          {resume && quality && !analysisAllowed && (
+            <ResumeParsingIssueCard
+              quality={quality}
+              onPasteResumeText={onPasteResumeText}
+              onNavigateResume={onNavigateResume}
+            />
+          )}
 
-          {report && (
+          {report && analysisAllowed && quality && (
+            <ResumeAnalysisStatusCallout quality={quality} />
+          )}
+
+          {report && analysisAllowed && (
             <div className="mt-5 space-y-4">
               <ExtractedProfileCard
                 profile={report.extractedProfile}
@@ -2441,68 +2628,11 @@ function ListBlock({ label, items }: { label: string; items: string[] }) {
   );
 }
 
-function ResumeIntelligenceModeBadge({
-  report
-}: {
-  report: ResumeIntelligenceReport | null;
-}) {
-  const provider =
-    report?.provider ??
-    (report?.extractionMode === "llm" ? "openai" : "deterministic");
-  const label =
-    provider === "openai"
-      ? "OpenAI LLM"
-      : provider === "azure_openai"
-        ? "Azure OpenAI"
-        : "deterministic fallback";
-  const isLlm = provider !== "deterministic";
-  return (
-    <span
-      data-testid="resume-intelligence-source-badge"
-      className={
-        isLlm
-          ? "rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-800"
-          : "rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold text-slate-700"
-      }
-    >
-      Source: {label}
-    </span>
-  );
-}
-
-function ResumeIntelligenceModeCallout({
-  report
-}: {
-  report: ResumeIntelligenceReport;
-}) {
-  const provider =
-    report.provider ??
-    (report.extractionMode === "llm" ? "openai" : "deterministic");
-  const isLlm = provider !== "deterministic";
-  const headline = isLlm ? "AI resume analysis" : "Basic local analysis";
-  const body =
-    provider === "openai"
-      ? "Powered by OpenAI through the local AI API server. Review all extracted facts before using them — the model can still misread sections."
-      : provider === "azure_openai"
-        ? "Powered by Azure OpenAI through the local AI API server. Review all extracted facts before using them — the model can still misread sections."
-        : "The AI API server is offline or no LLM provider is configured. Using deterministic extraction locally; this may be limited.";
-  return (
-    <div
-      data-testid="resume-intelligence-mode-callout"
-      className={
-        isLlm
-          ? "mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-900"
-          : "mt-4 rounded-md border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700"
-      }
-    >
-      <p className="font-semibold">{headline}</p>
-      <p className="mt-1 leading-5">{body}</p>
-      <p className="mt-1 text-[10px] uppercase tracking-wide text-slate-500">
-        Model: {report.modelName} · Prompt: {report.promptVersion}
-      </p>
-    </div>
-  );
-}
+// NOTE: previous customer-facing widgets `ResumeIntelligenceModeBadge`
+// and `ResumeIntelligenceModeCallout` (which exposed provider /
+// model / prompt detail) have been replaced by `ResumeQualityBadge`
+// and `ResumeAnalysisStatusCallout`. Provider details now live in
+// Admin/System AI Diagnostics only — see docs/AI_SERVICE_ARCHITECTURE.md.
 
 function ConfidenceBadge({ value }: { value: ResumeFieldConfidence }) {
   const tone =

@@ -2446,7 +2446,11 @@ Product Management, Roadmap, Customer Discovery, SQL, Figma`;
   }
 
   if (evalCase.id === "eval_ri_table_layout_warning") {
-    const text = `Jane Doe | Senior PM | jane@example.com | +1 555-555-0100\nLinkedIn | https://www.linkedin.com/in/janedoe`;
+    // Single-line piped layout that the adapter must flag as
+    // multi-column. Includes a date range so the text-quality gate
+    // sees enough signals to let analysis run; the pipes are
+    // still the thing under test.
+    const text = `Jane Doe | Senior Manager | jane@example.com | +1 555-555-0100\n2022 - 2026 | LinkedIn | https://www.linkedin.com/in/janedoe`;
     const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
     const passed = result.report.parsingWarnings.some((warning) =>
       warning.toLowerCase().includes("multi-column")
@@ -2461,7 +2465,20 @@ Product Management, Roadmap, Customer Discovery, SQL, Figma`;
   }
 
   if (evalCase.id === "eval_ri_skills_not_invented") {
-    const text = `Jane Doe\nNo recognisable role keywords here. Just personal description.`;
+    // Resume that has enough STRUCTURAL signals (name, email,
+    // phone, role title, dates) to pass the text-quality gate but
+    // contains zero matches against the adapter's SKILL_KEYWORDS
+    // list. The eval still verifies that the deterministic
+    // extractor never invents skills out of thin air.
+    const text = `Jane Doe
+Specialist
+Remote
+jane@example.com
++1 555-555-0100
+
+Experience
+Specialist — Acme — 2022 - 2026
+Just generic prose without any skill keywords from the adapter list.`;
     const result = await analyzeResumeIntelligence(sandbox, makeResume(text));
     const passed = result.report.extractedProfile.skills.length === 0;
     return resultFor(

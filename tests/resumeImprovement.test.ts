@@ -239,10 +239,20 @@ describe("resumeImprovementService", () => {
       // promotes a worse resume.
       const resume = await seedAndAnalyze(RICH_RESUME, "regression");
       const draft = await generateResumeImprovementDraft(currentSession, resume.id);
+      // Replacement text must be poor enough to worsen ATS risk
+      // but readable enough to clear the text-quality gate (added
+      // in the trust-and-diagnostics slice). 4 signals (name,
+      // email, role, dates) lands in "partial" — the analysis
+      // still runs but reports much higher risk than the rich
+      // original, which is exactly the regression case under test.
+      const worseText = `Jane Doe
+Engineer
+jane@example.com
+worked 2018 - 2020`;
       const worse = editResumeImprovementDraft(
         currentSession,
         draft.draft.id,
-        "Jane Doe"
+        worseText
       );
       const saved = saveResumeImprovementDraft(currentSession, worse.draft.id);
       const reanalyzed = await reanalyzeImprovedResume(

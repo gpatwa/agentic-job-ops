@@ -3,11 +3,17 @@ import {
   BarChart3,
   CheckCircle2,
   ClipboardList,
+  Cpu,
   Gauge,
   RefreshCw,
   ShieldAlert,
   XCircle
 } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  fetchAiStatus,
+  type ApiAiStatus
+} from "../services/resumeIntelligenceApiClient";
 import type {
   AIOutputMetadata,
   ApplicationOutcome,
@@ -347,6 +353,11 @@ export function AdminSystemPage({
         </div>
       </section>
 
+      <AiDiagnosticsSection
+        aiOutputMetadata={aiOutputMetadata}
+        auditLogs={auditLogs}
+      />
+
       <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
         <div className="rounded-lg border border-line bg-white p-5 shadow-soft">
           <h3 className="text-base font-semibold text-slate-950">
@@ -399,6 +410,179 @@ export function AdminSystemPage({
           </div>
         </div>
       </section>
+    </div>
+  );
+}
+
+/**
+ * AI Diagnostics — internal-only view of the active AI provider,
+ * model/deployment, last LLM call, and reachability of the local
+ * AI API server.
+ *
+ * Hard rule: this section must NEVER render the API key, raw
+ * resume text, sensitive candidate details, or any user content.
+ * It only shows aggregated metadata that the AI output metadata
+ * service has already classified as safe to log
+ * (provider/model/promptVersion/timestamp/mode).
+ */
+function AiDiagnosticsSection({
+  aiOutputMetadata,
+  auditLogs
+}: {
+  aiOutputMetadata: AIOutputMetadata[];
+  auditLogs: AuditLog[];
+}) {
+  const [status, setStatus] = useState<ApiAiStatus | null>(null);
+  const [statusLoaded, setStatusLoaded] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchAiStatus().then((result) => {
+      if (cancelled) return;
+      setStatus(result);
+      setStatusLoaded(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Pick the most recent LLM-mode entry as a "last analysis" anchor.
+  // Falls back to the most recent metadata entry of any mode.
+  const sortedMetadata = [...aiOutputMetadata].sort((a, b) =>
+    b.createdAt.localeCompare(a.createdAt)
+  );
+  const lastLlm = sortedMetadata.find((entry) => entry.mode !== "deterministic");
+  const lastEntry = lastLlm ?? sortedMetadata[0] ?? null;
+
+  // Surface the most recent AI-related failure / fallback signal
+  // from audit so an operator can correlate with provider state.
+  const lastFailure = auditLogs
+    .filter(
+      (log) =>
+        log.action.includes("primary_failed") ||
+        log.action.includes("fallback") ||
+        log.action.includes("ai_") ||
+        log.action.includes("llm")
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+
+  const apiReachable = statusLoaded && status !== null;
+  const providerLabel = status?.provider ?? "unknown";
+
+  return (
+    <section
+      className="rounded-lg border border-slate-200 bg-white p-5 shadow-soft"
+      data-testid="ai-diagnostics"
+    >
+      <div className="flex items-start gap-3">
+        <Cpu aria-hidden="true" className="mt-0.5 text-slate-700" size={18} />
+        <div className="flex-1">
+          <h3 className="text-base font-semibold text-slate-950">
+            AI diagnostics (internal)
+          </h3>
+          <p className="mt-1 text-sm text-slate-600">
+            Provider, model, and last call metadata for the local AI API
+            server. Customer-facing onboarding shows analysis quality only —
+            this is the operator view. No raw resume text, no API keys, no
+            candidate PII is included.
+          </p>
+
+          <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2 xl:grid-cols-3">
+            <DiagnosticRow
+              label="AI service status"
+              value={
+                !statusLoaded
+                  ? "checking…"
+                  : apiReachable
+                    ? "connected"
+                    : "offline (frontend deterministic fallback)"
+              }
+              tone={
+                !statusLoaded
+                  ? "neutral"
+                  : apiReachable
+                    ? "ok"
+                    : "warn"
+              }
+              testId="ai-diagnostics-service-status"
+            />
+            <DiagnosticRow
+              label="Provider"
+              value={providerLabel}
+              tone="neutral"
+              testId="ai-diagnostics-provider"
+            />
+            <DiagnosticRow
+              label="Model / deployment"
+              value={status?.resumeModel ?? "—"}
+              tone="neutral"
+              testId="ai-diagnostics-model"
+            />
+            <DiagnosticRow
+              label="Provider configured"
+              value={status ? (status.configured ? "yes" : "no") : "—"}
+              tone={
+                status ? (status.configured ? "ok" : "warn") : "neutral"
+              }
+              testId="ai-diagnostics-configured"
+            />
+            <DiagnosticRow
+              label="Fallback available"
+              value={status?.fallbackAvailable ? "yes" : status ? "no" : "—"}
+              tone="ok"
+              testId="ai-diagnostics-fallback"
+            />
+            <DiagnosticRow
+              label="Last analysis mode"
+              value={lastEntry ? lastEntry.mode : "—"}
+              tone="neutral"
+              testId="ai-diagnostics-last-mode"
+            />
+            <DiagnosticRow
+              label="Last analysis at"
+              value={
+                lastEntry
+                  ? new Date(lastEntry.createdAt).toLocaleString()
+                  : "—"
+              }
+              tone="neutral"
+              testId="ai-diagnostics-last-at"
+            />
+            <DiagnosticRow
+              label="Last error category"
+              value={lastFailure ? statusLabel(lastFailure.action) : "none"}
+              tone={lastFailure ? "warn" : "ok"}
+              testId="ai-diagnostics-last-error"
+            />
+          </dl>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function DiagnosticRow({
+  label,
+  value,
+  tone,
+  testId
+}: {
+  label: string;
+  value: string;
+  tone: "ok" | "warn" | "neutral";
+  testId: string;
+}) {
+  const valueClass =
+    tone === "ok"
+      ? "text-emerald-800"
+      : tone === "warn"
+        ? "text-amber-900"
+        : "text-slate-800";
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3" data-testid={testId}>
+      <dt className="text-xs uppercase tracking-wide text-slate-500">{label}</dt>
+      <dd className={`mt-1 text-sm font-semibold ${valueClass}`}>{value}</dd>
     </div>
   );
 }

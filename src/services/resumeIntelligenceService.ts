@@ -26,6 +26,10 @@ import {
   callResumeIntelligenceApi,
   type ApiClientOptions
 } from "./resumeIntelligenceApiClient";
+import {
+  assessResumeTextQuality,
+  canRunResumeIntelligence
+} from "./resumeTextQuality";
 
 type AuditMetadata = AuditLog["metadata"];
 
@@ -1183,16 +1187,49 @@ function event(
   return { action, resourceType, resourceId, metadata };
 }
 
+/**
+ * Thrown when the resume text is too poor / unreadable to safely
+ * run analysis (placeholder PDF text, near-empty input, etc.). The
+ * UI gates this case with the parsing-issue card; the service
+ * throws here as defense-in-depth so a programmatic call can never
+ * produce confidently-wrong analysis from garbage input.
+ */
+export class ResumeTextUnreadableError extends Error {
+  constructor(
+    public readonly recommendedFix: string | null,
+    public readonly characterCount: number
+  ) {
+    super("Resume text is unreadable; cannot run intelligence analysis.");
+    this.name = "ResumeTextUnreadableError";
+  }
+}
+
 export async function analyzeResumeIntelligence(
   session: AppSession,
   resume: Resume,
   adapter: ResumeIntelligenceAdapter = selectResumeIntelligenceAdapter()
 ): Promise<AnalyzeResumeResult> {
+  // Defense-in-depth quality gate. The UI's parsing-issue card is
+  // the primary gate; this throw is here so the API server (and
+  // any future programmatic caller) can never pump placeholder
+  // PDF text through the LLM/deterministic adapters and surface
+  // a misleading 100/100 ATS-risk "analysis" — the bug that
+  // motivated this slice.
+  const quality = assessResumeTextQuality(resume);
+  if (!canRunResumeIntelligence(quality)) {
+    throw new ResumeTextUnreadableError(
+      quality.recommendedFix,
+      quality.characterCount
+    );
+  }
   const startedAt = nowIso();
   const auditEvents: ResumeIntelligenceAuditEvent[] = [
     event("resume_intelligence_started", "Resume", resume.id, {
       resumeStatus: resume.status,
-      adapter: adapter.name
+      adapter: adapter.name,
+      // Metadata only — no resume content. Lets Admin/System see
+      // the quality band without exposing the text.
+      textQuality: quality.status
     })
   ];
 
