@@ -115,6 +115,12 @@ import {
   saveResume
 } from "./services/resumeService";
 import {
+  applyManualJobOverrides,
+  importOnboardingJobFromUrl,
+  type OnboardingJobImportOverrides,
+  type OnboardingJobImportResult
+} from "./services/onboardingJobUrlImport";
+import {
   loadAIOutputMetadata,
   recordAIOutputMetadata
 } from "./services/aiOutputMetadata";
@@ -2481,6 +2487,115 @@ export default function App() {
     persistOnboardingAuditEvents(result.auditEvents);
   }
 
+  /**
+   * Onboarding "paste a job URL" flow.
+   *
+   * Imports a job from the pasted URL (idempotent: re-importing the
+   * same URL returns the existing record), then re-scores it against
+   * the current profile/resume so the UI can show a match score and
+   * the Start application prep button. Never reaches the network —
+   * the importer is fully local; live enrichment is a future
+   * server-side concern.
+   */
+  async function handleImportJobFromOnboardingUrl(
+    url: string,
+    overrides?: OnboardingJobImportOverrides
+  ): Promise<{
+    job: OnboardingJobImportResult["job"];
+    parsedUrl: OnboardingJobImportResult["parsedUrl"];
+    isDuplicate: boolean;
+    needsManualEnrichment: boolean;
+    match: JobMatch | null;
+  }> {
+    const importResult = importOnboardingJobFromUrl(
+      currentSession,
+      url,
+      overrides
+    );
+    const refreshedJobs = loadNormalizedJobs(currentSession);
+    setNormalizedJobs(refreshedJobs);
+
+    recordAudit({
+      action: importResult.isDuplicate
+        ? "onboarding_job_url.reimported"
+        : "onboarding_job_url.imported",
+      resourceType: "NormalizedJob",
+      resourceId: importResult.job.id,
+      metadata: {
+        source: importResult.parsedUrl.source,
+        atsType: importResult.parsedUrl.atsType,
+        hostname: importResult.parsedUrl.detectedHostname,
+        companySlug: importResult.parsedUrl.companySlug ?? "",
+        externalJobId: importResult.parsedUrl.externalJobId ?? "",
+        needsManualEnrichment: importResult.needsManualEnrichment,
+        isDuplicate: importResult.isDuplicate
+      }
+    });
+    recordUsage({
+      eventType: "job_ingested",
+      resourceType: "NormalizedJob",
+      resourceId: importResult.job.id,
+      metadata: {
+        source: importResult.parsedUrl.source,
+        importPath: "onboarding_url"
+      }
+    });
+
+    // Score against the current profile so the UI can immediately
+    // show a match score / reasons / gaps. Pass only the imported
+    // job so we don't redundantly re-score the rest of the queue.
+    const scoringResult = await scoreJobsForProfile(
+      currentSession,
+      profile,
+      [importResult.job],
+      jobMatches
+    );
+    setJobMatches(scoringResult.matches);
+    setNormalizedJobs(loadNormalizedJobs(currentSession));
+    const match =
+      scoringResult.matches.find((m) => m.jobId === importResult.job.id) ?? null;
+
+    return {
+      job: importResult.job,
+      parsedUrl: importResult.parsedUrl,
+      isDuplicate: importResult.isDuplicate,
+      needsManualEnrichment: importResult.needsManualEnrichment,
+      match
+    };
+  }
+
+  /**
+   * Apply manually-entered title/company/location to an already-
+   * imported job, then re-score so the UI reflects the new signal.
+   * Placeholder fields are protected — applyManualJobOverrides
+   * never silently overwrites user-saved values (see service).
+   */
+  async function handleApplyOnboardingJobOverrides(
+    jobId: string,
+    overrides: OnboardingJobImportOverrides
+  ): Promise<void> {
+    const updated = applyManualJobOverrides(currentSession, jobId, overrides);
+    setNormalizedJobs(loadNormalizedJobs(currentSession));
+    const scoringResult = await scoreJobsForProfile(
+      currentSession,
+      profile,
+      [updated],
+      jobMatches
+    );
+    setJobMatches(scoringResult.matches);
+    setNormalizedJobs(loadNormalizedJobs(currentSession));
+    recordAudit({
+      action: "onboarding_job_url.overrides_applied",
+      resourceType: "NormalizedJob",
+      resourceId: updated.id,
+      metadata: {
+        titleApplied: typeof overrides.title === "string",
+        companyApplied: typeof overrides.company === "string",
+        locationApplied: typeof overrides.location === "string"
+      }
+    });
+  }
+
   async function handleOnboardingStartPrep(jobId: string) {
     const result = await recordOnboardingApplicationPrepStarted(
       currentSession,
@@ -3158,6 +3273,8 @@ export default function App() {
             onGenerateRecommendations={handleOnboardingGenerate}
             onReviewJob={handleOnboardingReview}
             onStartApplicationPrep={handleOnboardingStartPrep}
+            onImportJobFromUrl={handleImportJobFromOnboardingUrl}
+            onApplyJobOverrides={handleApplyOnboardingJobOverrides}
             onSaveJob={handleOnboardingSaveJob}
             onDismissJob={handleOnboardingDismissJob}
             onCompleteOnboarding={handleOnboardingComplete}

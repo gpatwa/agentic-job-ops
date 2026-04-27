@@ -32,6 +32,10 @@ import type {
 import type { OnboardingRecommendationResult } from "../services/onboardingJobRecommendationService";
 import { isDemoJob } from "../services/onboardingJobRecommendationService";
 import { selectionFromRecommendation } from "../services/resumeIntelligenceService";
+import type {
+  OnboardingJobImportOverrides,
+  OnboardingJobImportResult
+} from "../services/onboardingJobUrlImport";
 import { computeOnboardingStep, type OnboardingStepId } from "./onboardingStep";
 
 interface OnboardingPageProps {
@@ -68,6 +72,20 @@ interface OnboardingPageProps {
   onGenerateRecommendations: (roles: string[]) => void;
   onReviewJob: (jobId: string) => void;
   onStartApplicationPrep: (jobId: string) => void;
+  onImportJobFromUrl: (
+    url: string,
+    overrides?: OnboardingJobImportOverrides
+  ) => Promise<{
+    job: OnboardingJobImportResult["job"];
+    parsedUrl: OnboardingJobImportResult["parsedUrl"];
+    isDuplicate: boolean;
+    needsManualEnrichment: boolean;
+    match: JobMatch | null;
+  }>;
+  onApplyJobOverrides: (
+    jobId: string,
+    overrides: OnboardingJobImportOverrides
+  ) => Promise<void>;
   onSaveJob: (jobId: string) => void;
   onDismissJob: (jobId: string) => void;
   onCompleteOnboarding: (
@@ -163,6 +181,8 @@ export function OnboardingPage({
   onGenerateRecommendations,
   onReviewJob,
   onStartApplicationPrep,
+  onImportJobFromUrl,
+  onApplyJobOverrides,
   onSaveJob,
   onDismissJob,
   onCompleteOnboarding,
@@ -430,6 +450,17 @@ export function OnboardingPage({
         </section>
       )}
 
+      {showTargetsStep && (
+        <OnboardingJobUrlImport
+          onImportJobFromUrl={onImportJobFromUrl}
+          onApplyJobOverrides={onApplyJobOverrides}
+          onStartApplicationPrep={(jobId) => {
+            onStartApplicationPrep(jobId);
+            onCompleteOnboarding("user_started_prep");
+          }}
+        />
+      )}
+
       {showJobsStep && lastResult && (
         <RecommendationsSection
           result={lastResult}
@@ -591,6 +622,404 @@ function CompletedStepBanner({
         {actionLabel}
       </button>
     </div>
+  );
+}
+
+interface ImportedJobState {
+  job: OnboardingJobImportResult["job"];
+  parsedUrl: OnboardingJobImportResult["parsedUrl"];
+  match: JobMatch | null;
+  needsManualEnrichment: boolean;
+  isDuplicate: boolean;
+}
+
+function describeImportSource(parsed: OnboardingJobImportResult["parsedUrl"]): string {
+  if (parsed.source === "greenhouse") return "Greenhouse";
+  if (parsed.source === "lever") return "Lever";
+  if (parsed.detectedHostname) return `external (${parsed.detectedHostname})`;
+  return "external";
+}
+
+function recommendationLabel(match: JobMatch | null): string {
+  if (!match) return "Pending score";
+  switch (match.recommendation) {
+    case "apply":
+      return "Strong match";
+    case "maybe":
+      return "Possible match";
+    case "browse":
+      return "Browse";
+    case "skip":
+    default:
+      return "Skip / low match";
+  }
+}
+
+function recommendationTone(match: JobMatch | null): string {
+  if (!match) return "bg-slate-100 text-slate-700";
+  switch (match.recommendation) {
+    case "apply":
+      return "bg-emerald-100 text-emerald-800";
+    case "maybe":
+      return "bg-amber-100 text-amber-800";
+    default:
+      return "bg-slate-100 text-slate-700";
+  }
+}
+
+function OnboardingJobUrlImport({
+  onImportJobFromUrl,
+  onApplyJobOverrides,
+  onStartApplicationPrep
+}: {
+  onImportJobFromUrl: OnboardingPageProps["onImportJobFromUrl"];
+  onApplyJobOverrides: OnboardingPageProps["onApplyJobOverrides"];
+  onStartApplicationPrep: (jobId: string) => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [status, setStatus] = useState<
+    | { kind: "idle" }
+    | { kind: "detecting" }
+    | { kind: "imported"; isDuplicate: boolean; needsManualEnrichment: boolean }
+    | { kind: "needs_manual"; reason: string }
+    | { kind: "scored"; score: number }
+    | { kind: "ready_for_prep" }
+    | { kind: "error"; message: string }
+  >({ kind: "idle" });
+  const [imported, setImported] = useState<ImportedJobState | null>(null);
+  const [titleDraft, setTitleDraft] = useState("");
+  const [companyDraft, setCompanyDraft] = useState("");
+  const [locationDraft, setLocationDraft] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  function statusText(): string {
+    switch (status.kind) {
+      case "idle":
+        return "";
+      case "detecting":
+        return "Detecting source…";
+      case "imported":
+        return status.isDuplicate
+          ? status.needsManualEnrichment
+            ? "Already imported · still needs manual details"
+            : "Already imported"
+          : status.needsManualEnrichment
+            ? "Imported · needs manual details"
+            : "Imported";
+      case "needs_manual":
+        return `Needs manual details: ${status.reason}`;
+      case "scored":
+        return `Scored ${status.score.toFixed(1)}/10`;
+      case "ready_for_prep":
+        return "Ready for application prep";
+      case "error":
+        return status.message;
+    }
+  }
+
+  async function handleImportClick() {
+    const trimmed = url.trim();
+    if (trimmed.length === 0) {
+      setStatus({ kind: "error", message: "Paste a job URL to import." });
+      return;
+    }
+    setIsSubmitting(true);
+    setStatus({ kind: "detecting" });
+    try {
+      const result = await onImportJobFromUrl(trimmed);
+      setImported({
+        job: result.job,
+        parsedUrl: result.parsedUrl,
+        match: result.match,
+        needsManualEnrichment: result.needsManualEnrichment,
+        isDuplicate: result.isDuplicate
+      });
+      setTitleDraft("");
+      setCompanyDraft("");
+      setLocationDraft("");
+      if (result.needsManualEnrichment) {
+        setStatus({
+          kind: "imported",
+          isDuplicate: result.isDuplicate,
+          needsManualEnrichment: true
+        });
+      } else if (result.match) {
+        setStatus({ kind: "scored", score: result.match.overallScore });
+      } else {
+        setStatus({
+          kind: "imported",
+          isDuplicate: result.isDuplicate,
+          needsManualEnrichment: false
+        });
+      }
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "We couldn't import that URL. Double-check the link and try again."
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleApplyOverridesClick() {
+    if (!imported) return;
+    const overrides: OnboardingJobImportOverrides = {};
+    if (titleDraft.trim().length > 0) overrides.title = titleDraft.trim();
+    if (companyDraft.trim().length > 0) overrides.company = companyDraft.trim();
+    if (locationDraft.trim().length > 0) overrides.location = locationDraft.trim();
+    if (Object.keys(overrides).length === 0) return;
+    setIsSubmitting(true);
+    try {
+      await onApplyJobOverrides(imported.job.id, overrides);
+      // Re-import (idempotent) so the component picks up the freshly-
+      // scored match for the same job id.
+      const refreshed = await onImportJobFromUrl(imported.job.applicationUrl);
+      setImported({
+        job: refreshed.job,
+        parsedUrl: refreshed.parsedUrl,
+        match: refreshed.match,
+        needsManualEnrichment: refreshed.needsManualEnrichment,
+        isDuplicate: true
+      });
+      if (refreshed.match) {
+        setStatus({ kind: "scored", score: refreshed.match.overallScore });
+      }
+    } catch (error) {
+      setStatus({
+        kind: "error",
+        message:
+          error instanceof Error
+            ? error.message
+            : "We couldn't save those details. Try again."
+      });
+    } finally {
+      setIsSubmitting(false);
+    }
+  }
+
+  function handleStartPrepClick() {
+    if (!imported) return;
+    setStatus({ kind: "ready_for_prep" });
+    onStartApplicationPrep(imported.job.id);
+  }
+
+  return (
+    <section
+      className="rounded-lg border border-line bg-white p-5 shadow-soft"
+      data-testid="onboarding-job-url-section"
+    >
+      <div className="flex items-start gap-3">
+        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-emerald-50 text-emerald-700">
+          <Target aria-hidden="true" size={18} />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-base font-semibold text-slate-950">
+            Have a job already? Paste the job URL.
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Drop in a posting from Greenhouse, Lever, or any company careers
+            page. We import a local job record, score it against your resume,
+            and let you start application prep — without leaving onboarding.
+            We never auto-submit; the final submit always requires your
+            explicit approval.
+          </p>
+
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+            <input
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="https://job-boards.greenhouse.io/{company}/jobs/{id}"
+              className="flex-1 rounded-md border border-slate-300 px-3 py-2 text-sm"
+              value={url}
+              onChange={(event) => setUrl(event.target.value)}
+              data-testid="onboarding-job-url-input"
+              disabled={isSubmitting}
+            />
+            <button
+              type="button"
+              className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-emerald-600 px-3 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+              data-testid="onboarding-import-job-url"
+              onClick={handleImportClick}
+              disabled={isSubmitting || url.trim().length === 0}
+            >
+              <Sparkles aria-hidden="true" size={15} />
+              {isSubmitting ? "Importing…" : "Import job"}
+            </button>
+          </div>
+
+          {status.kind !== "idle" && (
+            <p
+              className={`mt-2 text-xs font-semibold ${
+                status.kind === "error"
+                  ? "text-red-700"
+                  : status.kind === "scored" || status.kind === "ready_for_prep"
+                    ? "text-emerald-800"
+                    : "text-slate-700"
+              }`}
+              data-testid="onboarding-job-url-status"
+              role={status.kind === "error" ? "alert" : "status"}
+            >
+              {statusText()}
+            </p>
+          )}
+
+          {imported && (
+            <div
+              className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
+              data-testid="onboarding-imported-job-card"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">
+                  {imported.job.title}
+                </span>
+                <span className="text-emerald-800">·</span>
+                <span>{imported.job.company}</span>
+                <span className="text-emerald-800">·</span>
+                <span className="text-emerald-800">
+                  {imported.job.location}
+                </span>
+                <span className="ml-auto rounded-md bg-white px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-emerald-800">
+                  Source: {describeImportSource(imported.parsedUrl)}
+                </span>
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-3">
+                <span
+                  data-testid="onboarding-imported-job-score"
+                  className={`rounded-md px-2 py-0.5 text-xs font-semibold uppercase tracking-wide ${recommendationTone(
+                    imported.match
+                  )}`}
+                >
+                  Score: {imported.match
+                    ? `${imported.match.overallScore.toFixed(1)} / 10`
+                    : "pending"}
+                </span>
+                <span className="rounded-md bg-white px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                  {recommendationLabel(imported.match)}
+                </span>
+                {imported.needsManualEnrichment && (
+                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-900">
+                    Low confidence (description incomplete)
+                  </span>
+                )}
+              </div>
+
+              {imported.match && imported.match.topMatchReasons.length > 0 && (
+                <div className="mt-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                    Top match reasons
+                  </p>
+                  <ul className="mt-1 space-y-1 text-xs leading-5 text-emerald-900">
+                    {imported.match.topMatchReasons.slice(0, 3).map((line) => (
+                      <li key={line}>• {line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {imported.match && imported.match.topGaps.length > 0 && (
+                <div className="mt-2">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-800">
+                    Top gaps
+                  </p>
+                  <ul className="mt-1 space-y-1 text-xs leading-5 text-amber-900">
+                    {imported.match.topGaps.slice(0, 3).map((line) => (
+                      <li key={line}>• {line}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {imported.match &&
+                imported.match.employerLookingFor.length > 0 && (
+                  <div className="mt-2">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-700">
+                      What the employer appears to want
+                    </p>
+                    <ul className="mt-1 space-y-1 text-xs leading-5 text-slate-700">
+                      {imported.match.employerLookingFor
+                        .slice(0, 3)
+                        .map((line) => (
+                          <li key={line}>• {line}</li>
+                        ))}
+                    </ul>
+                  </div>
+                )}
+
+              {imported.needsManualEnrichment && (
+                <div className="mt-3 rounded-md border border-amber-300 bg-white p-3 text-amber-900">
+                  <p className="text-xs">
+                    We detected this as a {describeImportSource(imported.parsedUrl)} job.
+                    Full details could not be fetched locally, so add missing
+                    details below or run enrichment later. Scoring confidence
+                    is limited until the description is filled in.
+                  </p>
+                  <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                    <input
+                      type="text"
+                      placeholder="Job title"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      value={titleDraft}
+                      onChange={(event) => setTitleDraft(event.target.value)}
+                      data-testid="onboarding-job-url-title-input"
+                      disabled={isSubmitting}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Company"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      value={companyDraft}
+                      onChange={(event) => setCompanyDraft(event.target.value)}
+                      data-testid="onboarding-job-url-company-input"
+                      disabled={isSubmitting}
+                    />
+                    <input
+                      type="text"
+                      placeholder="Location"
+                      className="rounded-md border border-slate-300 px-2 py-1 text-xs"
+                      value={locationDraft}
+                      onChange={(event) => setLocationDraft(event.target.value)}
+                      data-testid="onboarding-job-url-location-input"
+                      disabled={isSubmitting}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    className="mt-2 inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-amber-400 bg-amber-50 px-3 text-xs font-semibold text-amber-900 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+                    data-testid="onboarding-job-url-apply-overrides"
+                    onClick={handleApplyOverridesClick}
+                    disabled={
+                      isSubmitting ||
+                      [titleDraft, companyDraft, locationDraft]
+                        .map((value) => value.trim())
+                        .every((value) => value.length === 0)
+                    }
+                  >
+                    Apply manual details
+                  </button>
+                </div>
+              )}
+
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="inline-flex min-h-10 items-center justify-center gap-2 rounded-md bg-ink px-3 text-sm font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                  data-testid="onboarding-start-prep-from-url"
+                  onClick={handleStartPrepClick}
+                  disabled={isSubmitting}
+                >
+                  <Rocket aria-hidden="true" size={15} />
+                  Start application prep
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 

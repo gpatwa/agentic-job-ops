@@ -25,6 +25,22 @@ The automated Playwright test covers:
 - Tracker visibility for application context.
 - Admin/System audit event visibility.
 
+A separate Playwright spec
+(`tests/e2e/onboarding-job-url.spec.ts`) covers the optional
+"paste a known job URL during onboarding" path:
+
+- Paste a Greenhouse job URL into the onboarding URL section.
+- See the imported job card appear with a match score.
+- Start application prep from the imported job.
+- Approve the package and start the browser apply demo.
+- Confirm submit is still blocked (the gate applies to URL-imported
+  jobs the same way it applies to recommended jobs).
+- Re-importing the same URL is idempotent (no duplicate record).
+
+Users can paste a known job URL during onboarding to start from a
+specific role instead of the recommended queue. The same approval
+gates apply.
+
 Manual QA is still useful for copy polish, visual layout review across viewports, exploratory package editing, and browser-extension edge cases.
 
 ## Preconditions
