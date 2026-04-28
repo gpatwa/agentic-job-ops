@@ -6,29 +6,39 @@ import type {
 } from "../models/domain";
 import { normalizedJobSchema } from "../models/schemas";
 import {
+  detectRemoteType,
+  extractSectionLines,
   loadNormalizedJobs,
-  saveNormalizedJobs
+  saveNormalizedJobs,
+  stripHtml
 } from "./jobIngestion";
 
 /**
  * Phase 18 — Onboarding "paste a job URL" flow.
  *
- * Pure URL → NormalizedJob importer for the onboarding step. Lives
- * outside jobIngestion.ts so the existing manual-import path stays
- * unchanged and so this module can be unit-tested without dragging
- * in the full ingestion pipeline.
+ * Two-stage importer for the onboarding step:
+ * 1) `importOnboardingJobFromUrl` — synchronous, network-free.
+ *    Parses the URL, creates a placeholder NormalizedJob so the UI
+ *    can show something instantly. Idempotent on (source, slug, id).
+ * 2) `enrichOnboardingImportedJob` — async, calls the public ATS
+ *    API (Greenhouse `/v1/boards/{slug}/jobs/{id}` or Lever
+ *    `/v0/postings/{slug}/{id}`) to replace placeholder fields
+ *    (title, company, location, description, requirements,
+ *    responsibilities, postedAt, remoteType) with real data.
+ *    Both endpoints expose Access-Control-Allow-Origin: *, so the
+ *    call works browser-direct without a proxy.
  *
  * Safety contract:
  * - Never logs the URL beyond what's already persisted on the
  *   NormalizedJob record (the URL itself is a domain field).
- * - Never reaches the network. Greenhouse / Lever detection is
- *   purely string-based; live enrichment is the job of a future
- *   server-side adapter and is intentionally not wired here.
+ * - Enrichment is best-effort. Network failure / non-2xx leaves
+ *   the placeholder intact so the manual-override UI still works;
+ *   the function never throws on a failed fetch.
  * - Idempotent: re-importing the same URL returns the existing
  *   record and reports `isDuplicate: true`.
- * - Manual overrides only ever fill placeholder fields ("Manually
- *   imported job", "Unknown company", "Unknown") so a real value
- *   from a previous import is never silently overwritten.
+ * - Manual overrides only ever fill placeholder fields so a real
+ *   value from a previous import or enrichment is never silently
+ *   overwritten.
  */
 
 export interface ParsedJobUrl {
@@ -355,6 +365,287 @@ export function applyManualJobOverrides(
     all.map((job) => (job.id === updated.id ? updated : job))
   );
   return updated;
+}
+
+// ---------------------------------------------------------------------------
+// Async live enrichment via public ATS APIs
+// ---------------------------------------------------------------------------
+
+const ENRICHMENT_TIMEOUT_MS = 15_000;
+
+export interface EnrichmentResult {
+  /** The job after enrichment (or the unchanged placeholder on failure). */
+  job: NormalizedJob;
+  /** True iff at least one placeholder field was replaced with real data. */
+  enriched: boolean;
+  /**
+   * Categorised failure reason when `enriched === false`. `null` means
+   * enrichment succeeded OR there was nothing to enrich (the job was
+   * already populated by a prior pass).
+   */
+  failureReason:
+    | null
+    | "url_missing_slug_or_id"
+    | "unsupported_source"
+    | "network"
+    | "timeout"
+    | "http_4xx"
+    | "http_5xx"
+    | "json_parse"
+    | "empty_response";
+}
+
+interface GreenhouseSingleJobResponse {
+  id?: number;
+  title?: string;
+  content?: string;
+  location?: { name?: string };
+  absolute_url?: string;
+  updated_at?: string;
+  first_published?: string;
+  company_name?: string;
+}
+
+interface LeverSinglePostingResponse {
+  id?: string;
+  text?: string;
+  description?: string;
+  additional?: string;
+  categories?: {
+    team?: string;
+    location?: string;
+    commitment?: string;
+  };
+  hostedUrl?: string;
+  applyUrl?: string;
+  createdAt?: number;
+  workplaceType?: "remote" | "hybrid" | "on-site";
+  lists?: Array<{ text?: string; content?: string }>;
+}
+
+function categoriseHttpStatus(
+  status: number
+): "http_4xx" | "http_5xx" {
+  return status >= 500 ? "http_5xx" : "http_4xx";
+}
+
+async function fetchWithTimeout(
+  url: string,
+  fetcher: typeof fetch
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ENRICHMENT_TIMEOUT_MS);
+  try {
+    return await fetcher(url, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal
+    });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Build the patch fields for a Greenhouse single-job response. Pure
+ * mapper — no I/O, no localStorage. Returns `null` when the response
+ * is too sparse to be useful.
+ */
+export function mapGreenhouseSingleJobResponse(
+  payload: GreenhouseSingleJobResponse,
+  parsed: ParsedJobUrl
+): Partial<NormalizedJob> | null {
+  const title = (payload.title ?? "").trim();
+  if (!title) return null;
+  const description = stripHtml(payload.content);
+  const locationName = (payload.location?.name ?? "").trim();
+  const company =
+    (payload.company_name ?? "").trim() ||
+    (parsed.companySlug ? titleCaseFromSlug(parsed.companySlug) : "");
+  return {
+    title,
+    company: company || PLACEHOLDER_COMPANY,
+    location: locationName || PLACEHOLDER_LOCATION,
+    remoteType: detectRemoteType(locationName, description),
+    description,
+    responsibilities: extractSectionLines(description, [
+      "responsibil",
+      "what you will do",
+      "what you'll do"
+    ]),
+    requirements: extractSectionLines(description, [
+      "requirement",
+      "qualification",
+      "what you bring"
+    ]),
+    applicationUrl: payload.absolute_url?.trim() || parsed.originalUrl,
+    postedAt: payload.first_published || payload.updated_at || null
+  };
+}
+
+/**
+ * Build the patch fields for a Lever single-posting response. The
+ * description is split across `description`, `additional`, and the
+ * `lists` array; we concatenate after stripping each chunk so the
+ * EMPLOYER IS LOOKING FOR / requirements extraction sees the full
+ * text.
+ */
+export function mapLeverSinglePostingResponse(
+  payload: LeverSinglePostingResponse,
+  parsed: ParsedJobUrl
+): Partial<NormalizedJob> | null {
+  const title = (payload.text ?? "").trim();
+  if (!title) return null;
+  const descriptionParts = [
+    stripHtml(payload.description),
+    ...(payload.lists ?? []).flatMap((list) => [
+      list.text ? `\n${list.text}\n` : "",
+      stripHtml(list.content)
+    ]),
+    stripHtml(payload.additional)
+  ].filter(Boolean);
+  const description = descriptionParts.join("\n").trim();
+  const locationName = (payload.categories?.location ?? "").trim();
+  const company = parsed.companySlug
+    ? titleCaseFromSlug(parsed.companySlug)
+    : "";
+  return {
+    title,
+    company: company || PLACEHOLDER_COMPANY,
+    location: locationName || PLACEHOLDER_LOCATION,
+    remoteType: detectRemoteType(
+      locationName,
+      description,
+      payload.workplaceType
+    ),
+    description,
+    responsibilities: extractSectionLines(description, [
+      "responsibil",
+      "what you will do",
+      "what you'll do"
+    ]),
+    requirements: extractSectionLines(description, [
+      "requirement",
+      "qualification",
+      "what you bring"
+    ]),
+    applicationUrl:
+      payload.applyUrl?.trim() ||
+      payload.hostedUrl?.trim() ||
+      parsed.originalUrl,
+    postedAt:
+      typeof payload.createdAt === "number"
+        ? new Date(payload.createdAt).toISOString()
+        : null
+  };
+}
+
+/**
+ * Live-enrich an imported job by calling the public ATS API for the
+ * pasted URL's source. Best-effort: any failure leaves the
+ * placeholder intact and surfaces the reason in `failureReason`.
+ *
+ * Network calls go directly from the browser; both Greenhouse
+ * (`boards-api.greenhouse.io`) and Lever (`api.lever.co`) expose
+ * `Access-Control-Allow-Origin: *`, which is the same property the
+ * curated catalog discovery slice relies on.
+ */
+export async function enrichOnboardingImportedJob(
+  session: AppSession,
+  jobId: string,
+  fetcher: typeof fetch = fetch
+): Promise<EnrichmentResult> {
+  const all = loadNormalizedJobs(session);
+  const target = all.find((job) => job.id === jobId);
+  if (!target) {
+    throw new Error("Imported job was not found in the local store.");
+  }
+
+  // No-op early when the job already has real data (e.g. user
+  // navigated away and re-imported the same URL after enrichment
+  // already ran). Avoids a redundant network call.
+  if (!jobNeedsManualEnrichment(target)) {
+    return { job: target, enriched: false, failureReason: null };
+  }
+
+  const parsed = parseJobUrlForImport(target.applicationUrl);
+  if (!parsed.companySlug || !parsed.externalJobId) {
+    return {
+      job: target,
+      enriched: false,
+      failureReason: "url_missing_slug_or_id"
+    };
+  }
+
+  let endpoint: string | null = null;
+  if (parsed.source === "greenhouse") {
+    endpoint = `https://boards-api.greenhouse.io/v1/boards/${encodeURIComponent(
+      parsed.companySlug
+    )}/jobs/${encodeURIComponent(parsed.externalJobId)}?content=true`;
+  } else if (parsed.source === "lever") {
+    endpoint = `https://api.lever.co/v0/postings/${encodeURIComponent(
+      parsed.companySlug
+    )}/${encodeURIComponent(parsed.externalJobId)}?mode=json`;
+  } else {
+    return {
+      job: target,
+      enriched: false,
+      failureReason: "unsupported_source"
+    };
+  }
+
+  let response: Response;
+  try {
+    response = await fetchWithTimeout(endpoint, fetcher);
+  } catch (error) {
+    const aborted =
+      error instanceof DOMException && error.name === "AbortError";
+    return {
+      job: target,
+      enriched: false,
+      failureReason: aborted ? "timeout" : "network"
+    };
+  }
+
+  if (!response.ok) {
+    return {
+      job: target,
+      enriched: false,
+      failureReason: categoriseHttpStatus(response.status)
+    };
+  }
+
+  let payload: unknown;
+  try {
+    payload = await response.json();
+  } catch {
+    return { job: target, enriched: false, failureReason: "json_parse" };
+  }
+
+  const patch =
+    parsed.source === "greenhouse"
+      ? mapGreenhouseSingleJobResponse(
+          payload as GreenhouseSingleJobResponse,
+          parsed
+        )
+      : mapLeverSinglePostingResponse(
+          payload as LeverSinglePostingResponse,
+          parsed
+        );
+
+  if (!patch) {
+    return { job: target, enriched: false, failureReason: "empty_response" };
+  }
+
+  const enrichedJob = normalizedJobSchema.parse({
+    ...target,
+    ...patch,
+    updatedAt: nowIso()
+  });
+  saveNormalizedJobs(
+    session,
+    all.map((job) => (job.id === enrichedJob.id ? enrichedJob : job))
+  );
+  return { job: enrichedJob, enriched: true, failureReason: null };
 }
 
 /**

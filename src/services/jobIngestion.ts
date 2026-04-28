@@ -143,22 +143,33 @@ function readableCompany(config: JobSourceConfig): string {
   );
 }
 
-function stripHtml(value: string | undefined): string {
+export function stripHtml(value: string | undefined): string {
   if (!value) {
     return "";
   }
 
-  return value
-    .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/p>/gi, "\n")
-    .replace(/<\/li>/gi, "\n")
-    .replace(/<[^>]+>/g, " ")
+  // Greenhouse returns the `content` field HTML-ENCODED — `<p>`
+  // arrives as `&lt;p&gt;`. We MUST decode entities before
+  // stripping tags, otherwise the tag-strip regex finds nothing
+  // (no real `<` chars yet), then entity decoding produces tags
+  // as visible literal text in the output (the bug behind the
+  // raw `<h3>Minimum requirements</h3>` strings shown in the
+  // EMPLOYER IS LOOKING FOR panel for Stripe and similar boards).
+  // `&amp;` is decoded last so we don't accidentally re-decode an
+  // intentionally double-encoded ampersand.
+  const decoded = value
     .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&#39;/g, "'")
     .replace(/&quot;/g, "\"")
+    .replace(/&amp;/g, "&");
+
+  return decoded
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/p>/gi, "\n")
+    .replace(/<\/li>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
     .replace(/\s+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
@@ -178,7 +189,7 @@ function toIsoDate(value: string | number | undefined): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function detectRemoteType(
+export function detectRemoteType(
   location: string,
   description: string,
   workplaceType?: LeverJob["workplaceType"]
@@ -211,7 +222,7 @@ function detectRemoteType(
   return location.trim() ? "onsite" : "unknown";
 }
 
-function extractSectionLines(description: string, markers: string[]): string[] {
+export function extractSectionLines(description: string, markers: string[]): string[] {
   const lines = description
     .split(/\n|•|- /)
     .map((line) => compactText(line))

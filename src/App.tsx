@@ -122,7 +122,9 @@ import {
 } from "./services/resumeIntelligenceApiClient";
 import {
   applyManualJobOverrides,
+  enrichOnboardingImportedJob,
   importOnboardingJobFromUrl,
+  jobNeedsManualEnrichment,
   type OnboardingJobImportOverrides,
   type OnboardingJobImportResult
 } from "./services/onboardingJobUrlImport";
@@ -2569,8 +2571,7 @@ export default function App() {
       url,
       overrides
     );
-    const refreshedJobs = loadNormalizedJobs(currentSession);
-    setNormalizedJobs(refreshedJobs);
+    setNormalizedJobs(loadNormalizedJobs(currentSession));
 
     recordAudit({
       action: importResult.isDuplicate
@@ -2598,29 +2599,77 @@ export default function App() {
       }
     });
 
-    // Score against the current profile so the UI can immediately
-    // show a match score / reasons / gaps. Pass only the imported
-    // job so we don't redundantly re-score the rest of the queue.
+    // Score against the current profile so the UI can show a match
+    // score / reasons / gaps without waiting on a network call. Pass
+    // only the imported job so we don't redundantly re-score the
+    // rest of the queue.
     const profileForScoring = synthesizeProfileWithResumeFallback(
       profile,
       resumeIntelligenceReports[0] ?? null
     );
-    const scoringResult = await scoreJobsForProfile(
+    const initialScoring = await scoreJobsForProfile(
       currentSession,
       profileForScoring,
       [importResult.job],
       jobMatches
     );
-    setJobMatches(scoringResult.matches);
+    setJobMatches(initialScoring.matches);
     setNormalizedJobs(loadNormalizedJobs(currentSession));
+
+    // Live-enrich via the public Greenhouse / Lever API in the
+    // BACKGROUND so the imported card appears instantly. Same
+    // fire-and-forget pattern as the curated catalog discovery
+    // (companyJobDiscovery): once the network call lands we re-load
+    // jobs + re-score, and React re-renders with the real title /
+    // description / requirements. A network failure leaves the
+    // placeholder intact and the manual-override UI still works.
+    void (async () => {
+      try {
+        const enrichmentResult = await enrichOnboardingImportedJob(
+          currentSession,
+          importResult.job.id
+        );
+        if (enrichmentResult.enriched) {
+          recordAudit({
+            action: "onboarding_job_url.enriched",
+            resourceType: "NormalizedJob",
+            resourceId: enrichmentResult.job.id,
+            metadata: { source: importResult.parsedUrl.source }
+          });
+          const refreshed = loadNormalizedJobs(currentSession);
+          setNormalizedJobs(refreshed);
+          const rescored = await scoreJobsForProfile(
+            currentSession,
+            profileForScoring,
+            [enrichmentResult.job],
+            initialScoring.matches
+          );
+          setJobMatches(rescored.matches);
+        } else if (enrichmentResult.failureReason) {
+          recordAudit({
+            action: "onboarding_job_url.enrichment_failed",
+            resourceType: "NormalizedJob",
+            resourceId: enrichmentResult.job.id,
+            metadata: {
+              source: importResult.parsedUrl.source,
+              failureReason: enrichmentResult.failureReason
+            }
+          });
+        }
+      } catch {
+        // Isolated background work — never bubble up to the UI.
+      }
+    })();
+
     const match =
-      scoringResult.matches.find((m) => m.jobId === importResult.job.id) ?? null;
+      initialScoring.matches.find((m) => m.jobId === importResult.job.id) ??
+      null;
 
     return {
       job: importResult.job,
       parsedUrl: importResult.parsedUrl,
       isDuplicate: importResult.isDuplicate,
-      needsManualEnrichment: importResult.needsManualEnrichment,
+      needsManualEnrichment: jobNeedsManualEnrichment(importResult.job),
       match
     };
   }

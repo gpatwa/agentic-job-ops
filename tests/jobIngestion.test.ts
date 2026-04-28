@@ -7,6 +7,7 @@ import {
   createManualJobImportPlaceholder,
   deduplicateAndMergeJobs,
   isConfigDueForScheduledScan,
+  stripHtml,
   type Fetcher
 } from "../src/services/jobIngestion";
 
@@ -162,5 +163,45 @@ describe("job deduplication", () => {
         at
       )
     ).toBe(false);
+  });
+});
+
+describe("stripHtml — entity decode then tag strip", () => {
+  // Regression test for the bug behind raw `<h3>Minimum requirements</h3>`
+  // strings showing up in the EMPLOYER IS LOOKING FOR panel for
+  // Stripe / Spring Health / etc. Greenhouse returns the `content`
+  // field HTML-ENCODED — `<p>` arrives as `&lt;p&gt;`. The original
+  // implementation stripped tags first (finding none, since the
+  // input had no real `<` chars) and then decoded entities, producing
+  // visible literal HTML. Decode entities first.
+  it("decodes Greenhouse-style escaped HTML and strips the resulting tags", () => {
+    const input =
+      "&lt;p&gt;We're hiring.&lt;/p&gt;&lt;h3&gt;Minimum requirements&lt;/h3&gt;&lt;ul&gt;&lt;li&gt;TypeScript&lt;/li&gt;&lt;li&gt;Distributed systems&lt;/li&gt;&lt;/ul&gt;";
+    const out = stripHtml(input);
+    expect(out).not.toMatch(/<\w+>/);
+    expect(out).toContain("We're hiring");
+    expect(out).toContain("Minimum requirements");
+    expect(out).toContain("TypeScript");
+  });
+
+  it("strips raw HTML when the source is not encoded", () => {
+    const out = stripHtml(
+      "<p>Build great products.</p><ul><li>Item one</li><li>Item two</li></ul>"
+    );
+    expect(out).not.toMatch(/<\w+>/);
+    expect(out).toContain("Build great products");
+    expect(out).toContain("Item one");
+    expect(out).toContain("Item two");
+  });
+
+  it("decodes &amp; without re-decoding intentionally double-encoded characters", () => {
+    // `&amp;lt;` should decode once to `&lt;`, not all the way to `<`.
+    const out = stripHtml("R&amp;amp;D &amp; design");
+    expect(out).toContain("R&amp;D & design");
+  });
+
+  it("returns empty string for null/undefined/empty input", () => {
+    expect(stripHtml(undefined)).toBe("");
+    expect(stripHtml("")).toBe("");
   });
 });
