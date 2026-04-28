@@ -1791,24 +1791,35 @@ function RecommendationCard({
       </div>
 
       <div className="mt-3 grid gap-3 md:grid-cols-3">
-        <DetailBlock
-          icon={CheckCircle2}
-          tone="good"
-          label="Top match reasons"
-          items={match.topMatchReasons.slice(0, 3)}
-        />
-        <DetailBlock
-          icon={FileText}
-          tone="warn"
-          label="Top gaps"
-          items={match.topGaps.slice(0, 3)}
-        />
-        <DetailBlock
-          icon={Sparkles}
-          tone="neutral"
-          label="Employer is looking for"
-          items={match.employerLookingFor.slice(0, 3)}
-        />
+        {/*
+          buildReasons() now returns [] when no positive signals
+          fired — hide the panel entirely rather than showing an
+          empty "Top match reasons" header.
+        */}
+        {match.topMatchReasons.length > 0 && (
+          <DetailBlock
+            icon={CheckCircle2}
+            tone="good"
+            label="Top match reasons"
+            items={match.topMatchReasons.slice(0, 3)}
+          />
+        )}
+        {match.topGaps.length > 0 && (
+          <DetailBlock
+            icon={FileText}
+            tone="warn"
+            label="Top gaps"
+            items={match.topGaps.slice(0, 3)}
+          />
+        )}
+        {match.employerLookingFor.length > 0 && (
+          <DetailBlock
+            icon={Sparkles}
+            tone="neutral"
+            label="Employer is looking for"
+            items={match.employerLookingFor.slice(0, 3)}
+          />
+        )}
       </div>
 
       {match.recommendedNextAction && (
@@ -2316,30 +2327,14 @@ function ExtractedProfileCard({
           />
         </div>
       )}
-      {(report.missingFields.length > 0 || report.ambiguousFields.length > 0) && (
-        <div className="mt-3 grid gap-2 md:grid-cols-2">
-          {report.missingFields.length > 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
-              <p className="font-semibold text-amber-900">Missing fields</p>
-              <ul className="mt-1 space-y-1 text-amber-800">
-                {report.missingFields.map((field) => (
-                  <li key={field}>• {field}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {report.ambiguousFields.length > 0 && (
-            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs">
-              <p className="font-semibold text-amber-900">Ambiguous fields</p>
-              <ul className="mt-1 space-y-1 text-amber-800">
-                {report.ambiguousFields.map((field) => (
-                  <li key={field}>• {field}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      )}
+      {/*
+        Per-field uncertainty is shown via ConfidenceBadge above; the
+        actionable list of missing/ambiguous fields with severity and
+        recommended action lives in AtsRiskCard's suggestedFixes
+        immediately below this card. Showing the bare amber lists
+        here was strictly redundant — the same info, less actionable,
+        rendered twice in adjacent cards.
+      */}
     </div>
   );
 }
@@ -2455,7 +2450,13 @@ function ResumeImprovementCard({
             skills, original resume preserved.
           </p>
         </div>
-        {isFresh && (
+        {/*
+          Hide the rewrite CTA when the parser already considers the
+          resume ATS-ready (atsRiskLevel === "low"). Pushing a rewrite
+          there would be misleading — there's nothing material to fix.
+          The empty-state message below replaces the button.
+        */}
+        {isFresh && report.atsRiskLevel !== "low" && (
           <button
             type="button"
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
@@ -2472,11 +2473,12 @@ function ResumeImprovementCard({
         )}
       </div>
 
-      {report.suggestedFixes.length === 0 && !draft && (
-        <p className="mt-3 text-xs text-slate-500">
-          No ATS warnings detected on this resume — improvement is optional.
-        </p>
-      )}
+      {!draft &&
+        (report.atsRiskLevel === "low" || report.suggestedFixes.length === 0) && (
+          <p className="mt-3 text-xs text-slate-500">
+            Your resume already looks ATS-ready — improvement is optional.
+          </p>
+        )}
 
       {draft && (
         <div className="mt-3 space-y-3">

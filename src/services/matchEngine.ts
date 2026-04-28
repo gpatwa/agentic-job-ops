@@ -356,11 +356,16 @@ function recommendedAction(
     return `${prefix}review the gaps before preparing any tailored material.`;
   }
 
+  // "skip" = strong mismatch (score < 3 or company on the avoid
+  // list). "browse" = below the maybe threshold but not actively
+  // bad. Both are honestly "skip" from the candidate's POV — the
+  // older "keep this in Browse" copy was confusing because it
+  // implied the candidate should still spend attention on it.
   if (recommendation === "skip") {
-    return "Keep this searchable in Browse, but skip unless the user explicitly overrides.";
+    return "Skip — strong mismatch (or the company is on your avoid list).";
   }
 
-  return `${prefix}keep this in Browse with the low-match explanation visible.`;
+  return "Skip — not aligned with your target roles.";
 }
 
 function buildReasons(input: {
@@ -409,9 +414,12 @@ function buildReasons(input: {
     reasons.push("Role has strong strategic value for the stated search.");
   }
 
-  return reasons.length > 0
-    ? reasons.slice(0, 5)
-    : ["Limited positive fit signals were found in the posting."];
+  // Return an empty array when no positive signals exist instead
+  // of a fallback bullet. The old "Limited positive fit signals…"
+  // string was rendered inside a panel labeled "Top match reasons",
+  // which read as a contradiction. Renderers gate on length > 0
+  // and hide the panel when there's nothing positive to show.
+  return reasons.slice(0, 5);
 }
 
 function buildGaps(input: {

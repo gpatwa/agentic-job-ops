@@ -316,24 +316,34 @@ function JobMatchCard({
       </p>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        <div>
-          <h4 className="text-sm font-semibold text-slate-900">Top match reasons</h4>
-          <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
-            {match.topMatchReasons.slice(0, 3).map((reason) => (
-              <li key={reason}>- {reason}</li>
-            ))}
-          </ul>
-        </div>
-        <div>
-          <h4 className="text-sm font-semibold text-slate-900">
-            {lowMatch ? "Why this is low match" : "Top gaps"}
-          </h4>
-          <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
-            {match.topGaps.slice(0, 3).map((gap) => (
-              <li key={gap}>- {gap}</li>
-            ))}
-          </ul>
-        </div>
+        {/*
+          buildReasons() returns [] when no positive signals fired;
+          hide the panel rather than show an empty "Top match
+          reasons" header. The gaps column carries the explanation
+          on its own for low-match jobs.
+        */}
+        {match.topMatchReasons.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">Top match reasons</h4>
+            <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
+              {match.topMatchReasons.slice(0, 3).map((reason) => (
+                <li key={reason}>- {reason}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {match.topGaps.length > 0 && (
+          <div>
+            <h4 className="text-sm font-semibold text-slate-900">
+              {lowMatch ? "Why this is low match" : "Top gaps"}
+            </h4>
+            <ul className="mt-2 space-y-2 text-sm leading-5 text-slate-600">
+              {match.topGaps.slice(0, 3).map((gap) => (
+                <li key={gap}>- {gap}</li>
+              ))}
+            </ul>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 rounded-md border border-slate-200 bg-panel p-3">
