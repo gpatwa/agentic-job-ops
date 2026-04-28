@@ -5,6 +5,7 @@ import {
   approveApplicationPackage,
   checkUnsupportedClaims,
   generateApplicationPackage,
+  isPackageStaleAfterJobEnrichment,
   loadApplicationAnswers,
   loadApplicationPackages,
   updateApplicationAnswerDraft
@@ -316,6 +317,147 @@ describe("application package generation", () => {
     expect(warnings).toContain("Unsupported tool mention: Kubernetes");
     expect(warnings).toContain("Unsupported degree or certification mention: AWS Certified");
     expect(warnings).toContain("Metric needs verification before use: 40%");
+  });
+
+  it("does NOT flag metrics that appear in the candidate's resume parsed text", () => {
+    // Regression: the old metric check used verifiedFacts only, so
+    // a candidate whose resume legitimately contained "2x increase"
+    // / "20+ years" / "20B+ events" got flagged for using their own
+    // grounded numbers in the LLM-generated drafts. Metric
+    // verification now consults verifiedFacts ∪ careerSummary ∪
+    // resume.parsedText.
+    const warnings = checkUnsupportedClaims({
+      text:
+        "I delivered a 2x increase in data ingestion performance with 99.9% uptime and over 20 years of experience.",
+      profile: profile({ verifiedFacts: [] }),
+      resume: resume({
+        parsedText:
+          "Senior Engineering Leader with 20+ years of experience. Achieved 2x increase in data ingestion performance and 99.9% uptime across global SaaS services."
+      }),
+      job: job()
+    });
+    expect(warnings).not.toContain("Metric needs verification before use: 2x");
+    expect(warnings).not.toContain("Metric needs verification before use: 99.9%");
+    expect(warnings).not.toContain("Metric needs verification before use: 20");
+  });
+
+  it("does NOT flag metrics that appear in the candidate's careerSummary", () => {
+    const warnings = checkUnsupportedClaims({
+      text: "I shipped a 45% latency improvement.",
+      profile: profile({
+        verifiedFacts: [],
+        careerSummary:
+          "Engineering leader who repeatedly delivers 45% latency improvements at scale."
+      }),
+      resume: null,
+      job: job()
+    });
+    expect(warnings).not.toContain(
+      "Metric needs verification before use: 45%"
+    );
+  });
+
+  it("DOES flag metrics that only appear in the job description (not candidate-side evidence)", () => {
+    // A metric in the posting (e.g. "scale to 99.9% uptime") is NOT
+    // evidence the candidate has personally achieved that metric.
+    // Treating job-description metrics as verification would let the
+    // LLM claim posting targets as candidate achievements.
+    const warnings = checkUnsupportedClaims({
+      text: "I achieved 99.9% uptime.",
+      profile: profile({ verifiedFacts: [] }),
+      resume: null,
+      job: job({ description: "We need someone who can scale to 99.9% uptime." })
+    });
+    expect(warnings).toContain("Metric needs verification before use: 99.9%");
+  });
+
+  describe("isPackageStaleAfterJobEnrichment", () => {
+    it("returns false when both the package and the job are post-enrichment", async () => {
+      const workflow = applyDashboardJobAction(
+        currentSession,
+        "job_1",
+        "start_application_prep"
+      );
+      const result = await generateApplicationPackage({
+        session: currentSession,
+        application: workflow.application,
+        profile: profile(),
+        resume: resume(),
+        job: job(),
+        match: null
+      });
+      expect(
+        isPackageStaleAfterJobEnrichment(result.package, job())
+      ).toBe(false);
+    });
+
+    it("returns true when the saved package contains the import-time placeholder but the current job is enriched", () => {
+      const stalePackage = {
+        id: "pkg_test",
+        tenantId: currentSession.tenant.id,
+        userId: currentSession.userId,
+        jobId: "job_test",
+        applicationRecordId: "app_test",
+        status: "ready_for_review" as const,
+        // Placeholder content that the URL importer + deterministic
+        // generator would have produced before enrichment landed.
+        resumeMarkdown:
+          "# Candidate\n\n## Target Role\nImported job pending enrichment at Springhealth66\n",
+        coverLetter: "",
+        coverLetterIncluded: false,
+        shortAnswersIncluded: false,
+        generationMode: "deterministic" as const,
+        modelName: "deterministic-package-fallback",
+        promptVersion: "application-package-v1",
+        inputHash: "h_old",
+        outputHash: "h_old",
+        safetyWarnings: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        approvedAt: null,
+        rejectedAt: null
+      };
+      const enrichedJob = job({
+        title: "Senior Engineering Manager",
+        company: "Spring Health"
+      });
+      expect(isPackageStaleAfterJobEnrichment(stalePackage, enrichedJob)).toBe(
+        true
+      );
+    });
+
+    it("returns false when both the package and the job still reference the placeholder (enrichment hasn't run yet)", () => {
+      const placeholderPackage = {
+        id: "pkg_test",
+        tenantId: currentSession.tenant.id,
+        userId: currentSession.userId,
+        jobId: "job_test",
+        applicationRecordId: "app_test",
+        status: "ready_for_review" as const,
+        resumeMarkdown:
+          "# Candidate\n\n## Target Role\nImported job pending enrichment at Springhealth66\n",
+        coverLetter: "",
+        coverLetterIncluded: false,
+        shortAnswersIncluded: false,
+        generationMode: "deterministic" as const,
+        modelName: "deterministic-package-fallback",
+        promptVersion: "application-package-v1",
+        inputHash: "h_old",
+        outputHash: "h_old",
+        safetyWarnings: [],
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        approvedAt: null,
+        rejectedAt: null
+      };
+      const placeholderJob = job({
+        title: "Imported job pending enrichment",
+        company: "Springhealth66"
+      });
+      expect(
+        isPackageStaleAfterJobEnrichment(placeholderPackage, placeholderJob)
+      ).toBe(false);
+    });
   });
 
   it("marks edited answers as user edited and refreshes package warnings", async () => {

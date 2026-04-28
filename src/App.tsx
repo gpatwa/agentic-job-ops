@@ -79,6 +79,7 @@ import {
   createDeterministicApplicationPackageGenerator,
   createFallbackApplicationPackageGenerator,
   generateApplicationPackage,
+  isPackageStaleAfterJobEnrichment,
   loadApplicationAnswers,
   loadApplicationPackages,
   rejectApplicationPackage,
@@ -1251,6 +1252,67 @@ export default function App() {
   function handleApplicationNotesChange(applicationId: string, notes: string) {
     const result = changeApplicationNotes(currentSession, applicationId, notes);
     recordWorkflowResult(result);
+  }
+
+  /**
+   * Re-run full LLM generation against the current job / profile /
+   * resume state. Used by both the always-visible "Regenerate"
+   * button on the Generation card AND the stale-after-enrichment
+   * banner when the underlying job's title/description has changed
+   * since the package was first written.
+   *
+   * Preserves the existing `coverLetterIncluded` +
+   * `shortAnswersIncluded` opt-in flags so the user doesn't have
+   * to re-opt-in after a refresh.
+   */
+  async function handleRegenerateApplicationPackage(packageId: string): Promise<void> {
+    const existing = applicationPackages.find(
+      (applicationPackage) => applicationPackage.id === packageId
+    );
+    if (!existing) {
+      return;
+    }
+    const application = applications.find(
+      (item) => item.id === existing.applicationRecordId
+    );
+    const job = normalizedJobs.find((item) => item.id === existing.jobId);
+    if (!application || !job) {
+      return;
+    }
+    setIsRegeneratingPackage(true);
+    try {
+      const packageResult = await generateApplicationPackage({
+        session: currentSession,
+        application,
+        profile,
+        resume,
+        job,
+        match: jobMatches.find((match) => match.jobId === existing.jobId) ?? null,
+        includeCoverLetter: existing.coverLetterIncluded,
+        includeShortAnswers: existing.shortAnswersIncluded,
+        adapter: createFallbackApplicationPackageGenerator(
+          createApiBackedApplicationPackageGenerator({
+            includeCoverLetter: existing.coverLetterIncluded
+          }),
+          createDeterministicApplicationPackageGenerator()
+        )
+      });
+      setApplicationPackages(loadApplicationPackages(currentSession));
+      setApplicationAnswers(loadApplicationAnswers(currentSession));
+      recordAudit({
+        action: "application_package_regenerated",
+        resourceType: "ApplicationPackage",
+        resourceId: packageResult.package.id,
+        metadata: {
+          jobId: packageResult.package.jobId,
+          generationMode: packageResult.package.generationMode,
+          coverLetterIncluded: packageResult.package.coverLetterIncluded,
+          shortAnswersIncluded: packageResult.package.shortAnswersIncluded
+        }
+      });
+    } finally {
+      setIsRegeneratingPackage(false);
+    }
   }
 
   /**
@@ -3707,6 +3769,12 @@ export default function App() {
             onOpenBrowserSession={navigateToBrowserSession}
             onGenerateCoverLetter={handleGenerateCoverLetter}
             onGenerateShortAnswers={handleGenerateShortAnswers}
+            onRegeneratePackage={handleRegenerateApplicationPackage}
+            isStaleAfterJobEnrichment={
+              applicationPackage && job
+                ? isPackageStaleAfterJobEnrichment(applicationPackage, job)
+                : false
+            }
             onGenerateIntelligence={() =>
               job ? handleGenerateIntelligenceForJob(job.id) : undefined
             }

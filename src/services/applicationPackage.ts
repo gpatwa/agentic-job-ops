@@ -423,7 +423,27 @@ export function checkUnsupportedClaims(input: {
   job: NormalizedJob;
 }): string[] {
   const allowed = normalizeText(evidenceText(input.profile, input.resume, input.job));
-  const verifiedFacts = normalizeText(input.profile?.verifiedFacts.join(" ") ?? "");
+  // Candidate-side evidence for metric verification: verifiedFacts +
+  // resume parsed text + careerSummary. We INTENTIONALLY exclude job
+  // description from the metric allowlist — referencing a metric
+  // that only appears in the posting (e.g. "scale to 99.9% uptime")
+  // would mean the candidate is claiming a posting target as their
+  // own achievement, which is a different category of risk than a
+  // pure fabrication.
+  //
+  // The old check used `verifiedFacts` only, which produced false
+  // positives any time the candidate's actual resume contained
+  // metrics ("2x increase in data ingestion performance",
+  // "20+ years of experience", "20B+ daily events") — the LLM
+  // grounded in the resume, then the safety checker flagged those
+  // grounded metrics anyway.
+  const candidateMetricEvidence = normalizeText(
+    [
+      input.profile?.verifiedFacts.join(" ") ?? "",
+      input.profile?.careerSummary ?? "",
+      usableResumeText(input.resume)
+    ].join(" ")
+  );
   const text = input.text;
   const warnings: string[] = [];
 
@@ -450,12 +470,41 @@ export function checkUnsupportedClaims(input: {
       /\b\d+(?:\.\d+)?\s?(?:%|x|k|m|million|billion)(?=\b|[^a-zA-Z0-9])|\$\s?\d+(?:,\d{3})*(?:\.\d+)?/gi
     ) ?? [];
   metrics.forEach((metric) => {
-    if (!verifiedFacts.includes(normalizeText(metric))) {
+    if (!candidateMetricEvidence.includes(normalizeText(metric))) {
       warnings.push(`Metric needs verification before use: ${metric}`);
     }
   });
 
   return Array.from(new Set(warnings));
+}
+
+/**
+ * True when a saved package was generated against the URL-import
+ * placeholder job ("Imported job pending enrichment / Unknown
+ * company / Unknown") AND the underlying job has since been
+ * enriched (real title + company + description). The UI surfaces
+ * this with an amber "Job details have refreshed since this
+ * package was generated — regenerate" banner so the candidate
+ * never accidentally submits drafts that name the placeholder.
+ *
+ * Detection is structural — we look at the persisted package's
+ * resume markdown for the placeholder title constant; we don't try
+ * to compare hashes because regeneration intentionally changes
+ * many fields besides the title.
+ */
+export function isPackageStaleAfterJobEnrichment(
+  applicationPackage: ApplicationPackage,
+  job: NormalizedJob
+): boolean {
+  const placeholderInPackage =
+    applicationPackage.resumeMarkdown.includes("Imported job pending enrichment") ||
+    applicationPackage.coverLetter.includes("Imported job pending enrichment") ||
+    applicationPackage.resumeMarkdown.includes("Unknown company") ||
+    applicationPackage.coverLetter.includes("Unknown company");
+  const jobIsEnriched =
+    !job.title.includes("Imported job pending enrichment") &&
+    !job.company.includes("Unknown company");
+  return placeholderInPackage && jobIsEnriched;
 }
 
 function safetyWarningsForContent(

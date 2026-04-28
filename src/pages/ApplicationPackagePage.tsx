@@ -5,6 +5,7 @@ import {
   ExternalLink,
   FileText,
   Paperclip,
+  RefreshCw,
   ShieldCheck,
   Sparkles,
   XCircle
@@ -72,6 +73,22 @@ interface ApplicationPackagePageProps {
    * questions go to the LLM.
    */
   onGenerateShortAnswers?: (packageId: string) => void;
+  /**
+   * Re-run the full LLM generation pass against the current job /
+   * profile / resume data. Surfaced as a "Regenerate" button next
+   * to the metadata + as the action on the stale-job banner.
+   * Preserves `coverLetterIncluded` + `shortAnswersIncluded` flags
+   * so opt-ins survive the regen.
+   */
+  onRegeneratePackage?: (packageId: string) => void;
+  /**
+   * True when the persisted package references the URL-import
+   * placeholder ("Imported job pending enrichment") but the
+   * underlying job has since been enriched. Driven by
+   * `isPackageStaleAfterJobEnrichment`. When true, the page shows
+   * an amber banner suggesting regeneration.
+   */
+  isStaleAfterJobEnrichment?: boolean;
   onGenerateIntelligence: () => void;
   onMarkIntelligenceHelpful: () => void;
   onMarkIntelligenceNotHelpful: () => void;
@@ -207,6 +224,8 @@ export function ApplicationPackagePage({
   onOpenBrowserSession,
   onGenerateCoverLetter,
   onGenerateShortAnswers,
+  onRegeneratePackage,
+  isStaleAfterJobEnrichment,
   onGenerateIntelligence,
   onMarkIntelligenceHelpful,
   onMarkIntelligenceNotHelpful,
@@ -322,6 +341,54 @@ export function ApplicationPackagePage({
         </div>
       </header>
 
+      {/*
+        Stale-after-enrichment banner. Fires when the persisted
+        package still references the URL-import placeholder
+        ("Imported job pending enrichment") but the underlying job
+        has since been enriched via the Greenhouse / Lever single-
+        job API. Without this, a candidate could submit drafts that
+        literally name the placeholder.
+      */}
+      {isStaleAfterJobEnrichment && (
+        <section
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4"
+          data-testid="package-stale-banner"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <RefreshCw
+                aria-hidden="true"
+                className="mt-0.5 shrink-0 text-amber-700"
+                size={18}
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Job details have refreshed since this package was generated
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  The drafts below still reference the import-time placeholder
+                  title. Regenerate to use the enriched job title, company, and
+                  description. Cover-letter and short-answer opt-ins are
+                  preserved.
+                </p>
+              </div>
+            </div>
+            {onRegeneratePackage && (
+              <button
+                className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-md bg-amber-700 px-3 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-amber-400"
+                data-testid="regenerate-from-stale-banner"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={() => onRegeneratePackage(applicationPackage.id)}
+              >
+                <RefreshCw aria-hidden="true" size={13} />
+                {isRegeneratingPackage ? "Regenerating…" : "Regenerate package"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       {applicationPackage.safetyWarnings.length > 0 ? (
         <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="flex gap-3">
@@ -351,9 +418,30 @@ export function ApplicationPackagePage({
 
       <section className="grid gap-4 xl:grid-cols-3">
         <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Generation
-          </p>
+          <div className="flex items-start justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Generation
+            </p>
+            {/*
+              Always-available regenerate button (in addition to the
+              stale-banner action). Useful when the user updated their
+              resume / verified facts / target titles and wants the
+              drafts refreshed against the latest profile state.
+            */}
+            {onRegeneratePackage && (
+              <button
+                className="inline-flex min-h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                data-testid="regenerate-package"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={() => onRegeneratePackage(applicationPackage.id)}
+                title="Regenerate drafts using the current job and profile data"
+              >
+                <RefreshCw aria-hidden="true" size={11} />
+                {isRegeneratingPackage ? "Regenerating…" : "Regenerate"}
+              </button>
+            )}
+          </div>
           <dl className="mt-3 space-y-2 text-sm text-slate-600">
             <div>
               <dt className="font-medium text-slate-800">Mode</dt>
