@@ -3,11 +3,16 @@ import {
   Bot,
   CheckCircle2,
   ClipboardCheck,
+  Copy,
+  ExternalLink,
   FileWarning,
+  Paperclip,
   Plug,
+  RefreshCw,
   Send,
   ShieldAlert
 } from "lucide-react";
+import { useState } from "react";
 import { EmptyState } from "../components/EmptyState";
 import type {
   ApplicationPackage,
@@ -20,6 +25,7 @@ import type {
   NormalizedJob
 } from "../models/domain";
 import { isExtensionSubmitAllowed } from "../services/extensionService";
+import type { ManualApplyHelperData } from "../services/manualApplyHelper";
 
 interface BrowserSessionReviewPageProps {
   browserSession: BrowserApplicationSession | null;
@@ -28,6 +34,28 @@ interface BrowserSessionReviewPageProps {
   job: NormalizedJob | null;
   match: JobMatch | null;
   extensionSession: ExtensionSession | null;
+  /**
+   * Computed by App.tsx via `buildManualApplyHelper`. Renders a
+   * copyable summary the user can paste into the actual application
+   * form when they choose manual apply (or when the dry-run
+   * assistant can't drive the page itself).
+   */
+  manualApplyHelper: ManualApplyHelperData | null;
+  /**
+   * True when the persisted package was generated against the URL-
+   * import placeholder ("Imported job pending enrichment") but the
+   * underlying job has since been enriched. Driven by
+   * `isPackageStaleAfterJobEnrichment` from applicationPackage.ts.
+   */
+  isStaleAfterJobEnrichment?: boolean;
+  /** True while a regenerate / enrichment retry is in flight. */
+  isRegeneratingPackage?: boolean;
+  /** True when the underlying job is still a URL-import placeholder. */
+  isJobPendingEnrichment?: boolean;
+  /** Trigger a fresh enrichment fetch for the underlying job. */
+  onRetryJobEnrichment?: () => void;
+  /** Trigger regeneration of the package against the current job/profile. */
+  onRegeneratePackage?: () => void;
   onBack: () => void;
   onMarkReadyForReview: (sessionId: string) => void;
   onApproveSubmit: (sessionId: string) => void;
@@ -137,6 +165,12 @@ export function BrowserSessionReviewPage({
   job,
   match,
   extensionSession,
+  manualApplyHelper,
+  isStaleAfterJobEnrichment,
+  isRegeneratingPackage,
+  isJobPendingEnrichment,
+  onRetryJobEnrichment,
+  onRegeneratePackage,
   onBack,
   onMarkReadyForReview,
   onApproveSubmit,
@@ -270,6 +304,94 @@ export function BrowserSessionReviewPage({
         </div>
       </header>
 
+      {/*
+        Job-pending-enrichment banner. The URL importer creates a
+        placeholder job synchronously; enrichment runs in the
+        background. If enrichment failed (404 / network) the job
+        stays as the placeholder forever — and every downstream
+        artifact (package, browser session) inherits the bad title
+        + missing description. Surface that here with a Retry button
+        so the user can recover without re-pasting the URL.
+      */}
+      {isJobPendingEnrichment && (
+        <section
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4"
+          data-testid="browser-session-job-pending-enrichment-banner"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <RefreshCw
+                aria-hidden="true"
+                className="mt-0.5 shrink-0 text-amber-700"
+                size={18}
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Job details are still placeholder values
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  The original URL enrichment didn't complete. Without it,
+                  fields below are tailored to "Imported job pending enrichment"
+                  rather than the real role. Refresh now to fetch the live
+                  Greenhouse / Lever data.
+                </p>
+              </div>
+            </div>
+            {onRetryJobEnrichment && (
+              <button
+                className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-md bg-amber-700 px-3 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-amber-400"
+                data-testid="browser-session-retry-job-enrichment"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={onRetryJobEnrichment}
+              >
+                <RefreshCw aria-hidden="true" size={13} />
+                {isRegeneratingPackage ? "Refreshing…" : "Refresh job details"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
+      {isStaleAfterJobEnrichment && !isJobPendingEnrichment && (
+        <section
+          className="rounded-lg border border-amber-300 bg-amber-50 p-4"
+          data-testid="browser-session-stale-banner"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div className="flex gap-3">
+              <RefreshCw
+                aria-hidden="true"
+                className="mt-0.5 shrink-0 text-amber-700"
+                size={18}
+              />
+              <div>
+                <h3 className="text-sm font-semibold text-amber-900">
+                  Package was generated against the old placeholder
+                </h3>
+                <p className="mt-1 text-sm leading-6 text-amber-800">
+                  The job has been enriched since this package was prepared.
+                  Regenerate so the resume + cover letter + answers reference
+                  the real title and description.
+                </p>
+              </div>
+            </div>
+            {onRegeneratePackage && (
+              <button
+                className="inline-flex min-h-9 shrink-0 items-center justify-center gap-2 rounded-md bg-amber-700 px-3 text-xs font-semibold text-white transition hover:bg-amber-800 disabled:cursor-not-allowed disabled:bg-amber-400"
+                data-testid="browser-session-regenerate-package"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={onRegeneratePackage}
+              >
+                <RefreshCw aria-hidden="true" size={13} />
+                {isRegeneratingPackage ? "Regenerating…" : "Regenerate package"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
+
       <section className="rounded-lg border border-amber-200 bg-amber-50 p-4">
         <div className="flex gap-3">
           <ShieldAlert
@@ -298,6 +420,23 @@ export function BrowserSessionReviewPage({
           </div>
         </div>
       </section>
+
+      {/*
+        Manual-apply helper. The dry-run assistant computes everything
+        we'd need to drive the form (field labels, values, cover
+        letter, answers) but can't actually drive a real browser. So
+        instead we surface a copy-friendly card the user takes to the
+        actual application page. Big "Open job application" button
+        opens the real URL in a new tab; copy buttons next to each
+        value let the user paste field-by-field. This makes the
+        existing dry-run output useful instead of decorative.
+      */}
+      {manualApplyHelper && (
+        <ManualApplyHelperCard
+          data={manualApplyHelper}
+          onMarkApplied={() => onManualRequired(browserSession.id)}
+        />
+      )}
 
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
@@ -758,6 +897,195 @@ function ExtensionPanel({
               </div>
             )}
           </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
+/**
+ * Per-row copy button. Shows "Copied" feedback for ~1.5s after a
+ * successful copy so the user has visual confirmation. Falls back
+ * silently if `navigator.clipboard` is unavailable (older browsers,
+ * non-secure contexts) — the value is still selectable in the
+ * adjacent block so the user can copy manually.
+ */
+function CopyButton({ value, label }: { value: string; label: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      className="inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+      data-testid="manual-apply-copy"
+      aria-label={`Copy ${label}`}
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(value);
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        } catch {
+          /* clipboard unavailable; user can still select + copy */
+        }
+      }}
+    >
+      <Copy aria-hidden="true" size={11} />
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
+function ManualApplyHelperCard({
+  data,
+  onMarkApplied
+}: {
+  data: ManualApplyHelperData;
+  onMarkApplied: () => void;
+}) {
+  return (
+    <section
+      className="rounded-lg border border-emerald-200 bg-white p-5 shadow-soft"
+      data-testid="manual-apply-helper-card"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h3 className="text-base font-semibold text-slate-950">
+            Apply now in your browser
+          </h3>
+          <p className="mt-1 text-sm leading-6 text-slate-600">
+            Open the application in a new tab and paste the values below into
+            each field. We never auto-submit. When you're done, mark this
+            session as applied so the tracker stays accurate.
+          </p>
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          {data.jobUrl && (
+            <a
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:bg-emerald-800"
+              data-testid="manual-apply-open-job"
+              href={data.jobUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              <ExternalLink aria-hidden="true" size={13} />
+              Open job application
+            </a>
+          )}
+          <button
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+            data-testid="manual-apply-mark-applied"
+            type="button"
+            onClick={onMarkApplied}
+          >
+            <CheckCircle2 aria-hidden="true" size={13} />
+            Mark as applied
+          </button>
+        </div>
+      </div>
+
+      {data.resumeFileName && (
+        <p
+          className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"
+          data-testid="manual-apply-resume-attached"
+        >
+          <Paperclip aria-hidden="true" size={12} />
+          Upload resume: {data.resumeFileName}
+        </p>
+      )}
+
+      {data.fields.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Fields to paste
+          </p>
+          <div className="space-y-2">
+            {data.fields.map((field) => (
+              <div
+                key={`${field.label}-${field.value}`}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-panel p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {field.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm text-slate-900" title={field.value}>
+                    {field.value}
+                  </p>
+                  <p className="mt-1 text-[11px] text-slate-500">
+                    Source: {field.sourceLabel}
+                  </p>
+                </div>
+                <CopyButton value={field.value} label={field.label} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.coverLetter && (
+        <div className="mt-4 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Cover letter
+            </p>
+            <CopyButton value={data.coverLetter} label="cover letter" />
+          </div>
+          <div className="max-h-48 overflow-auto rounded-md border border-slate-200 bg-panel p-3">
+            <pre className="whitespace-pre-wrap font-sans text-xs leading-5 text-slate-700">
+              {data.coverLetter}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {data.shortAnswers.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Short answers
+          </p>
+          <div className="space-y-3">
+            {data.shortAnswers.map((qa) => (
+              <div
+                key={qa.question}
+                className="rounded-md border border-slate-200 bg-panel p-3"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {qa.question}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    {qa.fromLibrary && (
+                      <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                        From your saved answers
+                      </span>
+                    )}
+                    <CopyButton value={qa.answer} label={qa.question} />
+                  </div>
+                </div>
+                <p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-700">
+                  {qa.answer}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.pauseItems.length > 0 && (
+        <div className="mt-4 space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            You'll handle these on the page
+          </p>
+          <ul className="space-y-2">
+            {data.pauseItems.map((item) => (
+              <li
+                key={item.label}
+                className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs leading-5"
+              >
+                <p className="font-semibold text-amber-950">{item.label}</p>
+                <p className="mt-1 text-amber-900">{item.reason}</p>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
     </section>

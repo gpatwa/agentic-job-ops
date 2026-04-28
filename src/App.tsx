@@ -88,6 +88,7 @@ import {
   type ApplicationPackageContext
 } from "./services/applicationPackage";
 import { createApiBackedApplicationPackageGenerator } from "./services/applicationPackageApiClient";
+import { buildManualApplyHelper } from "./services/manualApplyHelper";
 import { loadApplications } from "./services/applicationService";
 import {
   applyDashboardJobAction,
@@ -1252,6 +1253,49 @@ export default function App() {
   function handleApplicationNotesChange(applicationId: string, notes: string) {
     const result = changeApplicationNotes(currentSession, applicationId, notes);
     recordWorkflowResult(result);
+  }
+
+  /**
+   * Retry the public-API enrichment for a job that's still in
+   * placeholder state. Triggered from the Browser Assistant page
+   * when the user notices the title is still "Imported job pending
+   * enrichment" (the original fire-and-forget enrichment failed —
+   * 404, timeout, network) and wants to retry without re-pasting
+   * the URL.
+   *
+   * Reuses isRegeneratingPackage as the busy flag so the UI shows
+   * a single consistent in-flight state across "refresh job" /
+   * "regenerate package" / "generate cover letter" actions.
+   */
+  async function handleRetryJobEnrichment(jobId: string): Promise<void> {
+    const job = normalizedJobs.find((item) => item.id === jobId);
+    if (!job) return;
+    setIsRegeneratingPackage(true);
+    try {
+      const result = await enrichOnboardingImportedJob(currentSession, jobId);
+      if (result.enriched) {
+        recordAudit({
+          action: "onboarding_job_url.enriched",
+          resourceType: "NormalizedJob",
+          resourceId: jobId,
+          metadata: { source: result.job.source, retried: true }
+        });
+        setNormalizedJobs(loadNormalizedJobs(currentSession));
+      } else if (result.failureReason) {
+        recordAudit({
+          action: "onboarding_job_url.enrichment_failed",
+          resourceType: "NormalizedJob",
+          resourceId: jobId,
+          metadata: {
+            source: job.source,
+            failureReason: result.failureReason,
+            retried: true
+          }
+        });
+      }
+    } finally {
+      setIsRegeneratingPackage(false);
+    }
   }
 
   /**
@@ -3816,6 +3860,30 @@ export default function App() {
                   new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
               )[0] ?? null
           : null;
+        // Build the manual-apply helper (copyable values + open job
+        // URL) at the App layer so the page stays presentational.
+        const manualApplyAnswers = applicationPackage
+          ? applicationAnswers.filter(
+              (answer) => answer.applicationPackageId === applicationPackage.id
+            )
+          : [];
+        const manualApplyHelperData =
+          browserSession && job && applicationPackage
+            ? buildManualApplyHelper({
+                session: browserSession,
+                job,
+                profile,
+                resume,
+                applicationPackage,
+                answers: manualApplyAnswers
+              })
+            : null;
+        const browserSessionStale = applicationPackage && job
+          ? isPackageStaleAfterJobEnrichment(applicationPackage, job)
+          : false;
+        const browserSessionJobPending = job
+          ? jobNeedsManualEnrichment(job)
+          : false;
 
         return (
           <BrowserSessionReviewPage
@@ -3825,6 +3893,20 @@ export default function App() {
             job={job}
             match={match}
             extensionSession={linkedExtensionSession}
+            manualApplyHelper={manualApplyHelperData}
+            isStaleAfterJobEnrichment={browserSessionStale}
+            isRegeneratingPackage={isRegeneratingPackage}
+            isJobPendingEnrichment={browserSessionJobPending}
+            onRetryJobEnrichment={
+              job
+                ? () => handleRetryJobEnrichment(job.id)
+                : undefined
+            }
+            onRegeneratePackage={
+              applicationPackage
+                ? () => handleRegenerateApplicationPackage(applicationPackage.id)
+                : undefined
+            }
             onBack={() => navigate("tracker")}
             onMarkReadyForReview={handleMarkBrowserSessionReady}
             onApproveSubmit={handleApproveBrowserSubmit}
