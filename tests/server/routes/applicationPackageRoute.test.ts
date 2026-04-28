@@ -66,12 +66,27 @@ describe("POST /api/ai/application-package — validation", () => {
     );
   });
 
-  it("requires at least one question", async () => {
+  it("accepts an empty questions array (resume-only generation)", async () => {
+    // The user opted out of short-answer drafting OR every question
+    // already has a saved-library hit. The route still produces
+    // resume markdown (and optional cover letter) — it just skips
+    // short-answer drafting.
+    const callProvider = vi.fn(async () => ({
+      output: {
+        resumeMarkdown: "# Test",
+        coverLetter: "",
+        answers: []
+      },
+      provider: "openai" as const,
+      modelName: "openai:gpt-4.1-mini",
+      promptVersion: "application-package-llm-v1"
+    }));
     const result = await handleApplicationPackage(
       { ...VALID_BODY, questions: [] },
-      { config: fakeConfig() }
+      { config: fakeConfig(), callProvider }
     );
-    expect(result.status).toBe(400);
+    expect(result.status).toBe(200);
+    expect(callProvider).toHaveBeenCalledOnce();
   });
 
   it("requires a non-empty job title and company", async () => {

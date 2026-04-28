@@ -125,17 +125,27 @@ export function buildApplicationPackageUserPrompt(
       `- "coverLetter": empty string "". The user opted out of a cover letter for this application.`
     );
   }
-  lines.push(
-    `- "answers": array of objects, one per question below, in the same order. Each object has { "question": <verbatim question>, "answer": <80-180 word draft>, "confidence": "high" | "medium" | "low", "needs_user_review": boolean, "rationale": <1-sentence note describing what supported the answer or what gaps remain> }.`
-  );
-  lines.push("Questions to draft answers for:");
-  input.questions.forEach((question, index) => {
-    lines.push(`${index + 1}. ${question}`);
-  });
-  lines.push("");
-  lines.push(
-    'confidence rubric: "high" only when the resume text clearly supports the claims; "medium" when the answer is generic-but-true; "low" when the resume / profile is too sparse to answer well — set needs_user_review=true.'
-  );
+  if (input.questions.length > 0) {
+    lines.push(
+      `- "answers": array of objects, one per question below, in the same order. Each object has { "question": <verbatim question>, "answer": <80-180 word draft>, "confidence": "high" | "medium" | "low", "needs_user_review": boolean, "rationale": <1-sentence note describing what supported the answer or what gaps remain> }.`
+    );
+    lines.push("Questions to draft answers for:");
+    input.questions.forEach((question, index) => {
+      lines.push(`${index + 1}. ${question}`);
+    });
+    lines.push("");
+    lines.push(
+      'confidence rubric: "high" only when the resume text clearly supports the claims; "medium" when the answer is generic-but-true; "low" when the resume / profile is too sparse to answer well — set needs_user_review=true.'
+    );
+  } else {
+    // Caller opted out of short-answer drafting OR every question
+    // already has a SavedApplicationAnswer library hit. Spending LLM
+    // tokens here is wasteful — instruct the model to return an
+    // empty array so the response schema is still valid.
+    lines.push(
+      `- "answers": empty array []. The user did not request short-answer drafts for this application.`
+    );
+  }
 
   return lines.join("\n");
 }
@@ -145,6 +155,9 @@ const answerConfidenceSchema = z.enum(["high", "medium", "low"]);
 export const llmApplicationPackageResponseSchema = z.object({
   resumeMarkdown: z.string().min(1),
   coverLetter: z.string().default(""),
+  // .min(0) so the model can return [] when the caller opted out
+  // of short-answer drafting OR every question had a saved-library
+  // hit. Resume + cover letter are still produced.
   answers: z
     .array(
       z.object({
@@ -155,7 +168,7 @@ export const llmApplicationPackageResponseSchema = z.object({
         rationale: z.string().trim().optional().default("")
       })
     )
-    .min(1)
+    .default([])
 });
 
 export type ValidatedLlmApplicationPackageResponse = z.infer<

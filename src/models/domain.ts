@@ -71,7 +71,16 @@ export type GenerationMode = (typeof generationModes)[number];
 export const answerConfidences = ["high", "medium", "low"] as const;
 export type AnswerConfidence = (typeof answerConfidences)[number];
 
-export const applicationAnswerSources = ["generated", "user_edited"] as const;
+export const applicationAnswerSources = [
+  "generated",
+  "user_edited",
+  // Pulled from the user's personal SavedApplicationAnswer library
+  // (a previously-saved answer for the same question being re-used
+  // on this application). The UI surfaces this as a "From your
+  // saved answers" badge so the candidate knows it wasn't a fresh
+  // LLM call.
+  "saved_library"
+] as const;
 export type ApplicationAnswerSource = (typeof applicationAnswerSources)[number];
 
 export const jobSources = [
@@ -515,6 +524,18 @@ export interface ApplicationPackage {
    * generation only produces a cover letter when this is true.
    */
   coverLetterIncluded: boolean;
+  /**
+   * Whether the user has opted in to short-answer drafts for this
+   * package. Default `false` — Greenhouse / Lever postings don't
+   * expose application-form questions via the public API, and many
+   * jobs don't have free-text questions at all. Generating four
+   * generic answers per package wastes LLM tokens AND clutters the
+   * review surface. When opted in, the package generator pulls
+   * matching answers from the user's SavedApplicationAnswer library
+   * first, then asks the LLM to draft only the questions that have
+   * no saved match.
+   */
+  shortAnswersIncluded: boolean;
   generationMode: GenerationMode;
   modelName: string;
   promptVersion: string;
@@ -537,6 +558,46 @@ export interface ApplicationAnswer {
   confidence: AnswerConfidence;
   source: ApplicationAnswerSource;
   needsUserReview: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Personal answer library entry — one per (tenant, user, normalized
+ * question). Lets the candidate write a great answer to "Why are
+ * you interested in this kind of role?" once and reuse it across
+ * dozens of applications. The package generator looks up matching
+ * library entries before asking the LLM, which both saves tokens
+ * and keeps the candidate's voice consistent.
+ *
+ * Persistence + privacy:
+ * - Stored at (tenant, user) scope in localStorage; never leaves
+ *   the workspace until the candidate explicitly applies.
+ * - The answer text is treated as candidate-authored content (it
+ *   is what they would actually submit), so the deterministic
+ *   safety checker still runs against it before any application
+ *   submit.
+ * - `useCount` and `lastUsedAt` are advisory metadata for a future
+ *   "your most-used answers" UI; the library lookup itself is
+ *   keyed strictly on `normalizedQuestion`.
+ */
+export interface SavedApplicationAnswer {
+  id: string;
+  tenantId: string;
+  userId: string;
+  /** Original question text as the user (or template) phrased it. */
+  question: string;
+  /**
+   * Lowercased, punctuation-collapsed form of `question`. Used as
+   * the lookup key so "Why are you interested in this role?" and
+   * "Why are you interested in this role" collapse to the same entry.
+   */
+  normalizedQuestion: string;
+  answer: string;
+  /** Times this entry has been re-used on a generated package. */
+  useCount: number;
+  /** ISO timestamp of the most recent re-use, or `createdAt` if never re-used. */
+  lastUsedAt: string;
   createdAt: string;
   updatedAt: string;
 }

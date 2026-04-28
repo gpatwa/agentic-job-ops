@@ -451,6 +451,7 @@ export function createExtensionFillPlan(
         resumeMarkdown: "",
         coverLetter: "",
         coverLetterIncluded: false,
+        shortAnswersIncluded: false,
         generationMode: "deterministic",
         modelName: "demo",
         promptVersion: "demo",

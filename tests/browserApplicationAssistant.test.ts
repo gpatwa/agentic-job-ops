@@ -119,6 +119,7 @@ function applicationPackage(
     resumeMarkdown: "# Example User\n\nLed workflow automation launches.",
     coverLetter: "Dear hiring team,\n\nI am interested in the role.",
     coverLetterIncluded: true,
+    shortAnswersIncluded: true,
     generationMode: "deterministic",
     modelName: "test",
     promptVersion: "test",

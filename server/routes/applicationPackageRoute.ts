@@ -97,7 +97,12 @@ export const applicationPackageRequestSchema = z.object({
       verifiedFacts: []
     }),
   resumeText: z.string().max(200_000).default(""),
-  questions: z.array(z.string().trim().min(1)).min(1).max(10),
+  // .min(0) so the client can request resume + cover letter
+  // generation without paying for short-answer drafting (the user
+  // hasn't opted in OR every question already has a saved-library
+  // hit). The route still requires at least the job + profile so the
+  // resume markdown is grounded.
+  questions: z.array(z.string().trim().min(1)).max(10).default([]),
   includeCoverLetter: z.boolean().default(false)
 });
 

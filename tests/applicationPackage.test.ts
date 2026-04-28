@@ -11,6 +11,10 @@ import {
 } from "../src/services/applicationPackage";
 import { applyDashboardJobAction } from "../src/services/applicationWorkflow";
 import { createEmptyProfile } from "../src/services/profileService";
+import {
+  findSavedAnswer,
+  loadSavedAnswers
+} from "../src/services/savedAnswerLibrary";
 
 function installLocalStorageMock() {
   const store = new Map<string, string>();
@@ -111,7 +115,7 @@ describe("application package generation", () => {
     Reflect.deleteProperty(globalThis, "window");
   });
 
-  it("generates a reviewable deterministic package with default answers", async () => {
+  it("generates a reviewable deterministic package with default opt-out for both cover letter + short answers", async () => {
     const workflow = applyDashboardJobAction(
       currentSession,
       "job_1",
@@ -133,18 +137,112 @@ describe("application package generation", () => {
     expect(result.package.userId).toBe(currentSession.userId);
     expect(result.package.applicationRecordId).toBe(workflow.application.id);
     expect(result.package.resumeMarkdown).toContain("Staff Product Manager");
-    // Cover letter is now opt-out by default (post-Phase-4 UX
-    // change). Without `includeCoverLetter: true` the deterministic
-    // generator returns an empty string and the package's
-    // coverLetterIncluded flag stays false. The page UI hides the
-    // cover-letter editor until the user clicks "Generate cover
-    // letter", which re-runs generation with the flag set.
+    // Cover letter + short answers are opt-out by default (Phase-4
+    // UX change). The deterministic generator returns "" / [] and
+    // the package flags stay false. The page UI hides the editors
+    // until the user clicks the per-section "Generate" button.
     expect(result.package.coverLetter).toBe("");
     expect(result.package.coverLetterIncluded).toBe(false);
-    expect(result.answers).toHaveLength(4);
-    expect(result.answers[0].confidence).toBe("high");
+    expect(result.package.shortAnswersIncluded).toBe(false);
+    expect(result.answers).toHaveLength(0);
     expect(loadApplicationPackages(currentSession)).toHaveLength(1);
-    expect(loadApplicationAnswers(currentSession)).toHaveLength(4);
+    expect(loadApplicationAnswers(currentSession)).toHaveLength(0);
+  });
+
+  it("generates short-answer drafts when includeShortAnswers is true", async () => {
+    const workflow = applyDashboardJobAction(
+      currentSession,
+      "job_1",
+      "start_application_prep"
+    );
+    const result = await generateApplicationPackage({
+      session: currentSession,
+      application: workflow.application,
+      profile: profile(),
+      resume: resume(),
+      job: job(),
+      match: null,
+      includeShortAnswers: true
+    });
+    expect(result.package.shortAnswersIncluded).toBe(true);
+    expect(result.answers).toHaveLength(4);
+    expect(result.answers[0].source).toBe("generated");
+  });
+
+  it("upserts saved-library entries on user-edited save and reuses them on the next package", async () => {
+    // First application: opt in to short answers, edit one, save —
+    // upsertSavedAnswer fires from inside updateApplicationAnswerDraft.
+    const workflow = applyDashboardJobAction(
+      currentSession,
+      "job_1",
+      "start_application_prep"
+    );
+    const generated = await generateApplicationPackage({
+      session: currentSession,
+      application: workflow.application,
+      profile: profile(),
+      resume: resume(),
+      job: job(),
+      match: null,
+      includeShortAnswers: true
+    });
+    expect(generated.answers).toHaveLength(4);
+
+    // Edit + save the first answer.
+    const edited = updateApplicationAnswerDraft(
+      currentSession,
+      generated.answers[0].id,
+      "My polished, reusable answer for why-this-role.",
+      {
+        profile: profile(),
+        resume: resume(),
+        job: job(),
+        match: null
+      }
+    );
+    expect(edited.package.id).toBe(generated.package.id);
+
+    // Library should have one entry now.
+    const library = loadSavedAnswers(currentSession);
+    expect(library).toHaveLength(1);
+    expect(library[0].answer).toBe(
+      "My polished, reusable answer for why-this-role."
+    );
+
+    // Direct lookup by question text works (case-insensitive).
+    expect(
+      findSavedAnswer(currentSession, "Why are you interested in this role?")
+    ).not.toBeNull();
+
+    // Second application — generate a fresh package and confirm
+    // the matching question is filled from the library, NOT from
+    // a fresh generator call.
+    const secondWorkflow = applyDashboardJobAction(
+      currentSession,
+      "job_2",
+      "start_application_prep"
+    );
+    const second = await generateApplicationPackage({
+      session: currentSession,
+      application: secondWorkflow.application,
+      profile: profile(),
+      resume: resume(),
+      job: job({ id: "job_2", title: "Director of Product, NewCo" }),
+      match: null,
+      includeShortAnswers: true
+    });
+    const reusedAnswer = second.answers.find(
+      (answer) => answer.question === "Why are you interested in this role?"
+    )!;
+    expect(reusedAnswer.source).toBe("saved_library");
+    expect(reusedAnswer.answer).toBe(
+      "My polished, reusable answer for why-this-role."
+    );
+    // Other questions still come from the deterministic generator.
+    const otherAnswer = second.answers.find(
+      (answer) => answer.question === "What makes you a strong fit?"
+    )!;
+    expect(otherAnswer.source).toBe("generated");
   });
 
   it("opts in to a cover letter when includeCoverLetter is true", async () => {
@@ -232,7 +330,9 @@ describe("application package generation", () => {
       profile: profile(),
       resume: resume(),
       job: job(),
-      match: null
+      match: null,
+      // Need short answers for the edit assertion below.
+      includeShortAnswers: true
     });
 
     const result = updateApplicationAnswerDraft(

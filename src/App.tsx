@@ -1254,6 +1254,63 @@ export default function App() {
   }
 
   /**
+   * Opt the user into short-answer drafts for an existing package.
+   * Re-runs generation with `includeShortAnswers: true`. The
+   * orchestrator looks up SavedApplicationAnswer library entries
+   * first; only un-cached questions hit the LLM, so subsequent
+   * applications cost nothing in tokens for those questions.
+   */
+  async function handleGenerateShortAnswers(packageId: string): Promise<void> {
+    const existing = applicationPackages.find(
+      (applicationPackage) => applicationPackage.id === packageId
+    );
+    if (!existing) {
+      return;
+    }
+    const application = applications.find(
+      (item) => item.id === existing.applicationRecordId
+    );
+    const job = normalizedJobs.find((item) => item.id === existing.jobId);
+    if (!application || !job) {
+      return;
+    }
+    setIsRegeneratingPackage(true);
+    try {
+      const packageResult = await generateApplicationPackage({
+        session: currentSession,
+        application,
+        profile,
+        resume,
+        job,
+        match: jobMatches.find((match) => match.jobId === existing.jobId) ?? null,
+        includeShortAnswers: true,
+        // Preserve the existing cover-letter choice rather than
+        // resetting it on the regen.
+        includeCoverLetter: existing.coverLetterIncluded,
+        adapter: createFallbackApplicationPackageGenerator(
+          createApiBackedApplicationPackageGenerator({
+            includeCoverLetter: existing.coverLetterIncluded
+          }),
+          createDeterministicApplicationPackageGenerator()
+        )
+      });
+      setApplicationPackages(loadApplicationPackages(currentSession));
+      setApplicationAnswers(loadApplicationAnswers(currentSession));
+      recordAudit({
+        action: "application_package_short_answers_opted_in",
+        resourceType: "ApplicationPackage",
+        resourceId: packageResult.package.id,
+        metadata: {
+          jobId: packageResult.package.jobId,
+          generationMode: packageResult.package.generationMode
+        }
+      });
+    } finally {
+      setIsRegeneratingPackage(false);
+    }
+  }
+
+  /**
    * Opt the user into a cover letter for an existing package.
    * Re-runs generation with `includeCoverLetter: true` so the LLM
    * (or deterministic fallback) produces the cover-letter draft and
@@ -3649,6 +3706,7 @@ export default function App() {
             onStartBrowserApply={handleStartBrowserApply}
             onOpenBrowserSession={navigateToBrowserSession}
             onGenerateCoverLetter={handleGenerateCoverLetter}
+            onGenerateShortAnswers={handleGenerateShortAnswers}
             onGenerateIntelligence={() =>
               job ? handleGenerateIntelligenceForJob(job.id) : undefined
             }

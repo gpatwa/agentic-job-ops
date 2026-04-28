@@ -19,6 +19,11 @@ import {
   loadApplications,
   upsertApplicationRecord
 } from "./applicationService";
+import {
+  findSavedAnswer,
+  recordSavedAnswerUsed,
+  upsertSavedAnswer
+} from "./savedAnswerLibrary";
 
 const PROMPT_VERSION = "application-package-v1";
 const DETERMINISTIC_MODEL_NAME = "deterministic-package-fallback";
@@ -106,6 +111,21 @@ export interface ApplicationPackageGenerationRequest extends ApplicationPackageC
    * button on the package page.
    */
   includeCoverLetter?: boolean;
+  /**
+   * When true, generate short-answer drafts. Defaults to the
+   * existing package's `shortAnswersIncluded` flag (false on first
+   * generation). When false, the generator skips the short-answer
+   * portion entirely (no LLM tokens spent on questions the actual
+   * application form may not even ask). When true, library matches
+   * are reused first; only un-matched questions go to the adapter.
+   */
+  includeShortAnswers?: boolean;
+  /**
+   * Specific questions to draft. Defaults to the four common
+   * questions. Allows future per-job question lists once we can
+   * scrape the actual application form.
+   */
+  questions?: string[];
 }
 
 export interface GeneratedAnswerDraft {
@@ -358,9 +378,12 @@ function answerForQuestion(
 function buildAnswers(
   profile: UserProfile | null,
   resume: Resume | null,
-  job: NormalizedJob
+  job: NormalizedJob,
+  questions: readonly string[] = commonQuestions
 ): GeneratedAnswerDraft[] {
-  return commonQuestions.map((question) => answerForQuestion(question, profile, resume, job));
+  return questions.map((question) =>
+    answerForQuestion(question, profile, resume, job)
+  );
 }
 
 function generationInputHash(
@@ -458,15 +481,20 @@ export class DeterministicApplicationPackageGenerator implements ApplicationPack
   modelName = DETERMINISTIC_MODEL_NAME;
 
   async generate(request: ApplicationPackageGenerationRequest) {
-    // Cover letter is opt-in (post-Phase-4 UX change). Skip the
-    // template entirely when the caller hasn't requested one.
+    // Cover letter + short answers are both opt-in (post-Phase-4
+    // UX change). Skip the templates entirely when the caller
+    // hasn't requested them.
     const includeCoverLetter = request.includeCoverLetter ?? false;
+    const includeShortAnswers = request.includeShortAnswers ?? false;
+    const questions = request.questions ?? [...commonQuestions];
     return {
       resumeMarkdown: buildResumeMarkdown(request.profile, request.resume, request.job),
       coverLetter: includeCoverLetter
         ? buildCoverLetter(request.profile, request.job)
         : "",
-      answers: buildAnswers(request.profile, request.resume, request.job),
+      answers: includeShortAnswers
+        ? buildAnswers(request.profile, request.resume, request.job, questions)
+        : [],
       generationMode: this.mode,
       modelName: this.modelName,
       promptVersion: PROMPT_VERSION
@@ -593,23 +621,107 @@ export async function generateApplicationPackage(
   request: ApplicationPackageGenerationRequest
 ): Promise<ApplicationPackageGenerationResult> {
   const adapter = request.adapter ?? createDeterministicApplicationPackageGenerator();
-  const generated = await adapter.generate(request);
+
+  // Resolve the question list + opt-in flag BEFORE calling the
+  // adapter so we can reuse SavedApplicationAnswer library entries
+  // and skip the LLM for any question the user has already answered
+  // before. This both saves tokens and keeps the candidate's voice
+  // consistent across applications.
+  const includeShortAnswers = request.includeShortAnswers ?? false;
+  const questions = request.questions ?? [...commonQuestions];
+  const libraryHits: Array<{
+    question: string;
+    answer: string;
+    savedAnswerId: string;
+  }> = [];
+  let questionsForAdapter = questions;
+  if (includeShortAnswers) {
+    const remaining: string[] = [];
+    for (const question of questions) {
+      const saved = findSavedAnswer(request.session, question);
+      if (saved) {
+        libraryHits.push({
+          question,
+          answer: saved.answer,
+          savedAnswerId: saved.id
+        });
+      } else {
+        remaining.push(question);
+      }
+    }
+    questionsForAdapter = remaining;
+  } else {
+    // Skip the adapter's short-answer pass entirely.
+    questionsForAdapter = [];
+  }
+
+  // Pass the trimmed-down questions list to the adapter so the LLM
+  // call only spends tokens on un-cached questions. The deterministic
+  // generator does the same via `questions` + `includeShortAnswers`.
+  const generated = await adapter.generate({
+    ...request,
+    includeShortAnswers,
+    questions: questionsForAdapter
+  });
   const timestamp = nowIso();
   const existingPackage = loadApplicationPackages(request.session).find(
     (applicationPackage) =>
       applicationPackage.applicationRecordId === request.application.id
   );
+
+  // Splice the library matches back into the answer list, preserving
+  // the original question order. Library matches carry source =
+  // "saved_library" so the UI can show a "From your saved answers"
+  // badge and the user knows it wasn't a fresh LLM call.
+  const generatedByQuestion = new Map(
+    generated.answers.map((answer) => [answer.question, answer])
+  );
+  const mergedAnswers: GeneratedAnswerDraft[] = includeShortAnswers
+    ? questions.map((question) => {
+        const hit = libraryHits.find((h) => h.question === question);
+        if (hit) {
+          return {
+            question,
+            answer: hit.answer,
+            confidence: "high" as const,
+            needsUserReview: false
+          };
+        }
+        const generatedAnswer = generatedByQuestion.get(question);
+        if (generatedAnswer) return generatedAnswer;
+        // Defensive: if the adapter dropped a question (it shouldn't),
+        // surface a deterministic placeholder so the UI doesn't lose
+        // the slot.
+        return {
+          question,
+          answer: "",
+          confidence: "low" as const,
+          needsUserReview: true
+        };
+      })
+    : [];
+
+  // Bump useCount + lastUsedAt on each library entry that fired.
+  // Best-effort metadata write; failures are swallowed by the
+  // service.
+  for (const hit of libraryHits) {
+    recordSavedAnswerUsed(request.session, hit.savedAnswerId);
+  }
+
   const safetyWarnings = safetyWarningsForContent(
     request,
     generated.resumeMarkdown,
     generated.coverLetter,
-    generated.answers
+    mergedAnswers
   );
-  // Persist the cover-letter inclusion choice on the package itself
-  // (rather than per-generation) so the UI can render the gate next
-  // time the user opens the package without re-running generation.
+  // Persist the cover-letter / short-answers inclusion choices on
+  // the package itself (rather than per-generation) so the UI can
+  // render the gates next time the user opens the package without
+  // re-running generation.
   const coverLetterIncluded =
     request.includeCoverLetter ?? existingPackage?.coverLetterIncluded ?? false;
+  const shortAnswersIncluded =
+    request.includeShortAnswers ?? existingPackage?.shortAnswersIncluded ?? false;
   const applicationPackage = applicationPackageSchema.parse({
     id: existingPackage?.id ?? createId("pkg"),
     tenantId: request.session.tenant.id,
@@ -620,6 +732,7 @@ export async function generateApplicationPackage(
     resumeMarkdown: generated.resumeMarkdown,
     coverLetter: generated.coverLetter,
     coverLetterIncluded,
+    shortAnswersIncluded,
     generationMode: generated.generationMode,
     modelName: generated.modelName,
     promptVersion: generated.promptVersion,
@@ -629,7 +742,10 @@ export async function generateApplicationPackage(
       request.job,
       request.match
     ),
-    outputHash: generationOutputHash(generated),
+    outputHash: generationOutputHash({
+      ...generated,
+      answers: mergedAnswers
+    }),
     safetyWarnings,
     createdAt: existingPackage?.createdAt ?? timestamp,
     updatedAt: timestamp,
@@ -649,7 +765,8 @@ export async function generateApplicationPackage(
   const existingAnswers = loadApplicationAnswers(request.session).filter(
     (answer) => answer.applicationPackageId !== applicationPackage.id
   );
-  const answers = generated.answers.map((answer) =>
+  const libraryHitQuestions = new Set(libraryHits.map((h) => h.question));
+  const answers = mergedAnswers.map((answer) =>
     applicationAnswerSchema.parse({
       id: createId("ans"),
       tenantId: request.session.tenant.id,
@@ -658,7 +775,12 @@ export async function generateApplicationPackage(
       question: answer.question,
       answer: answer.answer,
       confidence: answer.confidence,
-      source: "generated",
+      // Library matches surface as `saved_library` so the UI can
+      // show a "From your saved answers" badge. Everything else
+      // came from the LLM (or deterministic fallback) on this run.
+      source: libraryHitQuestions.has(answer.question)
+        ? "saved_library"
+        : "generated",
       needsUserReview: answer.needsUserReview,
       createdAt: timestamp,
       updatedAt: timestamp
@@ -752,6 +874,13 @@ export function updateApplicationAnswerDraft(
     answer.id === answerId ? updatedAnswer : answer
   );
   saveApplicationAnswers(session, nextAnswers);
+
+  // Persist the edited answer to the user's personal library so the
+  // next application that asks the same question (case-insensitive,
+  // punctuation-collapsed) reuses this exact text instead of asking
+  // the LLM again. The library lookup happens inside
+  // generateApplicationPackage on subsequent runs.
+  upsertSavedAnswer(session, updatedAnswer.question, updatedAnswer.answer);
 
   const applicationPackage = loadApplicationPackages(session).find(
     (item) => item.id === updatedAnswer.applicationPackageId

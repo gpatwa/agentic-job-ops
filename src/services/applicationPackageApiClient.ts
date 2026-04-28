@@ -65,21 +65,9 @@ export interface ApiBackedApplicationPackageOptions {
   fetcher?: typeof fetch;
   /** Override the timeout (tests). */
   timeoutMs?: number;
-  /**
-   * Specific short-answer questions to draft. When omitted the
-   * adapter passes the package's standard four questions.
-   */
-  questions?: string[];
   /** When true, request a cover letter from the model. */
   includeCoverLetter?: boolean;
 }
-
-const DEFAULT_QUESTIONS = [
-  "Why are you interested in this role?",
-  "Why this company?",
-  "What makes you a strong fit?",
-  "Tell us about relevant experience."
-] as const;
 
 function readApiBaseUrl(): string {
   // Vite injects environment variables at build time. We can't import
@@ -129,8 +117,14 @@ export class ApiBackedApplicationPackageGenerator
     const baseUrl = this.options.apiBaseUrl ?? readApiBaseUrl();
     const url = `${baseUrl}${APPLICATION_PACKAGE_API_PATH}`;
 
-    const questions = this.options.questions ?? [...DEFAULT_QUESTIONS];
-    const includeCoverLetter = this.options.includeCoverLetter ?? false;
+    // Use the questions list the orchestrator computed (already
+     // filtered to remove SavedApplicationAnswer hits) so the LLM
+     // only spends tokens on questions we don't already have a
+     // canonical answer for. An empty array means "skip short-answer
+     // drafting entirely" — the route still generates resume +
+     // optional cover letter.
+    const questions = request.questions ?? [];
+    const includeCoverLetter = request.includeCoverLetter ?? this.options.includeCoverLetter ?? false;
 
     const body = {
       job: {

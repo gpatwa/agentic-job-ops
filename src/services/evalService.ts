@@ -258,6 +258,7 @@ function applicationPackage(
     resumeMarkdown: "# Example User\n\nLed B2B SaaS workflow automation launches.",
     coverLetter: "Dear hiring team,\n\nI am interested in this role.",
     coverLetterIncluded: true,
+    shortAnswersIncluded: true,
     generationMode: "deterministic",
     modelName: "deterministic-package-fallback",
     promptVersion: "application-package-v1",
@@ -1176,7 +1177,11 @@ async function packageEval(
       profile: baseProfile,
       resume: baseResume,
       job: baseJob,
-      match: null
+      match: null,
+      // Eval needs the cover letter + answers populated to validate
+      // the no-fake-claims contract; in production both are opt-in.
+      includeCoverLetter: true,
+      includeShortAnswers: true
     });
     const warnings = checkUnsupportedClaims({
       text: [
@@ -1230,7 +1235,11 @@ async function packageEval(
         "Resume text extraction has not run yet. Add verified facts before using this resume."
     },
     job: baseJob,
-    match: null
+    match: null,
+    // Same reason as eval_package_no_fake_claims: the eval inspects
+    // generated.answers, so it has to opt in to short-answer
+    // generation; production keeps both opt-out.
+    includeShortAnswers: true
   });
   const hasLowConfidenceAnswer = generated.answers.some(
     (answer) => answer.confidence === "low" && answer.needsUserReview

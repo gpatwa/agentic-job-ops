@@ -227,6 +227,11 @@ export const applicationPackageSchema = z.object({
   // start with cover letter opt-OUT; the user opts in via the
   // "Generate cover letter" button on the package page.
   coverLetterIncluded: z.boolean().default(false),
+  // Short answers follow the same opt-in pattern as cover letter.
+  // Default false so a fresh package shows neither cover letter nor
+  // short-answer drafts; the user opts in per-section. Saved
+  // packages persisted before this field existed parse cleanly.
+  shortAnswersIncluded: z.boolean().default(false),
   generationMode: z.enum(generationModes),
   modelName: z.string().trim().min(1),
   promptVersion: z.string().trim().min(1),
@@ -249,6 +254,19 @@ export const applicationAnswerSchema = z.object({
   confidence: z.enum(answerConfidences),
   source: z.enum(applicationAnswerSources),
   needsUserReview: z.boolean(),
+  createdAt: isoDateSchema,
+  updatedAt: isoDateSchema
+});
+
+export const savedApplicationAnswerSchema = z.object({
+  id: idSchema,
+  tenantId: idSchema,
+  userId: idSchema,
+  question: z.string().trim().min(1),
+  normalizedQuestion: z.string().trim().min(1),
+  answer: z.string().trim().min(1),
+  useCount: z.number().int().min(0).default(0),
+  lastUsedAt: isoDateSchema,
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

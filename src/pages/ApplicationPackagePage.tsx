@@ -64,6 +64,14 @@ interface ApplicationPackagePageProps {
    * tests) the opt-in button is not rendered.
    */
   onGenerateCoverLetter?: (packageId: string) => void;
+  /**
+   * Opt the user into short-answer drafts for this package. Same
+   * pattern as `onGenerateCoverLetter` — if the application form
+   * actually asks free-text questions, click this to generate
+   * drafts. Saved-library entries are reused first; only un-cached
+   * questions go to the LLM.
+   */
+  onGenerateShortAnswers?: (packageId: string) => void;
   onGenerateIntelligence: () => void;
   onMarkIntelligenceHelpful: () => void;
   onMarkIntelligenceNotHelpful: () => void;
@@ -141,9 +149,18 @@ function AnswerEditor({
             >
               {answer.confidence} confidence
             </span>
-            <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
-              {statusLabel(answer.source)}
-            </span>
+            {answer.source === "saved_library" ? (
+              <span
+                className="rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"
+                data-testid="answer-source-saved-library"
+              >
+                From your saved answers
+              </span>
+            ) : (
+              <span className="rounded-md bg-slate-100 px-2 py-1 text-xs font-semibold capitalize text-slate-700">
+                {statusLabel(answer.source)}
+              </span>
+            )}
             {answer.needsUserReview && (
               <span className="rounded-md bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">
                 Needs review
@@ -189,6 +206,7 @@ export function ApplicationPackagePage({
   onStartBrowserApply,
   onOpenBrowserSession,
   onGenerateCoverLetter,
+  onGenerateShortAnswers,
   onGenerateIntelligence,
   onMarkIntelligenceHelpful,
   onMarkIntelligenceNotHelpful,
@@ -503,23 +521,69 @@ export function ApplicationPackagePage({
         </section>
       )}
 
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <h3 className="text-base font-semibold text-slate-950">
-          Short-answer drafts
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Answers are editable and low-confidence answers stay marked for review.
-        </p>
-        <div className="mt-4 space-y-3">
-          {answers.map((answer) => (
-            <AnswerEditor
-              key={answer.id}
-              answer={answer}
-              onSaveAnswer={onSaveAnswer}
-            />
-          ))}
-        </div>
-      </section>
+      {/*
+        Short-answer drafts are opt-in. Greenhouse / Lever public
+        APIs don't expose application-form questions, and many jobs
+        don't have free-text questions at all. Generating four
+        generic answers per package wastes LLM tokens. The user
+        opts in via the "Generate short-answer drafts" button when
+        the actual application form does ask questions; saved-
+        library entries are reused first so the user only writes
+        each answer once across applications.
+      */}
+      {applicationPackage.shortAnswersIncluded ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <h3 className="text-base font-semibold text-slate-950">
+            Short-answer drafts
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Answers are editable and low-confidence answers stay marked for
+            review. Saved answers carry over to your next application
+            automatically.
+          </p>
+          <div className="mt-4 space-y-3">
+            {answers.map((answer) => (
+              <AnswerEditor
+                key={answer.id}
+                answer={answer}
+                onSaveAnswer={onSaveAnswer}
+              />
+            ))}
+          </div>
+        </section>
+      ) : (
+        <section
+          className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5"
+          data-testid="short-answers-optional-card"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">
+                Short-answer drafts (optional)
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Generate drafts only if the actual application form asks
+                free-text questions. Previously-saved answers from your
+                personal library are reused automatically.
+              </p>
+            </div>
+            {onGenerateShortAnswers && (
+              <button
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                data-testid="generate-short-answers"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={() => onGenerateShortAnswers(applicationPackage.id)}
+              >
+                <Sparkles aria-hidden="true" size={13} />
+                {isRegeneratingPackage
+                  ? "Generating…"
+                  : "Generate short-answer drafts"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <IntelligenceCard
         intelligence={intelligence}

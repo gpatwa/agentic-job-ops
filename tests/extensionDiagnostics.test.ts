@@ -57,6 +57,7 @@ function makePackage(overrides: Partial<ApplicationPackage> = {}): ApplicationPa
     resumeMarkdown: "",
     coverLetter: "",
     coverLetterIncluded: false,
+    shortAnswersIncluded: false,
     generationMode: "deterministic",
     modelName: "test",
     promptVersion: "test",
