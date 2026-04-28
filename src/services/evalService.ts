@@ -171,6 +171,12 @@ function profile(overrides: Partial<UserProfile> = {}): UserProfile {
       "Partnered with engineering and design on customer discovery",
       "Built roadmap process for workflow automation products"
     ],
+    visaSponsorshipNeeded: "",
+    howDidYouHearAboutUs: "",
+    genderIdentity: "",
+    raceEthnicity: "",
+    veteranStatus: "",
+    disabilityStatus: "",
     createdAt: timestamp,
     updatedAt: timestamp,
     ...overrides

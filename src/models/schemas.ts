@@ -100,6 +100,18 @@ export const userProfileSchema = z.object({
   companiesToPrioritize: stringListSchema,
   careerSummary: z.string().trim(),
   verifiedFacts: stringListSchema,
+  // Application-form defaults — .default("") so existing
+  // localStorage profiles parse cleanly after this migration.
+  visaSponsorshipNeeded: z.string().trim().default(""),
+  howDidYouHearAboutUs: z.string().trim().default(""),
+  // Voluntary self-identification — all default empty; the user
+  // sets them on Profile setup. Helper renders "Prefer not to say"
+  // as a safe baseline default in the UI when the user hasn't
+  // customized.
+  genderIdentity: z.string().trim().default(""),
+  raceEthnicity: z.string().trim().default(""),
+  veteranStatus: z.string().trim().default(""),
+  disabilityStatus: z.string().trim().default(""),
   createdAt: isoDateSchema,
   updatedAt: isoDateSchema
 });

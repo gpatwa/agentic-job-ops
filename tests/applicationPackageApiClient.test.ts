@@ -63,6 +63,12 @@ function fakeProfile(): UserProfile {
     companiesToPrioritize: [],
     careerSummary: "20 years building data platforms.",
     verifiedFacts: ["Scaled team from 1 to 8"],
+    visaSponsorshipNeeded: "",
+    howDidYouHearAboutUs: "",
+    genderIdentity: "",
+    raceEthnicity: "",
+    veteranStatus: "",
+    disabilityStatus: "",
     createdAt: now,
     updatedAt: now
   };

@@ -3230,7 +3230,13 @@ export default function App() {
           ...extracted.resumeStrengths,
           ...extracted.quantifiedAchievements
         ])
-      ).join(", ")
+      ).join(", "),
+      visaSponsorshipNeeded: baseProfile?.visaSponsorshipNeeded ?? "",
+      howDidYouHearAboutUs: baseProfile?.howDidYouHearAboutUs ?? "",
+      genderIdentity: baseProfile?.genderIdentity ?? "",
+      raceEthnicity: baseProfile?.raceEthnicity ?? "",
+      veteranStatus: baseProfile?.veteranStatus ?? "",
+      disabilityStatus: baseProfile?.disabilityStatus ?? ""
     };
     handleSaveProfile(mergedDraft);
     const events = recordResumeProfileConfirmed(report, appliedFieldCount);
@@ -3446,7 +3452,13 @@ export default function App() {
         companiesToAvoid: profile.companiesToAvoid.join(", "),
         companiesToPrioritize: profile.companiesToPrioritize.join(", "),
         careerSummary: profile.careerSummary,
-        verifiedFacts: profile.verifiedFacts.join(", ")
+        verifiedFacts: profile.verifiedFacts.join(", "),
+        visaSponsorshipNeeded: profile.visaSponsorshipNeeded,
+        howDidYouHearAboutUs: profile.howDidYouHearAboutUs,
+        genderIdentity: profile.genderIdentity,
+        raceEthnicity: profile.raceEthnicity,
+        veteranStatus: profile.veteranStatus,
+        disabilityStatus: profile.disabilityStatus
       };
       handleSaveProfile(draft);
     }

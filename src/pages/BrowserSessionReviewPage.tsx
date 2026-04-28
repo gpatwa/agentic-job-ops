@@ -1057,6 +1057,40 @@ function ManualApplyHelperCard({
         </div>
       )}
 
+      {data.voluntarySelfIdFields.length > 0 && (
+        <div
+          className="mt-4 space-y-2"
+          data-testid="manual-apply-voluntary-self-id"
+        >
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Voluntary self-identification
+          </p>
+          <p className="text-[11px] leading-5 text-slate-500">
+            EEO-1 / Section 503 demographic fields. Filling these on the
+            actual form is voluntary; the values below come from your saved
+            answers.
+          </p>
+          <div className="space-y-2">
+            {data.voluntarySelfIdFields.map((field) => (
+              <div
+                key={`vsi-${field.label}`}
+                className="flex flex-col gap-2 rounded-md border border-slate-200 bg-panel p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                    {field.label}
+                  </p>
+                  <p className="mt-1 truncate text-sm text-slate-900" title={field.value}>
+                    {field.value}
+                  </p>
+                </div>
+                <CopyButton value={field.value} label={field.label} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {data.missingFields.length > 0 && (
         <div className="mt-4 space-y-2" data-testid="manual-apply-missing-fields">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">

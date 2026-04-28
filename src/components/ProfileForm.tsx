@@ -257,6 +257,9 @@ export function ProfileForm({
               />
             </div>
           </section>
+
+          <ApplicationDefaultsSection draft={draft} update={update} />
+          <VoluntarySelfIdSection draft={draft} update={update} />
         </>
       ) : (
         <>
@@ -346,5 +349,191 @@ export function ProfileForm({
         {message && <p className="text-sm font-medium text-emerald-700">{message}</p>}
       </div>
     </form>
+  );
+}
+
+
+/**
+ * Application defaults — values for the standard Greenhouse / Lever
+ * questions every form asks. Stored on the local profile so the
+ * Browser Assistant manual-apply helper can surface them as
+ * paste-ready answers without forcing the candidate to re-think
+ * them per job.
+ */
+function ApplicationDefaultsSection({
+  draft,
+  update
+}: {
+  draft: UserProfileDraft;
+  update: <K extends keyof UserProfileDraft>(
+    key: K,
+    value: UserProfileDraft[K]
+  ) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+      <h3 className="text-base font-semibold text-slate-950">
+        Application defaults
+      </h3>
+      <p className="mt-1 text-sm text-slate-500">
+        Common questions on Greenhouse / Lever forms. Filling these once
+        means the assistant has a paste-ready answer for every application.
+      </p>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-slate-700">
+            Will you require visa sponsorship now or in the future?
+          </span>
+          <select
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm focus:border-emerald-700"
+            value={draft.visaSponsorshipNeeded}
+            onChange={(event) =>
+              update("visaSponsorshipNeeded", event.target.value)
+            }
+          >
+            <option value="">— Choose —</option>
+            <option value="No, I do not and will not need a visa sponsorship.">
+              No, I do not and will not need a visa sponsorship
+            </option>
+            <option value="Yes, I currently need a visa sponsorship.">
+              Yes, I currently need a visa sponsorship
+            </option>
+            <option value="Yes, I may need a visa sponsorship in the future.">
+              Yes, I may need a visa sponsorship in the future
+            </option>
+            <option value="I am unsure and will discuss in the interview.">
+              I am unsure and will discuss in the interview
+            </option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+        </label>
+        <TextField
+          label="How did you hear about us?"
+          value={draft.howDidYouHearAboutUs}
+          onChange={(value) => update("howDidYouHearAboutUs", value)}
+          placeholder="LinkedIn, referral, Glassdoor, …"
+        />
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Voluntary self-identification — EEO-1 + Section 503. Stored only
+ * in the local workspace; never logged; only ever leaves via the
+ * candidate's own paste action. Defaults are empty; "Prefer not to
+ * say" is one of the standard options the user can pick.
+ */
+function VoluntarySelfIdSection({
+  draft,
+  update
+}: {
+  draft: UserProfileDraft;
+  update: <K extends keyof UserProfileDraft>(
+    key: K,
+    value: UserProfileDraft[K]
+  ) => void;
+}) {
+  return (
+    <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+      <h3 className="text-base font-semibold text-slate-950">
+        Voluntary self-identification (optional)
+      </h3>
+      <p className="mt-1 text-sm leading-6 text-slate-500">
+        Many forms include EEO-1 / Section 503 demographic questions.
+        Filling these is voluntary; "Prefer not to say" is always a valid
+        answer. Stored only in your local workspace — never logged, never
+        sent anywhere except via your own paste.
+      </p>
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-slate-700">Gender identity</span>
+          <select
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm focus:border-emerald-700"
+            value={draft.genderIdentity}
+            onChange={(event) => update("genderIdentity", event.target.value)}
+          >
+            <option value="">— Choose —</option>
+            <option value="Female">Female</option>
+            <option value="Male">Male</option>
+            <option value="Non-binary">Non-binary</option>
+            <option value="Decline to self-identify">
+              Decline to self-identify
+            </option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-slate-700">Race / ethnicity</span>
+          <select
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm focus:border-emerald-700"
+            value={draft.raceEthnicity}
+            onChange={(event) => update("raceEthnicity", event.target.value)}
+          >
+            <option value="">— Choose —</option>
+            <option value="Hispanic or Latino">Hispanic or Latino</option>
+            <option value="White (Not Hispanic or Latino)">
+              White (Not Hispanic or Latino)
+            </option>
+            <option value="Black or African American (Not Hispanic or Latino)">
+              Black or African American (Not Hispanic or Latino)
+            </option>
+            <option value="Asian (Not Hispanic or Latino)">
+              Asian (Not Hispanic or Latino)
+            </option>
+            <option value="American Indian or Alaska Native (Not Hispanic or Latino)">
+              American Indian or Alaska Native (Not Hispanic or Latino)
+            </option>
+            <option value="Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)">
+              Native Hawaiian or Other Pacific Islander (Not Hispanic or Latino)
+            </option>
+            <option value="Two or More Races (Not Hispanic or Latino)">
+              Two or More Races (Not Hispanic or Latino)
+            </option>
+            <option value="Prefer not to say">Prefer not to say</option>
+          </select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-slate-700">Veteran status</span>
+          <select
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm focus:border-emerald-700"
+            value={draft.veteranStatus}
+            onChange={(event) => update("veteranStatus", event.target.value)}
+          >
+            <option value="">— Choose —</option>
+            <option value="I am a protected veteran.">
+              I am a protected veteran
+            </option>
+            <option value="I am not a protected veteran.">
+              I am not a protected veteran
+            </option>
+            <option value="I do not wish to answer.">
+              I do not wish to answer
+            </option>
+          </select>
+        </label>
+        <label className="space-y-2">
+          <span className="text-sm font-medium text-slate-700">
+            Disability status
+          </span>
+          <select
+            className="min-h-11 w-full rounded-md border border-slate-300 bg-white px-3 text-sm text-slate-950 shadow-sm focus:border-emerald-700"
+            value={draft.disabilityStatus}
+            onChange={(event) => update("disabilityStatus", event.target.value)}
+          >
+            <option value="">— Choose —</option>
+            <option value="Yes, I have a disability, or have had one in the past.">
+              Yes, I have a disability (or have had one in the past)
+            </option>
+            <option value="No, I do not have a disability and have not had one in the past.">
+              No, I do not have a disability
+            </option>
+            <option value="I do not want to answer.">
+              I do not want to answer
+            </option>
+          </select>
+        </label>
+      </div>
+    </section>
   );
 }

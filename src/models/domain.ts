@@ -391,6 +391,30 @@ export interface UserProfile {
   companiesToPrioritize: string[];
   careerSummary: string;
   verifiedFacts: string[];
+  /**
+   * Application-form defaults — values for the standard
+   * Greenhouse / Lever questions every form asks so the
+   * Browser Assistant can surface them as paste-ready answers
+   * without forcing the candidate to re-think them per job.
+   *
+   * All free strings (not enums) so the user can match the
+   * EXACT wording the form expects (e.g. "No, I do not and will
+   * not need a visa sponsorship" vs. "No"). Default empty.
+   */
+  visaSponsorshipNeeded: string;
+  howDidYouHearAboutUs: string;
+  /**
+   * Voluntary self-identification (EEO-1 + Section 503). All
+   * default to "Prefer not to say" so the candidate has a safe,
+   * neutral answer ready for any form that asks. Stored only in
+   * the local workspace; never logged; only ever leaves via the
+   * candidate's own paste action. The candidate can override any
+   * value at any time on the Profile setup page.
+   */
+  genderIdentity: string;
+  raceEthnicity: string;
+  veteranStatus: string;
+  disabilityStatus: string;
   createdAt: string;
   updatedAt: string;
 }

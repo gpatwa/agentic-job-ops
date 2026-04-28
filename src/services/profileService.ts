@@ -21,6 +21,14 @@ export interface UserProfileDraft {
   companiesToPrioritize: string;
   careerSummary: string;
   verifiedFacts: string;
+  /** Application-form defaults — common Greenhouse / Lever questions. */
+  visaSponsorshipNeeded: string;
+  howDidYouHearAboutUs: string;
+  /** Voluntary EEO-1 / Section 503 self-identification. All optional. */
+  genderIdentity: string;
+  raceEthnicity: string;
+  veteranStatus: string;
+  disabilityStatus: string;
 }
 
 function createId(prefix: string): string {
@@ -77,6 +85,12 @@ export function createEmptyProfile(session: AppSession): UserProfile {
     companiesToPrioritize: [],
     careerSummary: "",
     verifiedFacts: [],
+    visaSponsorshipNeeded: "",
+    howDidYouHearAboutUs: "",
+    genderIdentity: "",
+    raceEthnicity: "",
+    veteranStatus: "",
+    disabilityStatus: "",
     createdAt: now,
     updatedAt: now
   };
@@ -101,7 +115,13 @@ export function profileToDraft(profile: UserProfile): UserProfileDraft {
     companiesToAvoid: formatList(profile.companiesToAvoid),
     companiesToPrioritize: formatList(profile.companiesToPrioritize),
     careerSummary: profile.careerSummary,
-    verifiedFacts: formatList(profile.verifiedFacts)
+    verifiedFacts: formatList(profile.verifiedFacts),
+    visaSponsorshipNeeded: profile.visaSponsorshipNeeded,
+    howDidYouHearAboutUs: profile.howDidYouHearAboutUs,
+    genderIdentity: profile.genderIdentity,
+    raceEthnicity: profile.raceEthnicity,
+    veteranStatus: profile.veteranStatus,
+    disabilityStatus: profile.disabilityStatus
   };
 }
 
@@ -133,6 +153,12 @@ export function draftToProfile(
     companiesToPrioritize: splitList(draft.companiesToPrioritize),
     careerSummary: draft.careerSummary.trim(),
     verifiedFacts: splitList(draft.verifiedFacts),
+    visaSponsorshipNeeded: draft.visaSponsorshipNeeded.trim(),
+    howDidYouHearAboutUs: draft.howDidYouHearAboutUs.trim(),
+    genderIdentity: draft.genderIdentity.trim(),
+    raceEthnicity: draft.raceEthnicity.trim(),
+    veteranStatus: draft.veteranStatus.trim(),
+    disabilityStatus: draft.disabilityStatus.trim(),
     createdAt: existingProfile?.createdAt ?? now,
     updatedAt: now
   };

@@ -106,6 +106,12 @@ export function synthesizeProfileWithResumeFallback(
       profile?.verifiedFacts?.length
         ? profile.verifiedFacts
         : extracted.quantifiedAchievements?.slice(0, 5) ?? [],
+    visaSponsorshipNeeded: profile?.visaSponsorshipNeeded ?? "",
+    howDidYouHearAboutUs: profile?.howDidYouHearAboutUs ?? "",
+    genderIdentity: profile?.genderIdentity ?? "",
+    raceEthnicity: profile?.raceEthnicity ?? "",
+    veteranStatus: profile?.veteranStatus ?? "",
+    disabilityStatus: profile?.disabilityStatus ?? "",
     createdAt: baseTimestamp,
     updatedAt: new Date().toISOString()
   };

@@ -251,6 +251,13 @@ function createDemoProfile(session: AppSession): UserProfile {
       "[Demo] Used SQL, product analytics, Figma, and customer interviews to prioritize product work.",
       "[Demo] Partnered with engineering, design, sales, and customer success on launch readiness."
     ],
+    visaSponsorshipNeeded:
+      "No, I do not and will not need a visa sponsorship.",
+    howDidYouHearAboutUs: "LinkedIn",
+    genderIdentity: "Prefer not to say",
+    raceEthnicity: "Prefer not to say",
+    veteranStatus: "Prefer not to say",
+    disabilityStatus: "Prefer not to say",
     createdAt: timestamp,
     updatedAt: timestamp
   });
@@ -918,7 +925,13 @@ export async function seedRealisticB2cDemo(
       companiesToAvoid: profile.companiesToAvoid.join(", "),
       companiesToPrioritize: profile.companiesToPrioritize.join(", "),
       careerSummary: profile.careerSummary,
-      verifiedFacts: profile.verifiedFacts.join(", ")
+      verifiedFacts: profile.verifiedFacts.join(", "),
+      visaSponsorshipNeeded: profile.visaSponsorshipNeeded,
+      howDidYouHearAboutUs: profile.howDidYouHearAboutUs,
+      genderIdentity: profile.genderIdentity,
+      raceEthnicity: profile.raceEthnicity,
+      veteranStatus: profile.veteranStatus,
+      disabilityStatus: profile.disabilityStatus
     },
     profile
   );

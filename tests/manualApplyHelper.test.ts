@@ -63,6 +63,12 @@ function fakeProfile(overrides: Partial<UserProfile> = {}): UserProfile {
     companiesToPrioritize: [],
     careerSummary: "Senior engineering leader with 20 years of experience.",
     verifiedFacts: ["Scaled team from 1 to 8"],
+    visaSponsorshipNeeded: "",
+    howDidYouHearAboutUs: "",
+    genderIdentity: "",
+    raceEthnicity: "",
+    veteranStatus: "",
+    disabilityStatus: "",
     createdAt: now,
     updatedAt: now,
     ...overrides
@@ -311,6 +317,124 @@ describe("buildManualApplyHelper — field assembly", () => {
       "https://job-boards.greenhouse.io/springhealth66/jobs/4653788005"
     );
     expect(helper.jobLabel).toBe("Senior Engineering Manager at Spring Health");
+  });
+});
+
+describe("buildManualApplyHelper — application defaults (visa, how-heard)", () => {
+  it("surfaces visaSponsorshipNeeded + howDidYouHearAboutUs as paste-ready rows", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        visaSponsorshipNeeded: "No, I do not and will not need a visa sponsorship.",
+        howDidYouHearAboutUs: "LinkedIn"
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    const labels = helper.fields.map((f) => f.label);
+    expect(labels).toContain("Will you require visa sponsorship now or in the future?");
+    expect(labels).toContain("How did you hear about us?");
+    expect(
+      helper.fields.find(
+        (f) =>
+          f.label === "Will you require visa sponsorship now or in the future?"
+      )?.value
+    ).toBe("No, I do not and will not need a visa sponsorship.");
+  });
+
+  it("lists empty visa / how-heard answers in missingFields", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        visaSponsorshipNeeded: "",
+        howDidYouHearAboutUs: ""
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    const missingLabels = helper.missingFields.map((m) => m.label);
+    expect(missingLabels).toContain(
+      "Will you require visa sponsorship now or in the future?"
+    );
+    expect(missingLabels).toContain("How did you hear about us?");
+  });
+});
+
+describe("buildManualApplyHelper — voluntary self-identification", () => {
+  it("populates voluntarySelfIdFields with each EEO-1 / Section 503 answer the user has set", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        genderIdentity: "Prefer not to say",
+        raceEthnicity: "Asian (Not Hispanic or Latino)",
+        veteranStatus: "I am not a protected veteran.",
+        disabilityStatus: "I do not want to answer."
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    expect(helper.voluntarySelfIdFields).toHaveLength(4);
+    const labels = helper.voluntarySelfIdFields.map((f) => f.label);
+    expect(labels).toEqual([
+      "Gender identity",
+      "Race / ethnicity",
+      "Veteran status",
+      "Disability status"
+    ]);
+    expect(
+      helper.voluntarySelfIdFields.every(
+        (f) => f.sourceLabel === "voluntary self-id"
+      )
+    ).toBe(true);
+  });
+
+  it("does NOT auto-populate voluntary fields with default values when empty", () => {
+    // Privacy: we don't fabricate "Prefer not to say" on the user's
+    // behalf. They have to explicitly set it on Profile setup. Empty
+    // values surface in missingFields with soft "voluntary; valid to
+    // skip" guidance instead.
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        genderIdentity: "",
+        raceEthnicity: "",
+        veteranStatus: "",
+        disabilityStatus: ""
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    expect(helper.voluntarySelfIdFields).toHaveLength(0);
+    const missingLabels = helper.missingFields.map((m) => m.label);
+    expect(missingLabels).toContain("Gender identity");
+    expect(missingLabels).toContain("Disability status");
+  });
+
+  it("includes voluntary self-id fields in copyAllText under their own section header", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        genderIdentity: "Prefer not to say",
+        veteranStatus: "I am not a protected veteran."
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    expect(helper.copyAllText).toContain("## Voluntary self-identification");
+    expect(helper.copyAllText).toContain("Gender identity: Prefer not to say");
+    expect(helper.copyAllText).toContain(
+      "Veteran status: I am not a protected veteran."
+    );
   });
 });
 

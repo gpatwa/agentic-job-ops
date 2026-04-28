@@ -125,7 +125,13 @@ describe("realistic B2C demo seed", () => {
         companiesToAvoid: "",
         companiesToPrioritize: "",
         careerSummary: "Real profile data",
-        verifiedFacts: "Real verified fact"
+        verifiedFacts: "Real verified fact",
+        visaSponsorshipNeeded: "",
+        howDidYouHearAboutUs: "",
+        genderIdentity: "",
+        raceEthnicity: "",
+        veteranStatus: "",
+        disabilityStatus: ""
       },
       null
     );

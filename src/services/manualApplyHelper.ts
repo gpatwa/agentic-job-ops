@@ -81,6 +81,12 @@ export interface ManualApplyHelperData {
   resumeFileName: string | null;
   /** Direct text fields the user should paste (name / email / phone / etc). */
   fields: ManualApplyField[];
+  /**
+   * Voluntary EEO-1 / Section 503 self-identification answers. Rendered
+   * in their own section on the helper card so they're clearly labeled
+   * as voluntary and the user knows the source.
+   */
+  voluntarySelfIdFields: ManualApplyField[];
   /** Profile fields that are empty but commonly required by forms. */
   missingFields: ManualApplyMissingField[];
   /** Cover letter text (only when the package opted in). */
@@ -91,8 +97,9 @@ export interface ManualApplyHelperData {
   pauseItems: ManualApplyPauseItem[];
   /**
    * Pre-formatted copy-all text. One click puts every field +
-   * cover letter + short answers in the clipboard as a structured
-   * block the user can scan while filling the form.
+   * voluntary self-id + cover letter + short answers in the
+   * clipboard as a structured block the user can scan while
+   * filling the form.
    */
   copyAllText: string;
 }
@@ -210,7 +217,81 @@ function buildProfileFieldRows(
     "Work Authorization",
     profile.workAuthorization,
     "workAuthorization",
-    'Often asked as "Are you authorized to work in the U.S.?" or "Will you require visa sponsorship?"'
+    'Often asked as "Are you authorized to work in the U.S.?"'
+  );
+
+  // Common Greenhouse / Lever questions — universal enough that we
+  // surface them as their own profile fields so the user picks an
+  // answer once and reuses it everywhere.
+  push(
+    "Will you require visa sponsorship now or in the future?",
+    profile.visaSponsorshipNeeded,
+    "visaSponsorshipNeeded",
+    "Standard Greenhouse / Lever radio. Pick the option that matches your situation; the helper will surface it on every application."
+  );
+  push(
+    "How did you hear about us?",
+    profile.howDidYouHearAboutUs,
+    "howDidYouHearAboutUs",
+    "Most forms include this. A short default like \"LinkedIn\" or \"Referral\" covers most cases."
+  );
+
+  return { fields, missing };
+}
+
+/**
+ * Voluntary self-identification fields (EEO-1 / Section 503).
+ * Surfaced in their own section on the manual-apply card so the
+ * user can paste them when the form asks. Default empty; the
+ * user sets them on Profile setup. Stored only in the local
+ * workspace; never logged.
+ */
+function buildVoluntarySelfIdRows(
+  profile: UserProfile | null
+): { fields: ManualApplyField[]; missing: ManualApplyMissingField[] } {
+  const fields: ManualApplyField[] = [];
+  const missing: ManualApplyMissingField[] = [];
+  if (!profile) {
+    return { fields, missing };
+  }
+
+  const push = (
+    label: string,
+    rawValue: string,
+    profileField: string,
+    guidance: string
+  ): void => {
+    const value = rawValue.trim();
+    if (value.length > 0) {
+      fields.push({ label, value, sourceLabel: "voluntary self-id" });
+    } else {
+      missing.push({ label, guidance, profileField });
+    }
+  };
+
+  push(
+    "Gender identity",
+    profile.genderIdentity,
+    "genderIdentity",
+    'Voluntary EEO-1 question. "Prefer not to say" is always a valid answer.'
+  );
+  push(
+    "Race / ethnicity",
+    profile.raceEthnicity,
+    "raceEthnicity",
+    'Voluntary EEO-1 question. "Prefer not to say" is always a valid answer.'
+  );
+  push(
+    "Veteran status",
+    profile.veteranStatus,
+    "veteranStatus",
+    'Voluntary EEO-1 question. "I do not wish to answer" is always a valid choice.'
+  );
+  push(
+    "Disability status",
+    profile.disabilityStatus,
+    "disabilityStatus",
+    'Voluntary Section 503 question. "I do not want to answer" is always a valid choice.'
   );
 
   return { fields, missing };
@@ -258,6 +339,7 @@ function buildCopyAllText(input: {
   jobUrl: string;
   resumeFileName: string | null;
   fields: ManualApplyField[];
+  voluntarySelfIdFields: ManualApplyField[];
   coverLetter: string | null;
   shortAnswers: ManualApplyAnswer[];
 }): string {
@@ -271,6 +353,13 @@ function buildCopyAllText(input: {
     sections.push("");
     sections.push("## Your details");
     for (const field of input.fields) {
+      sections.push(`${field.label}: ${field.value}`);
+    }
+  }
+  if (input.voluntarySelfIdFields.length > 0) {
+    sections.push("");
+    sections.push("## Voluntary self-identification");
+    for (const field of input.voluntarySelfIdFields) {
       sections.push(`${field.label}: ${field.value}`);
     }
   }
@@ -306,6 +395,13 @@ export function buildManualApplyHelper(input: {
   //    profile fields go into missingFields so the user can pre-fill
   //    them on the Profile setup page.
   const { fields: profileFields, missing } = buildProfileFieldRows(profile);
+  const { fields: voluntarySelfIdFields, missing: voluntarySelfIdMissing } =
+    buildVoluntarySelfIdRows(profile);
+  // Surface missing voluntary self-id rows alongside the regular
+  // missing rows so the user gets ONE consolidated "add to profile"
+  // list. Voluntary fields aren't required for any application —
+  // the missing-list framing is intentionally soft.
+  const allMissing = [...missing, ...voluntarySelfIdMissing];
 
   // 2) Plus any additional free-text fields the session detected
   //    that match a saved short-answer (e.g. "What makes you a
@@ -361,6 +457,7 @@ export function buildManualApplyHelper(input: {
     jobUrl: job.applicationUrl,
     resumeFileName,
     fields,
+    voluntarySelfIdFields,
     coverLetter,
     shortAnswers
   });
@@ -370,7 +467,8 @@ export function buildManualApplyHelper(input: {
     jobLabel,
     resumeFileName,
     fields,
-    missingFields: missing,
+    voluntarySelfIdFields,
+    missingFields: allMissing,
     coverLetter,
     shortAnswers,
     pauseItems,
