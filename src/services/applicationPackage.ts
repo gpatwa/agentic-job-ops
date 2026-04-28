@@ -99,6 +99,13 @@ export interface ApplicationPackageGenerationRequest extends ApplicationPackageC
   session: AppSession;
   application: ApplicationRecord;
   adapter?: ApplicationPackageGenerator;
+  /**
+   * When true, generate a cover letter draft. Defaults to the
+   * existing package's `coverLetterIncluded` flag (false on first
+   * generation). The user opts in via the "Generate cover letter"
+   * button on the package page.
+   */
+  includeCoverLetter?: boolean;
 }
 
 export interface GeneratedAnswerDraft {
@@ -451,9 +458,14 @@ export class DeterministicApplicationPackageGenerator implements ApplicationPack
   modelName = DETERMINISTIC_MODEL_NAME;
 
   async generate(request: ApplicationPackageGenerationRequest) {
+    // Cover letter is opt-in (post-Phase-4 UX change). Skip the
+    // template entirely when the caller hasn't requested one.
+    const includeCoverLetter = request.includeCoverLetter ?? false;
     return {
       resumeMarkdown: buildResumeMarkdown(request.profile, request.resume, request.job),
-      coverLetter: buildCoverLetter(request.profile, request.job),
+      coverLetter: includeCoverLetter
+        ? buildCoverLetter(request.profile, request.job)
+        : "",
       answers: buildAnswers(request.profile, request.resume, request.job),
       generationMode: this.mode,
       modelName: this.modelName,
@@ -477,6 +489,41 @@ export function createDeterministicApplicationPackageGenerator(): ApplicationPac
 
 export function createPlaceholderLlmApplicationPackageGenerator(): ApplicationPackageGenerator {
   return new PlaceholderLlmApplicationPackageGenerator();
+}
+
+/**
+ * Compose two generators: try `primary` first, fall back to
+ * `fallback` on any throw. Used to layer the API-backed (LLM)
+ * generator on top of the deterministic generator so a transient
+ * server outage never blocks the user from seeing a draft.
+ *
+ * The result's `mode` + `modelName` reflect whichever generator
+ * actually produced the content (delegated via the GeneratedContent
+ * fields).
+ */
+export function createFallbackApplicationPackageGenerator(
+  primary: ApplicationPackageGenerator,
+  fallback: ApplicationPackageGenerator
+): ApplicationPackageGenerator {
+  return {
+    // Initial mode reflects the primary; the actual produced
+    // content's `generationMode` field is what gets persisted.
+    mode: primary.mode,
+    modelName: primary.modelName,
+    async generate(
+      request: ApplicationPackageGenerationRequest
+    ): Promise<GeneratedApplicationPackageContent> {
+      try {
+        return await primary.generate(request);
+      } catch {
+        // Surface as deterministic fallback. The route layer would
+        // already have logged the primary failure; we only get here
+        // when the API endpoint itself is unreachable (e.g. the API
+        // server is down entirely).
+        return await fallback.generate(request);
+      }
+    }
+  };
 }
 
 export function loadApplicationPackages(session: AppSession): ApplicationPackage[] {
@@ -558,6 +605,11 @@ export async function generateApplicationPackage(
     generated.coverLetter,
     generated.answers
   );
+  // Persist the cover-letter inclusion choice on the package itself
+  // (rather than per-generation) so the UI can render the gate next
+  // time the user opens the package without re-running generation.
+  const coverLetterIncluded =
+    request.includeCoverLetter ?? existingPackage?.coverLetterIncluded ?? false;
   const applicationPackage = applicationPackageSchema.parse({
     id: existingPackage?.id ?? createId("pkg"),
     tenantId: request.session.tenant.id,
@@ -567,6 +619,7 @@ export async function generateApplicationPackage(
     status: "ready_for_review",
     resumeMarkdown: generated.resumeMarkdown,
     coverLetter: generated.coverLetter,
+    coverLetterIncluded,
     generationMode: generated.generationMode,
     modelName: generated.modelName,
     promptVersion: generated.promptVersion,

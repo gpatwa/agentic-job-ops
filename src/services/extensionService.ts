@@ -450,6 +450,7 @@ export function createExtensionFillPlan(
         status: context.applicationPackage ? "approved" : "draft",
         resumeMarkdown: "",
         coverLetter: "",
+        coverLetterIncluded: false,
         generationMode: "deterministic",
         modelName: "demo",
         promptVersion: "demo",

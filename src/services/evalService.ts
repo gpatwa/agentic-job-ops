@@ -257,6 +257,7 @@ function applicationPackage(
     status,
     resumeMarkdown: "# Example User\n\nLed B2B SaaS workflow automation launches.",
     coverLetter: "Dear hiring team,\n\nI am interested in this role.",
+    coverLetterIncluded: true,
     generationMode: "deterministic",
     modelName: "deterministic-package-fallback",
     promptVersion: "application-package-v1",

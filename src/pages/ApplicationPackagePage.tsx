@@ -4,7 +4,9 @@ import {
   CheckCircle2,
   ExternalLink,
   FileText,
+  Paperclip,
   ShieldCheck,
+  Sparkles,
   XCircle
 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -33,6 +35,19 @@ interface ApplicationPackagePageProps {
   riskSignals: JobRiskSignal[];
   recruiterLeads: RecruiterLead[];
   isGeneratingIntelligence: boolean;
+  /**
+   * Original filename of the resume attached to this application
+   * (e.g. "GopalPatwa-Resume.pdf"). Surfaced in a "Resume attached"
+   * badge near the resume draft so the user knows which file the
+   * browser-application assistant will upload at submit time.
+   */
+  resumeFileName?: string;
+  /**
+   * True while the LLM is regenerating the package (e.g. after the
+   * user opted in to a cover letter). Disables the opt-in button to
+   * prevent double-submits.
+   */
+  isRegeneratingPackage?: boolean;
   onBack: () => void;
   onSavePackage: (
     packageId: string,
@@ -43,6 +58,12 @@ interface ApplicationPackagePageProps {
   onReject: (packageId: string) => void;
   onStartBrowserApply: (packageId: string) => void;
   onOpenBrowserSession: (sessionId: string) => void;
+  /**
+   * Opt the user into a cover letter for this package. Defined when
+   * the LLM regeneration is plumbed through; when undefined (e.g.
+   * tests) the opt-in button is not rendered.
+   */
+  onGenerateCoverLetter?: (packageId: string) => void;
   onGenerateIntelligence: () => void;
   onMarkIntelligenceHelpful: () => void;
   onMarkIntelligenceNotHelpful: () => void;
@@ -158,6 +179,8 @@ export function ApplicationPackagePage({
   riskSignals,
   recruiterLeads,
   isGeneratingIntelligence,
+  resumeFileName,
+  isRegeneratingPackage,
   onBack,
   onSavePackage,
   onSaveAnswer,
@@ -165,6 +188,7 @@ export function ApplicationPackagePage({
   onReject,
   onStartBrowserApply,
   onOpenBrowserSession,
+  onGenerateCoverLetter,
   onGenerateIntelligence,
   onMarkIntelligenceHelpful,
   onMarkIntelligenceNotHelpful,
@@ -360,7 +384,7 @@ export function ApplicationPackagePage({
       </section>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
           <div>
             <h3 className="text-base font-semibold text-slate-950">
               Resume draft
@@ -369,6 +393,19 @@ export function ApplicationPackagePage({
               Tailored from verified profile facts, parsed resume evidence, and the
               job description.
             </p>
+            {/* Resume-attached badge — surfaces the actual file the
+                browser-application assistant will upload at submit
+                time. The tailored markdown above is a preview /
+                edit surface; the underlying PDF/DOCX is the artifact. */}
+            {resumeFileName && (
+              <p
+                className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"
+                data-testid="resume-attached-badge"
+              >
+                <Paperclip aria-hidden="true" size={12} />
+                Resume attached: {resumeFileName}
+              </p>
+            )}
           </div>
           <button
             className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
@@ -393,39 +430,78 @@ export function ApplicationPackagePage({
         </div>
       </section>
 
-      <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="text-base font-semibold text-slate-950">
-              Cover letter draft
-            </h3>
-            <p className="mt-1 text-sm text-slate-500">
-              Concise role-specific draft with unsupported claims guarded by the
-              safety checker.
-            </p>
+      {/*
+        Cover letter is opt-in. Most postings don't require one and
+        an unwanted cover-letter draft is friction. The full editor
+        renders only when applicationPackage.coverLetterIncluded ===
+        true. Otherwise we show a slim card with a "Generate cover
+        letter" button that triggers a regeneration with
+        includeCoverLetter: true.
+      */}
+      {applicationPackage.coverLetterIncluded ? (
+        <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">
+                Cover letter draft
+              </h3>
+              <p className="mt-1 text-sm text-slate-500">
+                Concise role-specific draft with unsupported claims guarded by the
+                safety checker.
+              </p>
+            </div>
+            <button
+              className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+              type="button"
+              onClick={() =>
+                onSavePackage(applicationPackage.id, {
+                  resumeMarkdown: resumeDraft,
+                  coverLetter: coverLetterDraft
+                })
+              }
+            >
+              Save package drafts
+            </button>
           </div>
-          <button
-            className="inline-flex min-h-9 items-center justify-center rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
-            type="button"
-            onClick={() =>
-              onSavePackage(applicationPackage.id, {
-                resumeMarkdown: resumeDraft,
-                coverLetter: coverLetterDraft
-              })
-            }
-          >
-            Save package drafts
-          </button>
-        </div>
-        <div className="mt-4 grid gap-4 xl:grid-cols-2">
-          <textarea
-            className="min-h-72 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900"
-            value={coverLetterDraft}
-            onChange={(event) => setCoverLetterDraft(event.target.value)}
-          />
-          <DraftPreview text={coverLetterDraft} />
-        </div>
-      </section>
+          <div className="mt-4 grid gap-4 xl:grid-cols-2">
+            <textarea
+              className="min-h-72 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-6 text-slate-900"
+              value={coverLetterDraft}
+              onChange={(event) => setCoverLetterDraft(event.target.value)}
+            />
+            <DraftPreview text={coverLetterDraft} />
+          </div>
+        </section>
+      ) : (
+        <section
+          className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-5"
+          data-testid="cover-letter-optional-card"
+        >
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-slate-950">
+                Cover letter (optional)
+              </h3>
+              <p className="mt-1 text-sm text-slate-600">
+                Most jobs don't require a cover letter. Generate one only if the
+                posting asks for it.
+              </p>
+            </div>
+            {onGenerateCoverLetter && (
+              <button
+                className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+                data-testid="generate-cover-letter"
+                type="button"
+                disabled={Boolean(isRegeneratingPackage)}
+                onClick={() => onGenerateCoverLetter(applicationPackage.id)}
+              >
+                <Sparkles aria-hidden="true" size={13} />
+                {isRegeneratingPackage ? "Generating…" : "Generate cover letter"}
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <h3 className="text-base font-semibold text-slate-950">

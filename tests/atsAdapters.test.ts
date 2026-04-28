@@ -42,6 +42,7 @@ function applicationPackage(): ApplicationPackage {
     status: "approved",
     resumeMarkdown: "# Example User\n\nLed workflow automation launches.",
     coverLetter: "Dear hiring team,\n\nI am interested in this role.",
+    coverLetterIncluded: true,
     generationMode: "deterministic",
     modelName: "test",
     promptVersion: "test",

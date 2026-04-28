@@ -222,6 +222,11 @@ export const applicationPackageSchema = z.object({
   status: z.enum(applicationPackageStatuses),
   resumeMarkdown: z.string(),
   coverLetter: z.string(),
+  // .default(false) so existing localStorage-persisted packages
+  // (written before this field existed) parse cleanly. New packages
+  // start with cover letter opt-OUT; the user opts in via the
+  // "Generate cover letter" button on the package page.
+  coverLetterIncluded: z.boolean().default(false),
   generationMode: z.enum(generationModes),
   modelName: z.string().trim().min(1),
   promptVersion: z.string().trim().min(1),

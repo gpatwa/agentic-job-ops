@@ -56,6 +56,7 @@ function makePackage(overrides: Partial<ApplicationPackage> = {}): ApplicationPa
     status: "approved",
     resumeMarkdown: "",
     coverLetter: "",
+    coverLetterIncluded: false,
     generationMode: "deterministic",
     modelName: "test",
     promptVersion: "test",

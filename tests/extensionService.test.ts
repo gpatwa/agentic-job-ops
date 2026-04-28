@@ -366,6 +366,7 @@ describe("extensionService", () => {
           status: "ready_for_review",
           resumeMarkdown: "",
           coverLetter: "",
+          coverLetterIncluded: false,
           generationMode: "deterministic",
           modelName: "demo",
           promptVersion: "demo",

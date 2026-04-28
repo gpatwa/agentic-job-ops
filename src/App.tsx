@@ -76,6 +76,8 @@ import { clearScopedWorkspace } from "./lib/storage";
 import { appendAuditLog, loadAuditLogs } from "./services/auditLog";
 import {
   approveApplicationPackage,
+  createDeterministicApplicationPackageGenerator,
+  createFallbackApplicationPackageGenerator,
   generateApplicationPackage,
   loadApplicationAnswers,
   loadApplicationPackages,
@@ -84,6 +86,7 @@ import {
   updateApplicationPackageDraft,
   type ApplicationPackageContext
 } from "./services/applicationPackage";
+import { createApiBackedApplicationPackageGenerator } from "./services/applicationPackageApiClient";
 import { loadApplications } from "./services/applicationService";
 import {
   applyDashboardJobAction,
@@ -357,6 +360,7 @@ export default function App() {
     ResumeImprovementDraft[]
   >(() => loadResumeImprovementDrafts(currentSession));
   const [isImprovingResume, setIsImprovingResume] = useState(false);
+  const [isRegeneratingPackage, setIsRegeneratingPackage] = useState(false);
   // Latest server-side parse diagnostic. Set by the upload handler
   // when the AI API server returns a structured result; cleared
   // by paste/demo flows that produce text locally and don't need
@@ -1143,13 +1147,24 @@ export default function App() {
       return;
     }
 
+    // Default to the API-backed (LLM) generator with a local
+     // deterministic fallback. The route ALSO falls back internally
+     // when the provider call fails — this client-side fallback only
+     // catches the "API server is unreachable entirely" case (e.g.
+     // no API server running in dev). The package's persisted
+     // generationMode field surfaces whichever path produced the
+     // content.
     const packageResult = await generateApplicationPackage({
       session: currentSession,
       application: result.application,
       profile,
       resume,
       job,
-      match: jobMatches.find((match) => match.jobId === jobId) ?? null
+      match: jobMatches.find((match) => match.jobId === jobId) ?? null,
+      adapter: createFallbackApplicationPackageGenerator(
+        createApiBackedApplicationPackageGenerator(),
+        createDeterministicApplicationPackageGenerator()
+      )
     });
 
     setApplicationPackages(loadApplicationPackages(currentSession));
@@ -1236,6 +1251,61 @@ export default function App() {
   function handleApplicationNotesChange(applicationId: string, notes: string) {
     const result = changeApplicationNotes(currentSession, applicationId, notes);
     recordWorkflowResult(result);
+  }
+
+  /**
+   * Opt the user into a cover letter for an existing package.
+   * Re-runs generation with `includeCoverLetter: true` so the LLM
+   * (or deterministic fallback) produces the cover-letter draft and
+   * the package's `coverLetterIncluded` flag flips so the editor
+   * stays visible on subsequent renders. Best-effort: any failure
+   * leaves the package unchanged and surfaces in audit.
+   */
+  async function handleGenerateCoverLetter(packageId: string): Promise<void> {
+    const existing = applicationPackages.find(
+      (applicationPackage) => applicationPackage.id === packageId
+    );
+    if (!existing) {
+      return;
+    }
+    const application = applications.find(
+      (item) => item.id === existing.applicationRecordId
+    );
+    const job = normalizedJobs.find((item) => item.id === existing.jobId);
+    if (!application || !job) {
+      return;
+    }
+    setIsRegeneratingPackage(true);
+    try {
+      const packageResult = await generateApplicationPackage({
+        session: currentSession,
+        application,
+        profile,
+        resume,
+        job,
+        match: jobMatches.find((match) => match.jobId === existing.jobId) ?? null,
+        includeCoverLetter: true,
+        adapter: createFallbackApplicationPackageGenerator(
+          createApiBackedApplicationPackageGenerator({
+            includeCoverLetter: true
+          }),
+          createDeterministicApplicationPackageGenerator()
+        )
+      });
+      setApplicationPackages(loadApplicationPackages(currentSession));
+      setApplicationAnswers(loadApplicationAnswers(currentSession));
+      recordAudit({
+        action: "application_package_cover_letter_opted_in",
+        resourceType: "ApplicationPackage",
+        resourceId: packageResult.package.id,
+        metadata: {
+          jobId: packageResult.package.jobId,
+          generationMode: packageResult.package.generationMode
+        }
+      });
+    } finally {
+      setIsRegeneratingPackage(false);
+    }
   }
 
   function handleSaveApplicationPackageDraft(
@@ -3569,6 +3639,8 @@ export default function App() {
             riskSignals={jobRiskSignalsForJob}
             recruiterLeads={recruiterLeadsForJob}
             isGeneratingIntelligence={isGeneratingIntelligence}
+            resumeFileName={resume?.originalFileName}
+            isRegeneratingPackage={isRegeneratingPackage}
             onBack={() => navigate("tracker")}
             onSavePackage={handleSaveApplicationPackageDraft}
             onSaveAnswer={handleSaveApplicationAnswer}
@@ -3576,6 +3648,7 @@ export default function App() {
             onReject={handleRejectApplicationPackage}
             onStartBrowserApply={handleStartBrowserApply}
             onOpenBrowserSession={navigateToBrowserSession}
+            onGenerateCoverLetter={handleGenerateCoverLetter}
             onGenerateIntelligence={() =>
               job ? handleGenerateIntelligenceForJob(job.id) : undefined
             }

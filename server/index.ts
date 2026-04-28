@@ -6,6 +6,7 @@ import { getAiStatusResponse } from "./routes/aiStatusRoute";
 import { handleAiProbe } from "./routes/aiProbeRoute";
 import { handleResumeIntelligence } from "./routes/resumeIntelligenceRoute";
 import { handleResumeParse } from "./routes/resumeParseRoute";
+import { handleApplicationPackage } from "./routes/applicationPackageRoute";
 
 /**
  * Agentic Job Ops AI API server.
@@ -206,6 +207,40 @@ export function createApiServer(config = getServerConfig()) {
         }
 
         const result = await handleResumeIntelligence(parsed);
+        writeJson(res, result.status, result.body, corsOrigin);
+        for (const entry of result.logs) {
+          logRequest(entry.message, entry.fields);
+        }
+        logRequest("http.request", {
+          method,
+          path,
+          status: result.status,
+          durationMs: Date.now() - startedAt
+        });
+        return;
+      }
+
+      if (method === "POST" && path === "/api/ai/application-package") {
+        let parsed: unknown;
+        try {
+          parsed = await readJsonBody(req);
+        } catch (error) {
+          const message =
+            error instanceof Error && error.message === "REQUEST_BODY_TOO_LARGE"
+              ? "Request body exceeds the configured limit."
+              : "Invalid JSON in request body.";
+          writeJson(res, 400, { error: message }, corsOrigin);
+          logRequest("http.request", {
+            method,
+            path,
+            status: 400,
+            durationMs: Date.now() - startedAt,
+            kind: "body_parse_failed"
+          });
+          return;
+        }
+
+        const result = await handleApplicationPackage(parsed);
         writeJson(res, result.status, result.body, corsOrigin);
         for (const entry of result.logs) {
           logRequest(entry.message, entry.fields);

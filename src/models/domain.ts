@@ -507,6 +507,14 @@ export interface ApplicationPackage {
   status: ApplicationPackageStatus;
   resumeMarkdown: string;
   coverLetter: string;
+  /**
+   * Whether the user has opted in to a cover letter for this
+   * package. Default `false` — most jobs don't require one and the
+   * old "always show a cover letter draft" UX created friction.
+   * The cover letter section in the UI hides when this is false;
+   * generation only produces a cover letter when this is true.
+   */
+  coverLetterIncluded: boolean;
   generationMode: GenerationMode;
   modelName: string;
   promptVersion: string;
