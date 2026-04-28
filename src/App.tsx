@@ -127,6 +127,7 @@ import {
   type OnboardingJobImportResult
 } from "./services/onboardingJobUrlImport";
 import { synthesizeProfileWithResumeFallback } from "./services/userProfileFromResume";
+import { discoverAndIngestForRecommendation } from "./services/companyJobDiscovery";
 import {
   loadAIOutputMetadata,
   recordAIOutputMetadata
@@ -2827,6 +2828,26 @@ export default function App() {
       setResumeIntelligenceReports(loadResumeIntelligenceReports(currentSession));
       setJobTargetRecommendations(loadJobTargetRecommendations(currentSession));
       persistResumeIntelligenceAuditEvents(result.auditEvents);
+
+      // Platform-driven discovery: as soon as the LLM tells us
+      // which industries / roles the candidate fits, ingest jobs
+      // from the curated catalog of companies in those industries
+      // (Greenhouse + Lever public boards). The customer never
+      // configures an ATS source — we own the catalog. Fire-and-
+      // forget; the discovery service caches per-session and
+      // isolates network failures so a slow board never blocks
+      // the analysis return.
+      const recommendation = result.recommendation;
+      void discoverAndIngestForRecommendation(currentSession, recommendation)
+        .then(() => {
+          setNormalizedJobs(loadNormalizedJobs(currentSession));
+        })
+        .catch(() => {
+          /* discovery failures are isolated per-source inside the
+             service; this catch only fires on truly unexpected
+             errors and we want the analysis return to land
+             regardless. */
+        });
     } finally {
       setIsAnalyzingResume(false);
     }

@@ -479,7 +479,12 @@ export async function recommendApplyReadyJobs(
     matchedIds.has(match.jobId)
   );
   const groups = groupRecommendations(matchesForRecommendations, workingJobs);
-  const showsDemoBanner = workingJobs.some(isDemoJob);
+  // Only flag the "demo jobs are shown" banner when EVERY visible
+  // job is a demo. Once the LLM-driven company discovery has
+  // ingested real jobs from the curated catalog, the demo banner
+  // is misleading — the platform has real sources configured.
+  const showsDemoBanner =
+    workingJobs.length > 0 && workingJobs.every(isDemoJob);
 
   auditEvents.push(
     event("onboarding_jobs_recommended", state, {

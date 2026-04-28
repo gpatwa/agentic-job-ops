@@ -1660,8 +1660,9 @@ function RecommendationsSection({
     <section className="space-y-4">
       {result.showsDemoBanner && (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-          Demo jobs are shown so you can see how matching works. Add a real
-          source on the Ingestion page when you're ready.
+          Demo jobs are shown so you can see how matching works. The platform
+          will pull real openings from a curated company catalog as soon as
+          your resume analysis completes.
         </div>
       )}
 
