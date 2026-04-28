@@ -314,6 +314,142 @@ describe("buildManualApplyHelper — field assembly", () => {
   });
 });
 
+describe("buildManualApplyHelper — surfaces ALL profile fields (not just session-detected)", () => {
+  it("includes Location / LinkedIn / GitHub / Portfolio / Work auth from the profile when set, even if the session didn't detect them", () => {
+    // The static GreenhouseATSAdapter fixture only "detects" first
+    // name + last name + email + phone. The real Spring Health form
+    // also has Location, LinkedIn, Website, Visa-sponsorship, etc.
+    // The helper should surface every profile value regardless of
+    // what the dry-run detector reported.
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        location: "San Francisco Bay Area",
+        linkedinUrl: "https://linkedin.com/in/gopalpatwa",
+        githubUrl: "https://github.com/gopalpatwa",
+        portfolioUrl: "https://gopalpatwa.dev",
+        workAuthorization: "US Citizen"
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    const labels = helper.fields.map((f) => f.label);
+    expect(labels).toContain("Location");
+    expect(labels).toContain("LinkedIn URL");
+    expect(labels).toContain("GitHub URL");
+    expect(labels).toContain("Portfolio / Website");
+    expect(labels).toContain("Work Authorization");
+    expect(helper.fields.find((f) => f.label === "LinkedIn URL")?.value).toBe(
+      "https://linkedin.com/in/gopalpatwa"
+    );
+  });
+
+  it("populates missingFields for empty profile fields the form likely needs", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        location: "San Francisco Bay Area",
+        linkedinUrl: "",
+        githubUrl: "",
+        portfolioUrl: "",
+        workAuthorization: ""
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    const missingLabels = helper.missingFields.map((m) => m.label);
+    expect(missingLabels).toContain("LinkedIn URL");
+    expect(missingLabels).toContain("GitHub URL");
+    expect(missingLabels).toContain("Work Authorization");
+    expect(helper.missingFields.every((m) => m.guidance.length > 0)).toBe(true);
+  });
+
+  it("does not list a profile field in BOTH fields and missingFields", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        linkedinUrl: "https://linkedin.com/in/gopalpatwa"
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage(),
+      answers: []
+    });
+    expect(helper.fields.find((f) => f.label === "LinkedIn URL")).toBeDefined();
+    expect(
+      helper.missingFields.find((m) => m.label === "LinkedIn URL")
+    ).toBeUndefined();
+  });
+});
+
+describe("buildManualApplyHelper — copyAllText", () => {
+  it("includes every field, the cover letter, and short answers as a single text block", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile({
+        location: "San Francisco Bay Area",
+        linkedinUrl: "https://linkedin.com/in/gopalpatwa"
+      }),
+      resume: fakeResume(),
+      applicationPackage: fakePackage({
+        coverLetterIncluded: true,
+        coverLetter: "Dear hiring team,\n\nI am interested.",
+        shortAnswersIncluded: true
+      }),
+      answers: [
+        fakeAnswer({
+          question: "Why this role?",
+          answer: "Aligned with my data-platform leadership experience."
+        })
+      ]
+    });
+    const text = helper.copyAllText;
+    expect(text).toContain("Senior Engineering Manager at Spring Health");
+    expect(text).toContain(
+      "Application URL: https://job-boards.greenhouse.io/springhealth66/jobs/4653788005"
+    );
+    expect(text).toContain("Resume to upload: GopalPatwa-Resume.pdf");
+    expect(text).toContain("First Name: Gopal");
+    expect(text).toContain("Last Name: Patwa");
+    expect(text).toContain("Location: San Francisco Bay Area");
+    expect(text).toContain("LinkedIn URL: https://linkedin.com/in/gopalpatwa");
+    expect(text).toContain("## Cover letter");
+    expect(text).toContain("Dear hiring team");
+    expect(text).toContain("## Short answers");
+    expect(text).toContain("Q: Why this role?");
+    expect(text).toContain("A: Aligned with my data-platform leadership experience.");
+  });
+
+  it("omits the cover-letter section when the package opted out", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile(),
+      resume: fakeResume(),
+      applicationPackage: fakePackage({ coverLetterIncluded: false }),
+      answers: []
+    });
+    expect(helper.copyAllText).not.toContain("## Cover letter");
+  });
+
+  it("omits the short-answers section when the package opted out", () => {
+    const helper = buildManualApplyHelper({
+      session: fakeSession({ fieldsDetected: [] }),
+      job: fakeJob(),
+      profile: fakeProfile(),
+      resume: fakeResume(),
+      applicationPackage: fakePackage({ shortAnswersIncluded: false }),
+      answers: [fakeAnswer()]
+    });
+    expect(helper.copyAllText).not.toContain("## Short answers");
+  });
+});
+
 describe("buildManualApplyHelper — opt-in gates", () => {
   it("returns empty cover letter when the package opted out", () => {
     const helper = buildManualApplyHelper({

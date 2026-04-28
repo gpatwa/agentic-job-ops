@@ -10,18 +10,21 @@ import type {
 /**
  * Manual-apply helper.
  *
- * The Browser Assistant (Phase 5) runs in dry-run mode by default —
- * it computes what fields a real browser adapter WOULD fill, but
- * doesn't actually drive the page. When the user opts to "manual
- * apply" they need a clear, copyable summary of every value the
- * assistant prepared so they can paste it into the real
- * application form themselves.
+ * The Browser Assistant (Phase 5) runs in dry-run mode by default.
+ * The static GreenhouseATSAdapter / LeverATSAdapter return a fixed
+ * fixture of "detected fields" — they don't actually inspect the
+ * live page. So when the helper renders only what the session
+ * "detected", the user sees First Name + Last Name + Email + Phone
+ * and missing Country / Location / LinkedIn / Visa / Eligibility /
+ * "How did you hear about us" — every field a real Greenhouse form
+ * actually shows.
  *
- * This module is a pure assembler — no I/O, no React. It pulls the
- * full (non-redacted) profile fields, the package's resume +
- * cover letter drafts, and any short-answer drafts, and assembles
- * them into a list the UI can render with copy-to-clipboard
- * buttons next to each value.
+ * Fix: this helper now surfaces ALL candidate-side data the user has
+ * in their profile (Location, LinkedIn, GitHub, Portfolio, Work
+ * Authorization, etc.) regardless of whether the static detector
+ * listed them. The user matches them up to the real form. Empty
+ * profile fields surface as "missing" rows with an "Add to profile"
+ * CTA so they're ready next time.
  *
  * Privacy contract:
  * - The Browser Assistant session stores `valuePreview` strings
@@ -41,6 +44,20 @@ export interface ManualApplyField {
   value: string;
   /** Where the value came from (profile / resume / answer / package). */
   sourceLabel: string;
+}
+
+/**
+ * A candidate-side field that's commonly required by application
+ * forms but is empty in the user's profile. Surfaced with a CTA so
+ * the user can fill it on the Profile setup page and have it ready
+ * for the next application.
+ */
+export interface ManualApplyMissingField {
+  label: string;
+  /** Why this matters / what to enter (one-line guidance). */
+  guidance: string;
+  /** Profile-setup field id the user should fill. */
+  profileField: string;
 }
 
 export interface ManualApplyAnswer {
@@ -64,12 +81,20 @@ export interface ManualApplyHelperData {
   resumeFileName: string | null;
   /** Direct text fields the user should paste (name / email / phone / etc). */
   fields: ManualApplyField[];
+  /** Profile fields that are empty but commonly required by forms. */
+  missingFields: ManualApplyMissingField[];
   /** Cover letter text (only when the package opted in). */
   coverLetter: string | null;
   /** Short answers (only when the package opted in). */
   shortAnswers: ManualApplyAnswer[];
   /** Items the assistant can't help with (CAPTCHA / Final submit / Gender). */
   pauseItems: ManualApplyPauseItem[];
+  /**
+   * Pre-formatted copy-all text. One click puts every field +
+   * cover letter + short answers in the clipboard as a structured
+   * block the user can scan while filling the form.
+   */
+  copyAllText: string;
 }
 
 function firstName(fullName: string): string {
@@ -87,77 +112,123 @@ function lastName(fullName: string): string {
 }
 
 /**
- * Map a session field-detected `id` (e.g. "first_name", "email")
- * to a (label, value) pair, pulling the full value from the
- * candidate's profile / resume / answers. Returns `null` when the
- * source has nothing to fill — the UI should hide those rows
- * rather than showing an empty value.
+ * Build the candidate-side field list. We surface EVERY profile
+ * field that has a value, regardless of whether the session
+ * "detected" it on the form, because the static dry-run adapter
+ * is a fixture and most real forms have more fields than it
+ * reports.
+ *
+ * Empty profile fields go into `missingFields` instead so the user
+ * can pre-fill them in Profile setup.
  */
-function resolveFieldValue(input: {
-  fieldId: string;
-  fieldLabel: string;
-  profile: UserProfile | null;
-  resume: Resume | null;
-  applicationPackage: ApplicationPackage;
-  answers: ApplicationAnswer[];
-}): ManualApplyField | null {
-  const { fieldId, fieldLabel, profile, resume, applicationPackage, answers } = input;
-  const id = fieldId.toLowerCase();
-
-  if (id.includes("first") && id.includes("name")) {
-    const value = firstName(profile?.fullName ?? "");
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("last") && id.includes("name")) {
-    const value = lastName(profile?.fullName ?? "");
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("full") && id.includes("name")) {
-    const value = profile?.fullName?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id === "email" || id.endsWith("_email")) {
-    const value = profile?.email?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id === "phone" || id.endsWith("_phone")) {
-    const value = profile?.phone?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("location") || id.includes("city")) {
-    const value = profile?.location?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("linkedin")) {
-    const value = profile?.linkedinUrl?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("github")) {
-    const value = profile?.githubUrl?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("portfolio") || id.includes("website")) {
-    const value = profile?.portfolioUrl?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
-  }
-  if (id.includes("authorization") || id.includes("authorised") || id.includes("authorized")) {
-    const value = profile?.workAuthorization?.trim() ?? "";
-    if (!value) return null;
-    return { label: fieldLabel, value, sourceLabel: "profile" };
+function buildProfileFieldRows(
+  profile: UserProfile | null
+): { fields: ManualApplyField[]; missing: ManualApplyMissingField[] } {
+  const fields: ManualApplyField[] = [];
+  const missing: ManualApplyMissingField[] = [];
+  if (!profile) {
+    return { fields, missing };
   }
 
-  // For free-text fields ("What makes you a strong fit?", etc.) the
-  // session label is what the user will see on the form. Try to
-  // match a saved answer by question label.
+  const push = (
+    label: string,
+    rawValue: string,
+    profileField: string,
+    guidance: string
+  ): void => {
+    const value = rawValue.trim();
+    if (value.length > 0) {
+      fields.push({ label, value, sourceLabel: "profile" });
+    } else {
+      missing.push({ label, guidance, profileField });
+    }
+  };
+
+  const fullNameValue = profile.fullName.trim();
+  if (fullNameValue.length > 0) {
+    fields.push({
+      label: "First Name",
+      value: firstName(fullNameValue),
+      sourceLabel: "profile"
+    });
+    fields.push({
+      label: "Last Name",
+      value: lastName(fullNameValue),
+      sourceLabel: "profile"
+    });
+    fields.push({
+      label: "Full Name",
+      value: fullNameValue,
+      sourceLabel: "profile"
+    });
+  } else {
+    missing.push({
+      label: "Name",
+      guidance:
+        "Most forms require First Name + Last Name as separate fields.",
+      profileField: "fullName"
+    });
+  }
+
+  push(
+    "Email",
+    profile.email,
+    "email",
+    "Required on virtually every job application."
+  );
+  push(
+    "Phone",
+    profile.phone,
+    "phone",
+    "Required on most application forms."
+  );
+  push(
+    "Location",
+    profile.location,
+    "location",
+    "City / state / country — Greenhouse and Lever ask this on most postings."
+  );
+  push(
+    "LinkedIn URL",
+    profile.linkedinUrl,
+    "linkedinUrl",
+    "Most engineering roles ask for a LinkedIn profile link."
+  );
+  push(
+    "GitHub URL",
+    profile.githubUrl,
+    "githubUrl",
+    "Most engineering roles ask for a GitHub or code-sample link."
+  );
+  push(
+    "Portfolio / Website",
+    profile.portfolioUrl,
+    "portfolioUrl",
+    "Optional but commonly asked, especially for design / PM / IC roles."
+  );
+  push(
+    "Work Authorization",
+    profile.workAuthorization,
+    "workAuthorization",
+    'Often asked as "Are you authorized to work in the U.S.?" or "Will you require visa sponsorship?"'
+  );
+
+  return { fields, missing };
+}
+
+/**
+ * Map a session field-detected `id` → ManualApplyField using the
+ * candidate's own profile/resume/answer data. Used for free-text
+ * fields the LLM drafted (e.g. "What makes you a strong fit?")
+ * that aren't in the standard profile-field set.
+ *
+ * Returns null when the source has nothing to fill — the UI hides
+ * those rows rather than showing an empty value.
+ */
+function resolveFreeTextAnswerField(
+  fieldLabel: string,
+  answers: ApplicationAnswer[]
+): ManualApplyField | null {
   const matchingAnswer = answers.find((answer) => {
     const normalizedQuestion = answer.question.toLowerCase();
     const normalizedLabel = fieldLabel.toLowerCase();
@@ -167,31 +238,57 @@ function resolveFieldValue(input: {
         normalizedLabel.replace(/[^a-z0-9]+/g, " ").trim()
     );
   });
-  if (matchingAnswer && matchingAnswer.answer.trim().length > 0) {
-    return {
-      label: fieldLabel,
-      value: matchingAnswer.answer,
-      sourceLabel:
-        matchingAnswer.source === "saved_library"
-          ? "saved answer library"
-          : matchingAnswer.source === "user_edited"
-            ? "your edits"
-            : "generated draft"
-    };
-  }
-
-  // Resume / cover letter fields are surfaced separately (not in
-  // the row list) because they're attachments / longer-form blocks.
-  if (id === "resume" || id === "cover_letter") {
+  if (!matchingAnswer || matchingAnswer.answer.trim().length === 0) {
     return null;
   }
+  return {
+    label: fieldLabel,
+    value: matchingAnswer.answer,
+    sourceLabel:
+      matchingAnswer.source === "saved_library"
+        ? "saved answer library"
+        : matchingAnswer.source === "user_edited"
+          ? "your edits"
+          : "generated draft"
+  };
+}
 
-  // Avoid unused-variable lint when resume / package aren't directly
-  // consulted in any branch — they're surfaced at the helper level
-  // (resumeFileName, coverLetter), not per-field.
-  void resume;
-  void applicationPackage;
-  return null;
+function buildCopyAllText(input: {
+  jobLabel: string;
+  jobUrl: string;
+  resumeFileName: string | null;
+  fields: ManualApplyField[];
+  coverLetter: string | null;
+  shortAnswers: ManualApplyAnswer[];
+}): string {
+  const sections: string[] = [];
+  sections.push(`# ${input.jobLabel}`);
+  if (input.jobUrl) sections.push(`Application URL: ${input.jobUrl}`);
+  if (input.resumeFileName) {
+    sections.push(`Resume to upload: ${input.resumeFileName}`);
+  }
+  if (input.fields.length > 0) {
+    sections.push("");
+    sections.push("## Your details");
+    for (const field of input.fields) {
+      sections.push(`${field.label}: ${field.value}`);
+    }
+  }
+  if (input.coverLetter) {
+    sections.push("");
+    sections.push("## Cover letter");
+    sections.push(input.coverLetter);
+  }
+  if (input.shortAnswers.length > 0) {
+    sections.push("");
+    sections.push("## Short answers");
+    for (const qa of input.shortAnswers) {
+      sections.push("");
+      sections.push(`Q: ${qa.question}`);
+      sections.push(`A: ${qa.answer}`);
+    }
+  }
+  return sections.join("\n");
 }
 
 export function buildManualApplyHelper(input: {
@@ -204,34 +301,33 @@ export function buildManualApplyHelper(input: {
 }): ManualApplyHelperData {
   const { session, job, profile, resume, applicationPackage, answers } = input;
 
-  // Build one row per session-detected field. Skip fields the session
-  // already classifies as a "pause" (CAPTCHA / final submit / etc.) —
-  // those go into pauseItems instead.
+  // 1) ALL candidate-side profile fields with values, regardless of
+  //    whether the static dry-run adapter "detected" them. Empty
+  //    profile fields go into missingFields so the user can pre-fill
+  //    them on the Profile setup page.
+  const { fields: profileFields, missing } = buildProfileFieldRows(profile);
+
+  // 2) Plus any additional free-text fields the session detected
+  //    that match a saved short-answer (e.g. "What makes you a
+  //    strong fit?"). These wouldn't show up in profile-field rows.
   const pauseFieldIds = new Set(
     session.uncertainFields.map((field) => field.fieldId)
   );
-
-  const fields: ManualApplyField[] = [];
-  const seenValues = new Set<string>();
+  const seenLabels = new Set(profileFields.map((f) => f.label.toLowerCase()));
+  const extraFields: ManualApplyField[] = [];
   for (const detected of session.fieldsDetected) {
     if (pauseFieldIds.has(detected.id)) continue;
-    const resolved = resolveFieldValue({
-      fieldId: detected.id,
-      fieldLabel: detected.label,
-      profile,
-      resume,
-      applicationPackage,
-      answers
-    });
-    if (!resolved) continue;
-    // Avoid duplicating identical (label, value) pairs (Greenhouse
-    // sometimes shows the same field twice with slightly different
-    // ids — first_name + first_name_alt).
-    const dedupeKey = `${resolved.label}::${resolved.value}`;
-    if (seenValues.has(dedupeKey)) continue;
-    seenValues.add(dedupeKey);
-    fields.push(resolved);
+    if (seenLabels.has(detected.label.toLowerCase())) continue;
+    if (detected.id === "resume" || detected.id === "cover_letter") continue;
+    // Treat the detected field as a free-text answer slot.
+    const resolved = resolveFreeTextAnswerField(detected.label, answers);
+    if (resolved) {
+      extraFields.push(resolved);
+      seenLabels.add(resolved.label.toLowerCase());
+    }
   }
+
+  const fields = [...profileFields, ...extraFields];
 
   const shortAnswers: ManualApplyAnswer[] = applicationPackage.shortAnswersIncluded
     ? answers
@@ -258,13 +354,26 @@ export function buildManualApplyHelper(input: {
     })
   );
 
-  return {
+  const jobLabel = `${job.title} at ${job.company}`;
+  const resumeFileName = resume?.originalFileName ?? null;
+  const copyAllText = buildCopyAllText({
+    jobLabel,
     jobUrl: job.applicationUrl,
-    jobLabel: `${job.title} at ${job.company}`,
-    resumeFileName: resume?.originalFileName ?? null,
+    resumeFileName,
     fields,
     coverLetter,
+    shortAnswers
+  });
+
+  return {
+    jobUrl: job.applicationUrl,
+    jobLabel,
+    resumeFileName,
+    fields,
+    missingFields: missing,
+    coverLetter,
     shortAnswers,
-    pauseItems
+    pauseItems,
+    copyAllText
   };
 }

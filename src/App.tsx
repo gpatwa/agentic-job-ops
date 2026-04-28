@@ -3907,6 +3907,7 @@ export default function App() {
                 ? () => handleRegenerateApplicationPackage(applicationPackage.id)
                 : undefined
             }
+            onOpenProfileSetup={() => navigate("profile-setup")}
             onBack={() => navigate("tracker")}
             onMarkReadyForReview={handleMarkBrowserSessionReady}
             onApproveSubmit={handleApproveBrowserSubmit}

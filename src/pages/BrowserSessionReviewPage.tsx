@@ -56,6 +56,13 @@ interface BrowserSessionReviewPageProps {
   onRetryJobEnrichment?: () => void;
   /** Trigger regeneration of the package against the current job/profile. */
   onRegeneratePackage?: () => void;
+  /**
+   * Navigate to the Profile setup page so the user can fill the
+   * commonly-required field that's currently empty (LinkedIn,
+   * Work Authorization, etc.). When undefined the "Add to profile"
+   * CTA is not rendered.
+   */
+  onOpenProfileSetup?: () => void;
   onBack: () => void;
   onMarkReadyForReview: (sessionId: string) => void;
   onApproveSubmit: (sessionId: string) => void;
@@ -171,6 +178,7 @@ export function BrowserSessionReviewPage({
   isJobPendingEnrichment,
   onRetryJobEnrichment,
   onRegeneratePackage,
+  onOpenProfileSetup,
   onBack,
   onMarkReadyForReview,
   onApproveSubmit,
@@ -435,6 +443,7 @@ export function BrowserSessionReviewPage({
         <ManualApplyHelperCard
           data={manualApplyHelper}
           onMarkApplied={() => onManualRequired(browserSession.id)}
+          onOpenProfileSetup={onOpenProfileSetup}
         />
       )}
 
@@ -910,13 +919,30 @@ function ExtensionPanel({
  * non-secure contexts) — the value is still selectable in the
  * adjacent block so the user can copy manually.
  */
-function CopyButton({ value, label }: { value: string; label: string }) {
+function CopyButton({
+  value,
+  label,
+  variant = "secondary",
+  text = "Copy",
+  testId = "manual-apply-copy"
+}: {
+  value: string;
+  label: string;
+  /** Primary variant (filled emerald) for the prominent "Copy all" button. */
+  variant?: "primary" | "secondary";
+  text?: string;
+  testId?: string;
+}) {
   const [copied, setCopied] = useState(false);
+  const baseClasses =
+    variant === "primary"
+      ? "inline-flex min-h-9 shrink-0 items-center justify-center gap-1.5 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+      : "inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50";
   return (
     <button
       type="button"
-      className="inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-      data-testid="manual-apply-copy"
+      className={baseClasses}
+      data-testid={testId}
       aria-label={`Copy ${label}`}
       onClick={async () => {
         try {
@@ -928,18 +954,20 @@ function CopyButton({ value, label }: { value: string; label: string }) {
         }
       }}
     >
-      <Copy aria-hidden="true" size={11} />
-      {copied ? "Copied" : "Copy"}
+      <Copy aria-hidden="true" size={variant === "primary" ? 13 : 11} />
+      {copied ? "Copied" : text}
     </button>
   );
 }
 
 function ManualApplyHelperCard({
   data,
-  onMarkApplied
+  onMarkApplied,
+  onOpenProfileSetup
 }: {
   data: ManualApplyHelperData;
   onMarkApplied: () => void;
+  onOpenProfileSetup?: () => void;
 }) {
   return (
     <section
@@ -952,9 +980,10 @@ function ManualApplyHelperCard({
             Apply now in your browser
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Open the application in a new tab and paste the values below into
-            each field. We never auto-submit. When you're done, mark this
-            session as applied so the tracker stays accurate.
+            Open the application in a new tab. Use <strong>Copy all</strong> to
+            grab everything as a single text block, or copy field-by-field
+            below. We never auto-submit — when you're done, mark this session
+            as applied so the tracker stays accurate.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -970,6 +999,13 @@ function ManualApplyHelperCard({
               Open job application
             </a>
           )}
+          <CopyButton
+            value={data.copyAllText}
+            label="all fields"
+            variant="primary"
+            text="Copy all"
+            testId="manual-apply-copy-all"
+          />
           <button
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
             data-testid="manual-apply-mark-applied"
@@ -995,7 +1031,7 @@ function ManualApplyHelperCard({
       {data.fields.length > 0 && (
         <div className="mt-4 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Fields to paste
+            Your details
           </p>
           <div className="space-y-2">
             {data.fields.map((field) => (
@@ -1015,6 +1051,40 @@ function ManualApplyHelperCard({
                   </p>
                 </div>
                 <CopyButton value={field.value} label={field.label} />
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {data.missingFields.length > 0 && (
+        <div className="mt-4 space-y-2" data-testid="manual-apply-missing-fields">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+            Likely needed but not in your profile
+          </p>
+          <div className="space-y-2">
+            {data.missingFields.map((missing) => (
+              <div
+                key={missing.profileField}
+                className="flex flex-col gap-2 rounded-md border border-dashed border-amber-300 bg-amber-50 p-3 sm:flex-row sm:items-center sm:justify-between"
+              >
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-amber-900">
+                    {missing.label}
+                  </p>
+                  <p className="mt-1 text-xs leading-5 text-amber-800">
+                    {missing.guidance}
+                  </p>
+                </div>
+                {onOpenProfileSetup && (
+                  <button
+                    type="button"
+                    className="inline-flex min-h-7 shrink-0 items-center justify-center gap-1 rounded-md border border-amber-400 bg-white px-2 text-[11px] font-semibold text-amber-800 transition hover:bg-amber-100"
+                    onClick={onOpenProfileSetup}
+                  >
+                    Add to profile →
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1088,6 +1158,24 @@ function ManualApplyHelperCard({
           </ul>
         </div>
       )}
+
+      {/*
+        Honest footer about the dry-run limitation. Until a real
+        Chrome extension actually reads the live page DOM, the field
+        list above is profile-data based — we surface every value
+        the user has, but the real form may have additional fields
+        (e.g. "How did you hear about us?", visa-sponsorship radio).
+        Telling the user this directly builds trust + sets the right
+        expectation.
+      */}
+      <p
+        className="mt-4 text-[11px] leading-5 text-slate-500"
+        data-testid="manual-apply-helper-footnote"
+      >
+        Note: this preview is based on your saved profile data, not a live scan
+        of the application page. The real form may have additional questions
+        the assistant can't see in dry-run mode — fill those manually.
+      </p>
     </section>
   );
 }
