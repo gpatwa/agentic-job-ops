@@ -119,6 +119,24 @@ interface OnboardingPageProps {
   onNavigateResume: () => void;
   onNavigateDashboard: () => void;
   onNavigateJobQueue: () => void;
+  /**
+   * Live "today's queue" rows for the queue widget at the top of
+   * onboarding. Each row is one application in `ready_for_review`
+   * (or earlier) state — title, score, package status, and the
+   * navigation callback for the user to jump straight to the
+   * Browser Assistant. The queue widget hides when there are no
+   * rows.
+   */
+  todaysApplications: Array<{
+    packageId: string;
+    jobTitle: string;
+    company: string;
+    matchScore: number | null;
+    packageStatus: string;
+    /** Has the user opened a browser session for this package yet? */
+    browserSessionOpened: boolean;
+    onOpen: () => void;
+  }>;
 }
 
 const STEP_ORDER: OnboardingStepId[] = ["resume", "intelligence", "targets", "jobs"];
@@ -215,7 +233,8 @@ export function OnboardingPage({
   onNavigateProfile,
   onNavigateResume,
   onNavigateDashboard,
-  onNavigateJobQueue
+  onNavigateJobQueue,
+  todaysApplications
 }: OnboardingPageProps) {
   const currentStep = computeOnboardingStep({
     resume,
@@ -342,6 +361,8 @@ export function OnboardingPage({
       </header>
 
       <Stepper currentStep={currentStep} completed={completedSteps} />
+
+      <TodaysApplicationsQueue rows={todaysApplications} />
 
       {showJobsStep && lastResult && (
         <RecommendedNextActionHero
@@ -986,6 +1007,11 @@ function OnboardingJobUrlImport({
             </p>
           )}
 
+          <BatchUrlImportSection
+            onImportJobFromUrl={onImportJobFromUrl}
+            disabled={isSubmitting}
+          />
+
           {imported && (
             <div
               className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900"
@@ -1137,6 +1163,273 @@ function OnboardingJobUrlImport({
         </div>
       </div>
     </section>
+  );
+}
+
+/**
+ * Today's applications queue.
+ *
+ * Pinned to the top of the Onboarding page so the candidate can
+ * jump straight back to any in-progress application without
+ * navigating through the tracker. Rows correspond to packages in
+ * `ready_for_review` or earlier states — anything the candidate
+ * hasn't yet marked as applied.
+ *
+ * Solves the "where am I in my list of 15 applications" problem
+ * directly: one row per package, one click to the Browser
+ * Assistant. The widget hides when the queue is empty.
+ */
+function TodaysApplicationsQueue({
+  rows
+}: {
+  rows: OnboardingPageProps["todaysApplications"];
+}) {
+  if (rows.length === 0) return null;
+  return (
+    <section
+      className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 shadow-soft"
+      data-testid="todays-applications-queue"
+    >
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            Today's applications
+          </p>
+          <h3 className="mt-1 text-base font-semibold text-slate-950">
+            {rows.length} application{rows.length === 1 ? "" : "s"} in your queue
+          </h3>
+          <p className="mt-1 text-xs text-slate-600">
+            Click any row to open the Browser Assistant for that job. We never
+            auto-submit; each application requires your explicit approval.
+          </p>
+        </div>
+      </div>
+      <ul className="mt-3 space-y-2">
+        {rows.map((row) => (
+          <li
+            key={row.packageId}
+            className="flex flex-wrap items-center gap-3 rounded-md border border-emerald-200 bg-white px-3 py-2"
+            data-testid="todays-applications-queue-row"
+          >
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold text-slate-900" title={row.jobTitle}>
+                {row.jobTitle}
+              </p>
+              <p className="truncate text-xs text-slate-600">{row.company}</p>
+            </div>
+            {row.matchScore !== null && (
+              <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">
+                {row.matchScore.toFixed(1)} / 10
+              </span>
+            )}
+            <span className="rounded-md bg-slate-100 px-2 py-0.5 text-xs font-semibold capitalize text-slate-700">
+              {row.packageStatus.replace(/_/g, " ")}
+            </span>
+            {row.browserSessionOpened && (
+              <span className="rounded-md bg-blue-50 px-2 py-0.5 text-xs font-semibold text-blue-700">
+                In progress
+              </span>
+            )}
+            <button
+              type="button"
+              className="inline-flex min-h-8 items-center justify-center gap-1 rounded-md bg-ink px-3 text-xs font-semibold text-white transition hover:bg-slate-700"
+              onClick={row.onOpen}
+            >
+              Open →
+            </button>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Batch URL paste — the time-saving complement to the single-URL
+ * input above. The candidate pastes 5-20 URLs (one per line),
+ * clicks "Import all", and each one runs through the same
+ * onImportJobFromUrl pipeline (parse → enrichment via public API
+ * → match scoring → library lookup) sequentially. Per-line status
+ * appears as each completes so the user can watch progress.
+ *
+ * Sequential (not Promise.all) on purpose: enrichment hits the
+ * public Greenhouse / Lever APIs and parallel bursts of 20 calls
+ * trip rate limits without buying anything (the user only reads
+ * results once they're all done anyway).
+ */
+function BatchUrlImportSection({
+  onImportJobFromUrl,
+  disabled
+}: {
+  onImportJobFromUrl: OnboardingPageProps["onImportJobFromUrl"];
+  disabled: boolean;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [pasted, setPasted] = useState("");
+  const [results, setResults] = useState<
+    Array<{
+      url: string;
+      status: "queued" | "importing" | "done" | "error";
+      message: string;
+    }>
+  >([]);
+  const [isRunning, setIsRunning] = useState(false);
+
+  function parseUrls(input: string): string[] {
+    return Array.from(
+      new Set(
+        input
+          .split(/\r?\n/)
+          .map((line) => line.trim())
+          .filter((line) => line.length > 0)
+      )
+    );
+  }
+
+  async function handleImportAll() {
+    const urls = parseUrls(pasted);
+    if (urls.length === 0) return;
+    const initial = urls.map((url) => ({
+      url,
+      status: "queued" as const,
+      message: "Queued"
+    }));
+    setResults(initial);
+    setIsRunning(true);
+    try {
+      for (let i = 0; i < urls.length; i++) {
+        setResults((current) =>
+          current.map((row, index) =>
+            index === i
+              ? { ...row, status: "importing", message: "Importing…" }
+              : row
+          )
+        );
+        try {
+          const result = await onImportJobFromUrl(urls[i]);
+          const message = result.match
+            ? `Scored ${result.match.overallScore.toFixed(1)}/10`
+            : result.needsManualEnrichment
+              ? "Needs manual details"
+              : "Imported";
+          setResults((current) =>
+            current.map((row, index) =>
+              index === i ? { ...row, status: "done", message } : row
+            )
+          );
+        } catch (error) {
+          setResults((current) =>
+            current.map((row, index) =>
+              index === i
+                ? {
+                    ...row,
+                    status: "error",
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Failed — check the URL"
+                  }
+                : row
+            )
+          );
+        }
+      }
+    } finally {
+      setIsRunning(false);
+    }
+  }
+
+  const urlCount = parseUrls(pasted).length;
+
+  return (
+    <div className="mt-3" data-testid="onboarding-batch-url-section">
+      {!expanded ? (
+        <button
+          type="button"
+          className="text-xs font-semibold text-emerald-800 underline-offset-2 hover:underline"
+          onClick={() => setExpanded(true)}
+          data-testid="onboarding-batch-url-toggle"
+        >
+          Have multiple jobs? Paste a list →
+        </button>
+      ) : (
+        <div className="rounded-md border border-slate-200 bg-panel p-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Batch import (one URL per line)
+            </p>
+            <button
+              type="button"
+              className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:underline"
+              onClick={() => setExpanded(false)}
+            >
+              Hide
+            </button>
+          </div>
+          <textarea
+            className="mt-2 min-h-32 w-full rounded-md border border-slate-300 bg-white px-3 py-2 text-sm leading-5 text-slate-900"
+            value={pasted}
+            placeholder={[
+              "https://job-boards.greenhouse.io/{company}/jobs/{id}",
+              "https://jobs.lever.co/{company}/{id}",
+              "…"
+            ].join("\n")}
+            spellCheck={false}
+            disabled={isRunning || disabled}
+            onChange={(event) => setPasted(event.target.value)}
+            data-testid="onboarding-batch-url-textarea"
+          />
+          <div className="mt-2 flex items-center justify-between gap-2">
+            <p className="text-[11px] text-slate-500">
+              {urlCount} URL{urlCount === 1 ? "" : "s"} ready · processed in
+              order, ~1s each
+            </p>
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+              onClick={handleImportAll}
+              disabled={isRunning || disabled || urlCount === 0}
+              data-testid="onboarding-batch-url-import-all"
+            >
+              {isRunning ? "Importing…" : `Import all (${urlCount})`}
+            </button>
+          </div>
+          {results.length > 0 && (
+            <ul
+              className="mt-3 space-y-1.5"
+              data-testid="onboarding-batch-url-results"
+            >
+              {results.map((row, index) => (
+                <li
+                  key={`${row.url}-${index}`}
+                  className="flex items-center justify-between gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-xs"
+                >
+                  <span
+                    className="min-w-0 flex-1 truncate font-mono text-slate-700"
+                    title={row.url}
+                  >
+                    {row.url}
+                  </span>
+                  <span
+                    className={`shrink-0 rounded-md px-2 py-0.5 font-semibold ${
+                      row.status === "done"
+                        ? "bg-emerald-50 text-emerald-700"
+                        : row.status === "error"
+                          ? "bg-red-50 text-red-700"
+                          : row.status === "importing"
+                            ? "bg-blue-50 text-blue-700"
+                            : "bg-slate-100 text-slate-600"
+                    }`}
+                  >
+                    {row.message}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 

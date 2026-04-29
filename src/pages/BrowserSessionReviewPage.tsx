@@ -27,6 +27,19 @@ import type {
 import { isExtensionSubmitAllowed } from "../services/extensionService";
 import type { ManualApplyHelperData } from "../services/manualApplyHelper";
 
+/**
+ * Bookmarklet-based fill is the primary path — pre-rendered as a
+ * `javascript:` URI (App.tsx supplies `bookmarkletHref`). The user
+ * drags it to the bookmarks bar once, then clicks it on the actual
+ * application page to fill every input. We never auto-submit.
+ */
+interface BookmarkletData {
+  /** Pre-encoded `javascript:...` URI safe to put in `<a href>`. */
+  href: string;
+  /** Approximate count of fields the bookmarklet will fill. */
+  fillableCount: number;
+}
+
 interface BrowserSessionReviewPageProps {
   browserSession: BrowserApplicationSession | null;
   applicationPackage: ApplicationPackage | null;
@@ -41,6 +54,15 @@ interface BrowserSessionReviewPageProps {
    * assistant can't drive the page itself).
    */
   manualApplyHelper: ManualApplyHelperData | null;
+  /**
+   * Pre-generated bookmarklet for one-click form fill on the actual
+   * application page. When present, the helper card promotes the
+   * bookmarklet as the primary CTA and demotes copy-paste to a
+   * fallback ("Show copy-paste fields"). When absent (e.g. profile
+   * has no fillable values yet), the card falls back to copy-paste
+   * by default.
+   */
+  bookmarklet: BookmarkletData | null;
   /**
    * True when the persisted package was generated against the URL-
    * import placeholder ("Imported job pending enrichment") but the
@@ -173,6 +195,7 @@ export function BrowserSessionReviewPage({
   match,
   extensionSession,
   manualApplyHelper,
+  bookmarklet,
   isStaleAfterJobEnrichment,
   isRegeneratingPackage,
   isJobPendingEnrichment,
@@ -442,6 +465,7 @@ export function BrowserSessionReviewPage({
       {manualApplyHelper && (
         <ManualApplyHelperCard
           data={manualApplyHelper}
+          bookmarklet={bookmarklet}
           onMarkApplied={() => onManualRequired(browserSession.id)}
           onOpenProfileSetup={onOpenProfileSetup}
         />
@@ -913,6 +937,96 @@ function ExtensionPanel({
 }
 
 /**
+ * Bookmarklet panel — primary "Apply now" UX.
+ *
+ * The bookmarklet itself is a `javascript:` URI containing the
+ * user's profile values + ATS selector map. The user drags the
+ * link to their bookmarks bar ONCE; from then on, on any
+ * application page, clicking the bookmark fills every detected
+ * input inline (with a green outline so the fills are visible),
+ * shows a banner, and DOES NOT call submit. Same human-gate
+ * pattern as Simplify and MyGreenhouse.
+ *
+ * Why a bookmarklet vs. a Chrome extension: zero install
+ * friction, no Web Store review, ships today, runs only when the
+ * user explicitly clicks it (same activeTab safety story as the
+ * extension). Extension is the long-term play; bookmarklet
+ * proves the field-mapping UX first.
+ */
+function BookmarkletPanel({
+  bookmarklet,
+  jobLabel
+}: {
+  bookmarklet: BookmarkletData;
+  jobLabel: string;
+}) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <div
+      className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 p-4"
+      data-testid="manual-apply-bookmarklet-panel"
+    >
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0 flex-1">
+          <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+            One-click form fill
+          </p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">
+            Drag the button below to your bookmarks bar (just once). Then on
+            the application page in the new tab, click <strong>Fill: {jobLabel}</strong>{" "}
+            in your bookmarks — about <strong>{bookmarklet.fillableCount}</strong> field
+            {bookmarklet.fillableCount === 1 ? "" : "s"} will fill inline. We
+            never auto-submit; you review and click Submit yourself.
+          </p>
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        {/*
+          The actual bookmarklet — an <a href="javascript:..."> the user
+          drags to their bookmarks bar. We render it as a button-styled
+          link so it's visually obvious. Click does nothing useful (it'd
+          run the script on the wrong page); the value is the drag.
+        */}
+        <a
+          className="inline-flex min-h-9 cursor-grab items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white shadow-sm hover:bg-slate-700 active:cursor-grabbing"
+          data-testid="manual-apply-fill-bookmarklet"
+          href={bookmarklet.href}
+          draggable
+          onClick={(event) => event.preventDefault()}
+          title="Drag this to your bookmarks bar"
+        >
+          <Bot aria-hidden="true" size={13} />
+          Fill: {jobLabel}
+        </a>
+        <button
+          type="button"
+          className="inline-flex min-h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50"
+          data-testid="manual-apply-copy-bookmarklet"
+          onClick={async () => {
+            try {
+              await navigator.clipboard.writeText(bookmarklet.href);
+              setCopied(true);
+              setTimeout(() => setCopied(false), 1500);
+            } catch {
+              /* clipboard unavailable */
+            }
+          }}
+        >
+          <Copy aria-hidden="true" size={11} />
+          {copied ? "Copied" : "Copy as text"}
+        </button>
+      </div>
+      <p className="mt-3 text-[11px] leading-5 text-slate-600">
+        How it works: the bookmarklet is a tiny JavaScript snippet with your
+        profile values inlined. It runs only on the page you click it from. It
+        cannot read other tabs, cannot call submit, and doesn't talk to any
+        server. Standard safety guidance: don't share your bookmarks bar.
+      </p>
+    </div>
+  );
+}
+
+/**
  * Per-row copy button. Shows "Copied" feedback for ~1.5s after a
  * successful copy so the user has visual confirmation. Falls back
  * silently if `navigator.clipboard` is unavailable (older browsers,
@@ -962,13 +1076,20 @@ function CopyButton({
 
 function ManualApplyHelperCard({
   data,
+  bookmarklet,
   onMarkApplied,
   onOpenProfileSetup
 }: {
   data: ManualApplyHelperData;
+  bookmarklet: BookmarkletData | null;
   onMarkApplied: () => void;
   onOpenProfileSetup?: () => void;
 }) {
+  // When a bookmarklet is available we show the bookmarklet panel as
+  // the primary path and collapse copy-paste fields behind a toggle.
+  // When no bookmarklet (rare — profile fully empty), the old
+  // copy-paste UI is the default.
+  const [showCopyPaste, setShowCopyPaste] = useState(!bookmarklet);
   return (
     <section
       className="rounded-lg border border-emerald-200 bg-white p-5 shadow-soft"
@@ -980,10 +1101,9 @@ function ManualApplyHelperCard({
             Apply now in your browser
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            Open the application in a new tab. Use <strong>Copy all</strong> to
-            grab everything as a single text block, or copy field-by-field
-            below. We never auto-submit — when you're done, mark this session
-            as applied so the tracker stays accurate.
+            {bookmarklet
+              ? "Drag the Fill-this-form bookmarklet to your bookmarks bar once. Then open the application in a new tab and click the bookmarklet — every input fills inline. We never auto-submit; you review and click Submit yourself."
+              : "Open the application in a new tab. Use Copy all to grab everything as a single text block, or copy field-by-field below. We never auto-submit — when you're done, mark this session as applied so the tracker stays accurate."}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -999,13 +1119,6 @@ function ManualApplyHelperCard({
               Open job application
             </a>
           )}
-          <CopyButton
-            value={data.copyAllText}
-            label="all fields"
-            variant="primary"
-            text="Copy all"
-            testId="manual-apply-copy-all"
-          />
           <button
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
             data-testid="manual-apply-mark-applied"
@@ -1018,6 +1131,16 @@ function ManualApplyHelperCard({
         </div>
       </div>
 
+      {bookmarklet && (
+        <BookmarkletPanel bookmarklet={bookmarklet} jobLabel={data.jobLabel} />
+      )}
+
+      {/*
+        Resume-attached badge stays at the card top regardless of
+        copy-paste expand state — uploading the resume is something
+        the user does on every application path (the bookmarklet
+        can't fill <input type="file">).
+      */}
       {data.resumeFileName && (
         <p
           className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2 py-1 text-xs font-semibold text-emerald-700"
@@ -1028,7 +1151,53 @@ function ManualApplyHelperCard({
         </p>
       )}
 
-      {data.fields.length > 0 && (
+      {/*
+        Copy-paste fallback. Hidden by default when a bookmarklet
+        is available; one toggle reveals the detailed per-field
+        list + Copy all + missing-field CTAs. Bookmarklet covers
+        all standard inputs; copy-paste is for: (a) pages where
+        the bookmarklet can't find a selector match, (b) custom
+        questions the user wants to refine before pasting,
+        (c) users who don't want to install a bookmarklet.
+      */}
+      {bookmarklet && !showCopyPaste && (
+        <button
+          type="button"
+          className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
+          data-testid="manual-apply-show-copy-paste"
+          onClick={() => setShowCopyPaste(true)}
+        >
+          Show copy-paste fields (fallback)
+        </button>
+      )}
+
+      {showCopyPaste && (
+        <div className="mt-4 flex items-center justify-between gap-2">
+          <p className="text-xs uppercase tracking-wide text-slate-500">
+            Copy-paste fields
+          </p>
+          <div className="flex items-center gap-2">
+            <CopyButton
+              value={data.copyAllText}
+              label="all fields"
+              variant="secondary"
+              text="Copy all"
+              testId="manual-apply-copy-all"
+            />
+            {bookmarklet && (
+              <button
+                type="button"
+                className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:underline"
+                onClick={() => setShowCopyPaste(false)}
+              >
+                Hide
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {showCopyPaste && data.fields.length > 0 && (
         <div className="mt-4 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Your details
@@ -1057,7 +1226,7 @@ function ManualApplyHelperCard({
         </div>
       )}
 
-      {data.voluntarySelfIdFields.length > 0 && (
+      {showCopyPaste && data.voluntarySelfIdFields.length > 0 && (
         <div
           className="mt-4 space-y-2"
           data-testid="manual-apply-voluntary-self-id"
@@ -1091,7 +1260,7 @@ function ManualApplyHelperCard({
         </div>
       )}
 
-      {data.missingFields.length > 0 && (
+      {showCopyPaste && data.missingFields.length > 0 && (
         <div className="mt-4 space-y-2" data-testid="manual-apply-missing-fields">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Likely needed but not in your profile
@@ -1125,7 +1294,7 @@ function ManualApplyHelperCard({
         </div>
       )}
 
-      {data.coverLetter && (
+      {showCopyPaste && data.coverLetter && (
         <div className="mt-4 space-y-2">
           <div className="flex items-center justify-between gap-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -1141,7 +1310,7 @@ function ManualApplyHelperCard({
         </div>
       )}
 
-      {data.shortAnswers.length > 0 && (
+      {showCopyPaste && data.shortAnswers.length > 0 && (
         <div className="mt-4 space-y-2">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
             Short answers

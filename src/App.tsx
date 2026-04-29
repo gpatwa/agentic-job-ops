@@ -89,6 +89,10 @@ import {
 } from "./services/applicationPackage";
 import { createApiBackedApplicationPackageGenerator } from "./services/applicationPackageApiClient";
 import { buildManualApplyHelper } from "./services/manualApplyHelper";
+import {
+  countFillableSlots,
+  generateFillBookmarklet
+} from "./services/fillBookmarkletGenerator";
 import { loadApplications } from "./services/applicationService";
 import {
   applyDashboardJobAction,
@@ -3695,6 +3699,33 @@ export default function App() {
             onNavigateResume={() => navigate("resume-upload")}
             onNavigateDashboard={() => navigate("dashboard")}
             onNavigateJobQueue={() => navigate("jobs")}
+            todaysApplications={applicationPackages
+              .filter(
+                (pkg) =>
+                  pkg.status === "ready_for_review" || pkg.status === "draft"
+              )
+              .map((pkg) => {
+                const job = normalizedJobs.find((j) => j.id === pkg.jobId);
+                const match = jobMatches.find((m) => m.jobId === pkg.jobId);
+                const browserSession = browserSessions.find(
+                  (bs) => bs.applicationPackageId === pkg.id
+                );
+                return {
+                  packageId: pkg.id,
+                  jobTitle: job?.title ?? "Unknown job",
+                  company: job?.company ?? "Unknown company",
+                  matchScore: match?.overallScore ?? null,
+                  packageStatus: pkg.status,
+                  browserSessionOpened: Boolean(browserSession),
+                  onOpen: () => {
+                    if (browserSession) {
+                      navigateToBrowserSession(browserSession.id);
+                    } else {
+                      navigateToPackage(pkg.id);
+                    }
+                  }
+                };
+              })}
           />
         );
       }
@@ -3890,6 +3921,32 @@ export default function App() {
                 answers: manualApplyAnswers
               })
             : null;
+        // Bookmarklet is the primary "Apply now" path. We only
+        // surface it when the user has at least 3 fillable slots in
+        // the profile; below that the bookmarklet would do too
+        // little to be worth the install affordance, so the card
+        // falls back to the copy-paste UI.
+        const browserSessionBookmarklet =
+          job && applicationPackage
+            ? (() => {
+                const slots = countFillableSlots({
+                  profile,
+                  applicationPackage,
+                  answers: manualApplyAnswers,
+                  job
+                });
+                if (slots < 3) return null;
+                return {
+                  href: generateFillBookmarklet({
+                    profile,
+                    applicationPackage,
+                    answers: manualApplyAnswers,
+                    job
+                  }),
+                  fillableCount: slots
+                };
+              })()
+            : null;
         const browserSessionStale = applicationPackage && job
           ? isPackageStaleAfterJobEnrichment(applicationPackage, job)
           : false;
@@ -3906,6 +3963,7 @@ export default function App() {
             match={match}
             extensionSession={linkedExtensionSession}
             manualApplyHelper={manualApplyHelperData}
+            bookmarklet={browserSessionBookmarklet}
             isStaleAfterJobEnrichment={browserSessionStale}
             isRegeneratingPackage={isRegeneratingPackage}
             isJobPendingEnrichment={browserSessionJobPending}
