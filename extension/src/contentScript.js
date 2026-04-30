@@ -131,7 +131,7 @@ function detectSubmitButton() {
   );
 }
 
-export function extractPageStructure() {
+function extractPageStructure() {
   const inputs = Array.from(
     document.querySelectorAll("input, textarea, select")
   );
@@ -173,7 +173,7 @@ function findInput(field) {
  * exposing private data. A production deployment would inject explicitly
  * approved values from a secure local source.
  */
-export function applyFillPlan(fields) {
+function applyFillPlan(fields) {
   const filled = [];
   for (const field of fields) {
     if (!field.fieldId) continue;

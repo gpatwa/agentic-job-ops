@@ -1,134 +1,140 @@
-# Agentic Job Ops — Local Browser Extension Foundation (Phase 9)
+# Agentic Job Ops — Browser Extension (v0.2)
 
-This folder is the **Phase 9 foundation** for a local browser extension that lets the Agentic Job Ops assistant inspect a user-authorized job application page and safely fill fields the user has explicitly approved.
-
-It is intentionally minimal and aligned with the project's core safety rule:
+A Chrome MV3 extension that fills Greenhouse + Lever job application
+forms inline on the candidate's actual browser tab. **It never
+auto-submits.** The candidate reviews every fill and clicks Submit
+themselves.
 
 > The AI does the work. The human makes the decision.
-> No application can be submitted without explicit human approval.
 
-## What this is
-
-- A Manifest V3 Chrome extension scaffold.
-- A content script that extracts a normalized, value-redacted page structure.
-- A service worker that orchestrates messages between popup, content script, and (in production) the local app.
-- A popup UI that lets the user explicitly authorize a page before any inspection happens.
-- A local demo HTML application page for end-to-end manual testing.
-
-## What this is *not*
-
-- Not blind auto-apply.
-- Not a CAPTCHA bypass — CAPTCHA, login challenges, and demographic questions always pause for the user.
-- Not a credential store — passwords, hidden authentication fields, and cookies are never read or sent.
-- Not a live external submitter — submit only happens through the app's approval gate.
-
-## Folder layout
+## How it works
 
 ```
-extension/
-├── manifest.json           Manifest V3 manifest with minimal permissions
-├── README.md               This file
-├── src/
-│   ├── background.js       Service worker; orchestrates messages
-│   ├── contentScript.js    Page introspection + safe fill execution
-│   ├── popup.html          Popup UI shell
-│   ├── popup.js            Popup logic (connect, extract, fill)
-│   └── types.ts            Shared TypeScript types (documentation; mirrors
-│                           the app-side ExtensionPageStructure / message
-│                           contract)
-└── demo/
-    └── demo-application.html  Local fixture application page
++------------------------------------------------+
+|  http://localhost:5173  (Agentic dashboard)    |
+|  ┌────────────────────────────────────────┐    |
+|  │ dashboardBridge.js (content script)    │    |
+|  │  - listens for window.postMessage      │    |
+|  │  - stores synced profile in            │    |
+|  │    chrome.storage.local                │    |
+|  └────────────────────────────────────────┘    |
++------------------------------------------------+
+            |                       |
+   chrome.storage.local      chrome.storage.local
+   (sync-v1)                 (saved-answers-v1)
+            |                       |
++------------------------------------------------+
+|  https://job-boards.greenhouse.io/...          |
+|  ┌────────────────────────────────────────┐    |
+|  │ pill.js (content script)               │    |
+|  │  - renders "Apply with Agentic" pill   │    |
+|  │  - reads sync from chrome.storage      │    |
+|  │  - fills inputs (React-aware setter)   │    |
+|  │  - captures unmapped answers           │    |
+|  │  - "Fill & advance" multi-page mode    │    |
+|  │  - HARD STOP at Submit button          │    |
+|  └────────────────────────────────────────┘    |
++------------------------------------------------+
 ```
 
-## Permissions
+## Install (dev mode)
 
-The manifest requests the absolute minimum:
+1. Run the dashboard locally: `npm run dev` (Vite on :5173).
+2. Open `chrome://extensions/`, turn on **Developer mode**, click
+   **Load unpacked**, select this `extension/` folder.
+3. Refresh `http://localhost:5173/` — the
+   "Apply now in your browser" card on the Browser Assistant page
+   should flip from "Install extension" to "Sync to extension".
+4. Click **Sync to extension** on any active package.
+5. Open the actual application URL (Greenhouse / Lever).
+6. Click the floating **Apply with Agentic** pill bottom-right.
+7. Review every field, attach your resume manually, click Submit
+   yourself.
 
-- `activeTab` — inspect only the tab the user explicitly clicks the action on.
-- `scripting` — inject the content script on user click.
-- `storage` — remember the active connected tab between popup opens.
-- `host_permissions` for `http://127.0.0.1:5174` and `http://localhost:5174` — the local Agentic Job Ops dev server.
+## What gets injected where
 
-There is no broad host permission, no `cookies` permission, no `webRequest`, no `declarativeNetRequest`, and no remote endpoints.
+| File | Where it runs | Purpose |
+|---|---|---|
+| `manifest.json` | — | MV3 manifest, content_scripts auto-injection |
+| `src/dashboardBridge.js` | localhost:5173 / 127.0.0.1:5173 | postMessage broker between dashboard ↔ chrome.storage |
+| `src/pill.js` | `*.greenhouse.io`, `jobs.lever.co`, `*.lever.co` | Floating pill + fill engine |
+| `src/background.js` | service worker | Message routing for the legacy app-driven flow (used by Browser Assistant demo) |
+| `src/contentScript.js` | (programmatic only) | Legacy page-structure extractor for the dashboard demo |
 
-## Loading the extension in Chrome (manual)
+## Hard rules (enforced structurally)
 
-1. Run the app: `npm run dev` (the extension expects `http://127.0.0.1:5174/`).
-2. Open `chrome://extensions/`.
-3. Toggle **Developer mode** on.
-4. Click **Load unpacked** and select this `extension/` folder.
-5. Pin the extension so the action button is visible.
+| Rule | Where |
+|---|---|
+| Never click submit | `pill.js` has no `.submit()` call, asserted by `tests/extensionPill.test.ts`. The `Fill & advance` mode rejects any page with a visible Submit button via `looksLikeSubmitPage()`. |
+| Never bypass CAPTCHA | `looksLikeSubmitPage()` doesn't try to advance past CAPTCHA pages; the pill banner tells the user to solve it manually. |
+| Never fill credentials | `tryFill()` rejects `type=password`, `type=hidden`, `type=file`. |
+| Never read credentials | The extension has no access to password fields, cookies, or other tabs. `host_permissions` is scoped to localhost (dashboard sync) and Greenhouse/Lever only. |
+| Never call any server | All data lives in `chrome.storage.local` on the user's machine. No `fetch`, `XMLHttpRequest`, or `sendBeacon` in `pill.js`. |
 
-## Trying the demo flow
+## Features
 
-1. Open the demo fixture in a tab: drag `extension/demo/demo-application.html` into Chrome (or open via `file://`).
-2. Click the extension's action button. The popup opens.
-3. Click **Connect to active tab**. This is the explicit user authorization step. Until you click, no page inspection happens.
-4. Click **Read page structure**. The popup shows the field count and the captured fields.
-5. Click **Fill safe fields**. Demo placeholder values populate the safe (non-sensitive, non-file, non-select, non-checkbox) inputs. CAPTCHA, demographic, and password-like fields are skipped.
-6. The popup also includes a **Disconnect** button to drop the session.
+### One-click form fill
 
-The demo intentionally never submits. Even the demo's submit button is wired to a no-op.
+Click the **Apply with Agentic** pill on a Greenhouse / Lever
+application page. The pill reads the synced profile and fills:
 
-## Production wiring (later phases)
+- First Name, Last Name, Full Name (split from `fullName`)
+- Email, Phone, Location
+- LinkedIn, GitHub, Portfolio / Website URLs
+- Visa sponsorship select (when text matches)
+- Custom textarea questions matched by associated label
 
-The current foundation runs the popup-driven flow locally. The end-to-end production loop will be:
+Filled fields get a 2px emerald outline. A floating banner shows the
+count + the reminder to attach your resume manually.
 
-1. Extension popup → background → content script (already wired).
-2. Background → app: POST normalized page structure to the local app's extension ingest endpoint.
-3. App: runs `ingestExtensionPageStructure` then `createExtensionFillPlan` (see [src/services/extensionService.ts](../src/services/extensionService.ts)) to produce a safe fill plan.
-4. User reviews the plan inside the app and approves fill via `approveExtensionFill`.
-5. App → extension: forward the approved fill plan items.
-6. Extension content script writes the approved values.
-7. User reviews the page, then approves submit via `approveExtensionSubmit` inside the app.
-8. App emits a persisted `user_approved_extension_submit` audit log.
-9. Extension content script triggers submit (only when the user is on the page); it then reports back, and the app calls `recordExtensionSubmitCompleted`. That call **rejects** unless the persisted approval audit exists and the actor is the job seeker; on rejection it emits `extension_submit_blocked`.
+### "Save this answer once, reuse forever"
 
-The state machine and every guard live in [src/services/extensionService.ts](../src/services/extensionService.ts) and are covered by [tests/extensionService.test.ts](../tests/extensionService.test.ts).
+After fill, the pill watches every textarea you type into. If the
+field has a derivable label and isn't a standard contact field, a
+**Save to Agentic library** chip appears below the input. Click it to
+capture `{question: <label>, answer: <value>}` into
+`chrome.storage.local`.
 
-## State machine (mirrors the app)
+On your next dashboard visit, click **Pull saved answers** on the
+Browser Assistant card — captured answers merge into your
+`SavedApplicationAnswer` library and auto-fill on every future form
+that asks the same question (case + punctuation collapsed for
+matching).
 
-```
-extension_not_connected
-  ↓ user clicks the extension action
-awaiting_user_authorization
-  ↓ user explicitly authorizes
-connected
-  ↓ extension sends page structure
-page_analyzed
-  ↓ app creates fill plan via ATS adapter
-fill_plan_ready
-  ↓ user approves fill in the app
-fill_approved
-  ↓ extension fills safe fields and reports back
-fields_filled  →  ready_for_final_review
-  ↓ user reviews and approves submit in the app
-submit_approved
-  ↓ extension confirms submit
-submitted
-```
+### Fill & advance (Manus-pattern click-to-takeover)
 
-Side states:
+Toggle **Fill & advance multi-page** on the pill. After fill, if a
+Continue / Next button is found AND no Submit button is visible:
 
-- `disconnected` — user disconnected the session.
-- `manual_required` — CAPTCHA, login, or low-confidence pause; user takes over.
-- `failed` — adapter or runtime error; application status is never advanced.
+- A floating banner shows a 5-second countdown.
+- Click anywhere on the page → cancel auto-advance and take over.
+- Countdown ends → pill clicks Continue, waits for the next page,
+  re-fills.
+- Repeats until a Submit button appears, then **stops** so you click
+  Submit yourself.
 
-## Safety contract (enforced in `src/services/extensionService.ts`)
+This is the same UX Manus's local Browser Operator made famous —
+adapted to our hard rules. No server-side browser, no credit costs,
+no anti-bot bypass.
 
-- The fill plan is created by the existing ATS adapter layer; it returns `dry_run` previews only.
-- Approve fill (`approveExtensionFill`) and approve submit (`approveExtensionSubmit`) require the explicit `approvedByUser: true` flag and reject any actor other than the job seeker.
-- `recordExtensionSubmitCompleted` checks: session belongs to the current tenant and user → actor is the job seeker → status is `submit_approved` → a persisted `user_approved_extension_submit` audit exists for this session, authored by the job seeker, before the submit attempt → if a linked `applicationPackageId` is present, the package is still `approved` → no captcha or login pause remains. Any failure persists an `extension_submit_blocked` audit and rejects.
-- A captcha or login pause at the fill-plan stage routes the session to `manual_required` immediately.
+## Privacy
 
-## What is intentionally NOT included
+- Synced profile values + saved answer captures live in
+  `chrome.storage.local` on your machine. They never leave the
+  extension.
+- The pill content script can ONLY read DOM on the current tab
+  (manifest `host_permissions` is scoped to Greenhouse / Lever +
+  localhost).
+- The dashboardBridge content script ONLY accepts messages from the
+  same window with `source: "agentic-dashboard"`. Cross-origin
+  messages are ignored.
 
-- No build system / bundler. Manifest V3 + Chrome run plain JS files directly.
-- No real network call from the extension to the app. The Phase 9 foundation runs the user-authorized inspection and demo fill locally; the bridge into the app is documented above and represented by the app-side service contract.
-- No automated browser-runtime test of the extension itself. The app-side state machine is fully tested in [tests/extensionService.test.ts](../tests/extensionService.test.ts).
+## Tests
 
-## Future work
+- `tests/extensionPill.test.ts` — loads `pill.js` into jsdom and
+  exercises the fill engine, structural safety properties, library
+  merging, and Continue / Submit detection.
+- `tests/browserExtensionBridge.test.ts` — exercises the
+  dashboard-side `postMessage` round-trip and saved-answer pull / merge.
 
-- Wire a small local fetch endpoint (or `window.postMessage` bridge) so the extension can deliver page structures to the app and receive fill plans without copy/paste.
-- Replace the demo placeholder fill values with the app-supplied approved plan items.
-- Add a Playwright-driven extension smoke test against the demo page.
+Run with `npm test`.

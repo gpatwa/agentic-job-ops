@@ -90,9 +90,13 @@ import {
 import { createApiBackedApplicationPackageGenerator } from "./services/applicationPackageApiClient";
 import { buildManualApplyHelper } from "./services/manualApplyHelper";
 import {
-  countFillableSlots,
-  generateFillBookmarklet
-} from "./services/fillBookmarkletGenerator";
+  getExtensionBridgeStatus,
+  installExtensionBridgeListener,
+  pullCapturedSavedAnswers,
+  subscribeExtensionBridgeStatus,
+  syncProfileToExtension,
+  type ExtensionBridgeStatus
+} from "./services/browserExtensionBridge";
 import { loadApplications } from "./services/applicationService";
 import {
   applyDashboardJobAction,
@@ -367,6 +371,18 @@ export default function App() {
   >(() => loadResumeImprovementDrafts(currentSession));
   const [isImprovingResume, setIsImprovingResume] = useState(false);
   const [isRegeneratingPackage, setIsRegeneratingPackage] = useState(false);
+  const [extensionBridgeStatus, setExtensionBridgeStatus] =
+    useState<ExtensionBridgeStatus>(() => getExtensionBridgeStatus());
+
+  // Subscribe to extension-bridge status updates. The bridge content
+  // script (extension/src/dashboardBridge.js) posts agentic:bridge-
+  // ready / agentic:pong / agentic:sync-acknowledged messages we
+  // mirror into React state so the BrowserSessionReviewPage can show
+  // "Install extension" vs. "Sync to extension" vs. "Last synced…".
+  useEffect(() => {
+    installExtensionBridgeListener();
+    return subscribeExtensionBridgeStatus(setExtensionBridgeStatus);
+  }, []);
   // Latest server-side parse diagnostic. Set by the upload handler
   // when the AI API server returns a structured result; cleared
   // by paste/demo flows that produce text locally and don't need
@@ -3921,32 +3937,6 @@ export default function App() {
                 answers: manualApplyAnswers
               })
             : null;
-        // Bookmarklet is the primary "Apply now" path. We only
-        // surface it when the user has at least 3 fillable slots in
-        // the profile; below that the bookmarklet would do too
-        // little to be worth the install affordance, so the card
-        // falls back to the copy-paste UI.
-        const browserSessionBookmarklet =
-          job && applicationPackage
-            ? (() => {
-                const slots = countFillableSlots({
-                  profile,
-                  applicationPackage,
-                  answers: manualApplyAnswers,
-                  job
-                });
-                if (slots < 3) return null;
-                return {
-                  href: generateFillBookmarklet({
-                    profile,
-                    applicationPackage,
-                    answers: manualApplyAnswers,
-                    job
-                  }),
-                  fillableCount: slots
-                };
-              })()
-            : null;
         const browserSessionStale = applicationPackage && job
           ? isPackageStaleAfterJobEnrichment(applicationPackage, job)
           : false;
@@ -3963,7 +3953,19 @@ export default function App() {
             match={match}
             extensionSession={linkedExtensionSession}
             manualApplyHelper={manualApplyHelperData}
-            bookmarklet={browserSessionBookmarklet}
+            extensionStatus={extensionBridgeStatus}
+            onSyncToExtension={
+              job && applicationPackage
+                ? () =>
+                    syncProfileToExtension({
+                      profile,
+                      activePackage: applicationPackage,
+                      activeJob: job,
+                      activeAnswers: manualApplyAnswers
+                    })
+                : undefined
+            }
+            onPullSavedAnswers={() => pullCapturedSavedAnswers(currentSession)}
             isStaleAfterJobEnrichment={browserSessionStale}
             isRegeneratingPackage={isRegeneratingPackage}
             isJobPendingEnrichment={browserSessionJobPending}

@@ -28,16 +28,21 @@ import { isExtensionSubmitAllowed } from "../services/extensionService";
 import type { ManualApplyHelperData } from "../services/manualApplyHelper";
 
 /**
- * Bookmarklet-based fill is the primary path — pre-rendered as a
- * `javascript:` URI (App.tsx supplies `bookmarkletHref`). The user
- * drags it to the bookmarks bar once, then clicks it on the actual
- * application page to fill every input. We never auto-submit.
+ * Browser-extension primary path — replaces the v1 bookmarklet UX.
+ *
+ * `extensionStatus` is supplied by App.tsx via the
+ * browserExtensionBridge service. When the bridge has heard from
+ * the dashboardBridge content script we know the extension is
+ * installed and show the "Sync to extension" button; otherwise we
+ * show the install CTA. After a successful sync the candidate
+ * opens the application page (Greenhouse / Lever) and the pill
+ * content script fills every input there — same UX as
+ * Simplify.jobs but adapted to our hard rules (no auto-submit).
  */
-interface BookmarkletData {
-  /** Pre-encoded `javascript:...` URI safe to put in `<a href>`. */
-  href: string;
-  /** Approximate count of fields the bookmarklet will fill. */
-  fillableCount: number;
+interface ExtensionStatusForCard {
+  available: boolean;
+  version: string | null;
+  lastSyncedAt: string | null;
 }
 
 interface BrowserSessionReviewPageProps {
@@ -55,14 +60,24 @@ interface BrowserSessionReviewPageProps {
    */
   manualApplyHelper: ManualApplyHelperData | null;
   /**
-   * Pre-generated bookmarklet for one-click form fill on the actual
-   * application page. When present, the helper card promotes the
-   * bookmarklet as the primary CTA and demotes copy-paste to a
-   * fallback ("Show copy-paste fields"). When absent (e.g. profile
-   * has no fillable values yet), the card falls back to copy-paste
-   * by default.
+   * Live status of the Agentic browser extension. Drives whether the
+   * card shows the install CTA or the "Sync to extension" button.
+   * Comes from `subscribeExtensionBridgeStatus` in App.tsx.
    */
-  bookmarklet: BookmarkletData | null;
+  extensionStatus: ExtensionStatusForCard;
+  /**
+   * Push the candidate's profile + active package + answers + job to
+   * the extension via window.postMessage. Resolves with a syncedAt
+   * timestamp on bridge ack, rejects on timeout.
+   */
+  onSyncToExtension?: () => Promise<{ syncedAt: string }>;
+  /**
+   * Pull captured saved-answer entries from the extension's
+   * chrome.storage and merge them into the local
+   * SavedApplicationAnswer library. Surfaced as a "Pull saved
+   * answers from extension" button.
+   */
+  onPullSavedAnswers?: () => Promise<{ mergedCount: number }>;
   /**
    * True when the persisted package was generated against the URL-
    * import placeholder ("Imported job pending enrichment") but the
@@ -195,7 +210,9 @@ export function BrowserSessionReviewPage({
   match,
   extensionSession,
   manualApplyHelper,
-  bookmarklet,
+  extensionStatus,
+  onSyncToExtension,
+  onPullSavedAnswers,
   isStaleAfterJobEnrichment,
   isRegeneratingPackage,
   isJobPendingEnrichment,
@@ -465,7 +482,9 @@ export function BrowserSessionReviewPage({
       {manualApplyHelper && (
         <ManualApplyHelperCard
           data={manualApplyHelper}
-          bookmarklet={bookmarklet}
+          extensionStatus={extensionStatus}
+          onSyncToExtension={onSyncToExtension}
+          onPullSavedAnswers={onPullSavedAnswers}
           onMarkApplied={() => onManualRequired(browserSession.id)}
           onOpenProfileSetup={onOpenProfileSetup}
         />
@@ -937,90 +956,176 @@ function ExtensionPanel({
 }
 
 /**
- * Bookmarklet panel — primary "Apply now" UX.
+ * Browser-extension panel — Simplify-style primary path.
  *
- * The bookmarklet itself is a `javascript:` URI containing the
- * user's profile values + ATS selector map. The user drags the
- * link to their bookmarks bar ONCE; from then on, on any
- * application page, clicking the bookmark fills every detected
- * input inline (with a green outline so the fills are visible),
- * shows a banner, and DOES NOT call submit. Same human-gate
- * pattern as Simplify and MyGreenhouse.
+ * Replaces the v1 bookmarklet (deprecated as of v0.2 of the
+ * extension). When the dashboardBridge content script has reported
+ * in via window.postMessage, we know the extension is installed and
+ * show the "Sync to extension" CTA. Otherwise we render install
+ * instructions for the dev-mode load-unpacked flow (Web Store
+ * publishing is a future slice).
  *
- * Why a bookmarklet vs. a Chrome extension: zero install
- * friction, no Web Store review, ships today, runs only when the
- * user explicitly clicks it (same activeTab safety story as the
- * extension). Extension is the long-term play; bookmarklet
- * proves the field-mapping UX first.
+ * After sync, the candidate opens a Greenhouse / Lever job page
+ * and clicks the floating "Apply with Agentic" pill the extension
+ * injected — same UX as Simplify Copilot. Hard rules from CLAUDE.md
+ * are enforced by the pill content script: no auto-submit, no
+ * CAPTCHA bypass, no password / hidden / file fills.
  */
-function BookmarkletPanel({
-  bookmarklet,
-  jobLabel
+function AgenticExtensionPanel({
+  status,
+  jobLabel,
+  onSync,
+  onPullSavedAnswers
 }: {
-  bookmarklet: BookmarkletData;
+  status: ExtensionStatusForCard;
   jobLabel: string;
+  onSync?: () => Promise<{ syncedAt: string }>;
+  onPullSavedAnswers?: () => Promise<{ mergedCount: number }>;
 }) {
-  const [copied, setCopied] = useState(false);
+  const [syncing, setSyncing] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [syncMessage, setSyncMessage] = useState<string | null>(null);
+  const [pullMessage, setPullMessage] = useState<string | null>(null);
+
+  const lastSyncedRel =
+    status.lastSyncedAt &&
+    `${Math.max(
+      1,
+      Math.round((Date.now() - new Date(status.lastSyncedAt).getTime()) / 1000)
+    )}s ago`;
+
+  if (!status.available) {
+    return (
+      <div
+        className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 p-4"
+        data-testid="manual-apply-extension-install"
+      >
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+          One-click form fill via the Agentic browser extension
+        </p>
+        <p className="mt-1 text-sm leading-6 text-slate-700">
+          Install once. Then on every Greenhouse or Lever job page a small
+          <strong> Apply with Agentic </strong> pill appears bottom-right —
+          click it and every input on the form fills inline from your saved
+          profile. We never auto-submit; you review and click Submit yourself.
+        </p>
+        <ol className="mt-3 list-decimal space-y-1 pl-5 text-xs leading-5 text-slate-700">
+          <li>
+            Open <code>chrome://extensions/</code>, turn on{" "}
+            <strong>Developer mode</strong> (top-right toggle).
+          </li>
+          <li>
+            Click <strong>Load unpacked</strong> and pick the{" "}
+            <code>extension/</code> folder from this repo.
+          </li>
+          <li>
+            Refresh this page — this card will flip to "Sync to extension"
+            once the bridge is detected.
+          </li>
+        </ol>
+        <p className="mt-3 text-[11px] leading-5 text-slate-600">
+          A signed Chrome Web Store build is on the roadmap; load-unpacked is
+          the dev path for now.
+        </p>
+      </div>
+    );
+  }
+
   return (
     <div
       className="mt-4 rounded-md border border-emerald-300 bg-emerald-50 p-4"
-      data-testid="manual-apply-bookmarklet-panel"
+      data-testid="manual-apply-extension-installed"
     >
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
           <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
-            One-click form fill
+            Extension installed
+            {status.version ? ` · v${status.version}` : ""}
           </p>
           <p className="mt-1 text-sm leading-6 text-slate-700">
-            Drag the button below to your bookmarks bar (just once). Then on
-            the application page in the new tab, click <strong>Fill: {jobLabel}</strong>{" "}
-            in your bookmarks — about <strong>{bookmarklet.fillableCount}</strong> field
-            {bookmarklet.fillableCount === 1 ? "" : "s"} will fill inline. We
-            never auto-submit; you review and click Submit yourself.
+            Sync your profile + drafts for <strong>{jobLabel}</strong>, then
+            open the application page in a new tab. The Agentic pill there
+            fills every input. Captures any new answers you type so the next
+            form is faster.
           </p>
+          {status.lastSyncedAt && (
+            <p
+              className="mt-1 text-[11px] text-slate-600"
+              data-testid="manual-apply-extension-last-synced"
+            >
+              Last synced {lastSyncedRel}.
+            </p>
+          )}
+        </div>
+        <div className="flex shrink-0 flex-wrap gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md bg-emerald-700 px-3 text-xs font-semibold text-white transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-slate-400"
+            data-testid="manual-apply-sync-extension"
+            disabled={syncing || !onSync}
+            onClick={async () => {
+              if (!onSync) return;
+              setSyncMessage(null);
+              setSyncing(true);
+              try {
+                const result = await onSync();
+                setSyncMessage(`Synced ${new Date(result.syncedAt).toLocaleTimeString()}`);
+              } catch (error) {
+                setSyncMessage(
+                  error instanceof Error ? error.message : "Sync failed"
+                );
+              } finally {
+                setSyncing(false);
+              }
+            }}
+          >
+            {syncing ? "Syncing…" : "Sync to extension"}
+          </button>
+          {onPullSavedAnswers && (
+            <button
+              type="button"
+              className="inline-flex min-h-9 items-center justify-center gap-2 rounded-md border border-slate-300 bg-white px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+              data-testid="manual-apply-pull-saved-answers"
+              disabled={pulling}
+              onClick={async () => {
+                setPullMessage(null);
+                setPulling(true);
+                try {
+                  const result = await onPullSavedAnswers();
+                  setPullMessage(
+                    result.mergedCount === 0
+                      ? "No new captures to pull"
+                      : `Merged ${result.mergedCount} new answer${result.mergedCount === 1 ? "" : "s"} into your library`
+                  );
+                } catch (error) {
+                  setPullMessage(
+                    error instanceof Error ? error.message : "Pull failed"
+                  );
+                } finally {
+                  setPulling(false);
+                }
+              }}
+            >
+              {pulling ? "Pulling…" : "Pull saved answers"}
+            </button>
+          )}
         </div>
       </div>
-      <div className="mt-4 flex flex-wrap items-center gap-3">
-        {/*
-          The actual bookmarklet — an <a href="javascript:..."> the user
-          drags to their bookmarks bar. We render it as a button-styled
-          link so it's visually obvious. Click does nothing useful (it'd
-          run the script on the wrong page); the value is the drag.
-        */}
-        <a
-          className="inline-flex min-h-9 cursor-grab items-center justify-center gap-2 rounded-md bg-ink px-3 text-xs font-semibold text-white shadow-sm hover:bg-slate-700 active:cursor-grabbing"
-          data-testid="manual-apply-fill-bookmarklet"
-          href={bookmarklet.href}
-          draggable
-          onClick={(event) => event.preventDefault()}
-          title="Drag this to your bookmarks bar"
+      {(syncMessage || pullMessage) && (
+        <p
+          className="mt-3 text-[11px] leading-5 text-slate-700"
+          data-testid="manual-apply-extension-status-message"
         >
-          <Bot aria-hidden="true" size={13} />
-          Fill: {jobLabel}
-        </a>
-        <button
-          type="button"
-          className="inline-flex min-h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50"
-          data-testid="manual-apply-copy-bookmarklet"
-          onClick={async () => {
-            try {
-              await navigator.clipboard.writeText(bookmarklet.href);
-              setCopied(true);
-              setTimeout(() => setCopied(false), 1500);
-            } catch {
-              /* clipboard unavailable */
-            }
-          }}
-        >
-          <Copy aria-hidden="true" size={11} />
-          {copied ? "Copied" : "Copy as text"}
-        </button>
-      </div>
+          {syncMessage}
+          {syncMessage && pullMessage ? " · " : null}
+          {pullMessage}
+        </p>
+      )}
       <p className="mt-3 text-[11px] leading-5 text-slate-600">
-        How it works: the bookmarklet is a tiny JavaScript snippet with your
-        profile values inlined. It runs only on the page you click it from. It
-        cannot read other tabs, cannot call submit, and doesn't talk to any
-        server. Standard safety guidance: don't share your bookmarks bar.
+        How it works: the extension stores synced data in chrome.storage.local
+        on your machine — never sent to any server. The pill fills only the
+        page you click it from, never auto-submits, and never reads password
+        or hidden fields.
       </p>
     </div>
   );
@@ -1076,20 +1181,27 @@ function CopyButton({
 
 function ManualApplyHelperCard({
   data,
-  bookmarklet,
+  extensionStatus,
+  onSyncToExtension,
+  onPullSavedAnswers,
   onMarkApplied,
   onOpenProfileSetup
 }: {
   data: ManualApplyHelperData;
-  bookmarklet: BookmarkletData | null;
+  extensionStatus: ExtensionStatusForCard;
+  onSyncToExtension?: () => Promise<{ syncedAt: string }>;
+  onPullSavedAnswers?: () => Promise<{ mergedCount: number }>;
   onMarkApplied: () => void;
   onOpenProfileSetup?: () => void;
 }) {
-  // When a bookmarklet is available we show the bookmarklet panel as
-  // the primary path and collapse copy-paste fields behind a toggle.
-  // When no bookmarklet (rare — profile fully empty), the old
-  // copy-paste UI is the default.
-  const [showCopyPaste, setShowCopyPaste] = useState(!bookmarklet);
+  // The extension is the primary path. Copy-paste fallback collapses
+  // behind a toggle so users without the extension still have a way
+  // to get values onto the form. Default-collapsed when extension is
+  // installed AND we've synced; otherwise expanded so first-time
+  // users see the full picture immediately.
+  const [showCopyPaste, setShowCopyPaste] = useState(
+    !extensionStatus.available || !extensionStatus.lastSyncedAt
+  );
   return (
     <section
       className="rounded-lg border border-emerald-200 bg-white p-5 shadow-soft"
@@ -1101,9 +1213,9 @@ function ManualApplyHelperCard({
             Apply now in your browser
           </h3>
           <p className="mt-1 text-sm leading-6 text-slate-600">
-            {bookmarklet
-              ? "Drag the Fill-this-form bookmarklet to your bookmarks bar once. Then open the application in a new tab and click the bookmarklet — every input fills inline. We never auto-submit; you review and click Submit yourself."
-              : "Open the application in a new tab. Use Copy all to grab everything as a single text block, or copy field-by-field below. We never auto-submit — when you're done, mark this session as applied so the tracker stays accurate."}
+            {extensionStatus.available
+              ? "Sync your profile to the extension, then open the application page — the Apply with Agentic pill fills every input from your saved data. We never auto-submit; you review and click Submit yourself."
+              : "Install the Agentic browser extension to fill applications with one click. Without the extension, use the copy-paste fields below as a fallback. We never auto-submit."}
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -1131,9 +1243,16 @@ function ManualApplyHelperCard({
         </div>
       </div>
 
-      {bookmarklet && (
-        <BookmarkletPanel bookmarklet={bookmarklet} jobLabel={data.jobLabel} />
-      )}
+      <AgenticExtensionPanel
+        status={extensionStatus}
+        jobLabel={data.jobLabel}
+        onSync={onSyncToExtension}
+        onPullSavedAnswers={onPullSavedAnswers}
+      />
+
+      {/* The "show copy-paste fields" toggle wires the variable used
+          by every conditional below — it stays meaningful as a manual
+          fallback even though the extension is the primary path. */}
 
       {/*
         Resume-attached badge stays at the card top regardless of
@@ -1160,7 +1279,7 @@ function ManualApplyHelperCard({
         questions the user wants to refine before pasting,
         (c) users who don't want to install a bookmarklet.
       */}
-      {bookmarklet && !showCopyPaste && (
+      {extensionStatus.available && !showCopyPaste && (
         <button
           type="button"
           className="mt-4 inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-700 transition hover:bg-slate-50"
@@ -1184,7 +1303,7 @@ function ManualApplyHelperCard({
               text="Copy all"
               testId="manual-apply-copy-all"
             />
-            {bookmarklet && (
+            {extensionStatus.available && (
               <button
                 type="button"
                 className="text-[11px] font-semibold text-slate-500 underline-offset-2 hover:underline"
