@@ -490,6 +490,33 @@ export function BrowserSessionReviewPage({
         />
       )}
 
+      {/*
+        Everything below — adapter metrics, dry-run fill plan,
+        detected-fields list, browser screenshot placeholder, and
+        the extension-session debug card — is operational telemetry.
+        For the candidate doing the actual application work, none
+        of it changes their next action. We collapse it all into a
+        single "Diagnostics" disclosure that's open ONLY when the
+        session genuinely needs intervention (failed / manual_required
+        / disconnected extension session). That removes ~9 sections
+        of visual noise from the default view, matching how Simplify
+        and Manus keep their assistant pages clean.
+      */}
+      <details
+        className="rounded-lg border border-line bg-white shadow-soft"
+        data-testid="browser-session-diagnostics"
+        open={
+          browserSession.status === "failed" ||
+          browserSession.status === "manual_required" ||
+          (extensionSession?.status === "manual_required") ||
+          (extensionSession?.status === "failed")
+        }
+      >
+        <summary className="cursor-pointer list-none p-4 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
+          Diagnostics — adapter metrics, fill plan, detected fields, extension session ▾
+        </summary>
+        <div className="space-y-5 border-t border-slate-100 p-4">
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
           <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -703,6 +730,9 @@ export function BrowserSessionReviewPage({
         onDisconnectExtension={onDisconnectExtension}
         onExtensionManualRequired={onExtensionManualRequired}
       />
+
+        </div>
+      </details>
     </div>
   );
 }

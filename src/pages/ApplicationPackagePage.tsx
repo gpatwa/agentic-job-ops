@@ -409,85 +409,98 @@ export function ApplicationPackagePage({
             </div>
           </div>
         </section>
-      ) : (
-        <section className="flex gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm leading-6 text-emerald-800">
-          <ShieldCheck aria-hidden="true" className="mt-0.5 shrink-0" size={18} />
-          <p>No unsupported-claim warnings are currently detected.</p>
-        </section>
+      ) : null}
+      {/*
+        Removed the "No unsupported-claim warnings are currently
+        detected" green banner — silence is success here. Showing
+        an absence-of-problems banner permanently is debug noise
+        for the candidate. Warnings still surface loudly when
+        present (above), which is what matters.
+      */}
+
+      {/*
+        Inline regenerate action — primary surface lives here next to
+        the resume draft instead of behind the disclosure.
+      */}
+      {onRegeneratePackage && (
+        <div className="flex items-center justify-end">
+          <button
+            className="inline-flex min-h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+            data-testid="regenerate-package"
+            type="button"
+            disabled={Boolean(isRegeneratingPackage)}
+            onClick={() => onRegeneratePackage(applicationPackage.id)}
+            title="Regenerate drafts using the current job and profile data"
+          >
+            <RefreshCw aria-hidden="true" size={11} />
+            {isRegeneratingPackage ? "Regenerating…" : "Regenerate drafts"}
+          </button>
+        </div>
       )}
 
-      <section className="grid gap-4 xl:grid-cols-3">
-        <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
-          <div className="flex items-start justify-between gap-2">
+      {/*
+        Generation / Integrity / Review metadata — collapsed by
+        default. These are debug fields (model name, prompt version,
+        input/output hashes, last-updated timestamp, answer count)
+        useful for operators but distracting for the candidate.
+        Consolidated into one disclosure to reduce visual noise.
+      */}
+      <details className="rounded-lg border border-line bg-white shadow-soft" data-testid="package-debug-details">
+        <summary className="cursor-pointer list-none p-4 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
+          Generation details ▾
+        </summary>
+        <div className="grid gap-4 border-t border-slate-100 p-4 xl:grid-cols-3">
+          <div>
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
               Generation
             </p>
-            {/*
-              Always-available regenerate button (in addition to the
-              stale-banner action). Useful when the user updated their
-              resume / verified facts / target titles and wants the
-              drafts refreshed against the latest profile state.
-            */}
-            {onRegeneratePackage && (
-              <button
-                className="inline-flex min-h-7 items-center justify-center gap-1 rounded-md border border-slate-300 bg-white px-2 text-[11px] font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
-                data-testid="regenerate-package"
-                type="button"
-                disabled={Boolean(isRegeneratingPackage)}
-                onClick={() => onRegeneratePackage(applicationPackage.id)}
-                title="Regenerate drafts using the current job and profile data"
-              >
-                <RefreshCw aria-hidden="true" size={11} />
-                {isRegeneratingPackage ? "Regenerating…" : "Regenerate"}
-              </button>
-            )}
+            <dl className="mt-3 space-y-2 text-sm text-slate-600">
+              <div>
+                <dt className="font-medium text-slate-800">Mode</dt>
+                <dd className="capitalize">{applicationPackage.generationMode}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-800">Model</dt>
+                <dd>{applicationPackage.modelName}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-800">Prompt</dt>
+                <dd>{applicationPackage.promptVersion}</dd>
+              </div>
+            </dl>
           </div>
-          <dl className="mt-3 space-y-2 text-sm text-slate-600">
-            <div>
-              <dt className="font-medium text-slate-800">Mode</dt>
-              <dd className="capitalize">{applicationPackage.generationMode}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-800">Model</dt>
-              <dd>{applicationPackage.modelName}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-800">Prompt</dt>
-              <dd>{applicationPackage.promptVersion}</dd>
-            </div>
-          </dl>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Integrity
+            </p>
+            <dl className="mt-3 space-y-2 text-sm text-slate-600">
+              <div>
+                <dt className="font-medium text-slate-800">Input hash</dt>
+                <dd>{applicationPackage.inputHash}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-800">Output hash</dt>
+                <dd>{applicationPackage.outputHash}</dd>
+              </div>
+            </dl>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+              Review
+            </p>
+            <dl className="mt-3 space-y-2 text-sm text-slate-600">
+              <div>
+                <dt className="font-medium text-slate-800">Updated</dt>
+                <dd>{new Date(applicationPackage.updatedAt).toLocaleString()}</dd>
+              </div>
+              <div>
+                <dt className="font-medium text-slate-800">Answers</dt>
+                <dd>{answers.length}</dd>
+              </div>
+            </dl>
+          </div>
         </div>
-        <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Integrity
-          </p>
-          <dl className="mt-3 space-y-2 text-sm text-slate-600">
-            <div>
-              <dt className="font-medium text-slate-800">Input hash</dt>
-              <dd>{applicationPackage.inputHash}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-800">Output hash</dt>
-              <dd>{applicationPackage.outputHash}</dd>
-            </div>
-          </dl>
-        </div>
-        <div className="rounded-lg border border-line bg-white p-4 shadow-soft">
-          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-            Review
-          </p>
-          <dl className="mt-3 space-y-2 text-sm text-slate-600">
-            <div>
-              <dt className="font-medium text-slate-800">Updated</dt>
-              <dd>{new Date(applicationPackage.updatedAt).toLocaleString()}</dd>
-            </div>
-            <div>
-              <dt className="font-medium text-slate-800">Answers</dt>
-              <dd>{answers.length}</dd>
-            </div>
-          </dl>
-        </div>
-      </section>
+      </details>
 
       <section className="rounded-lg border border-line bg-white p-5 shadow-soft">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -673,17 +686,50 @@ export function ApplicationPackagePage({
         </section>
       )}
 
-      <IntelligenceCard
-        intelligence={intelligence}
-        riskSignals={riskSignals}
-        recruiterLeads={recruiterLeads}
-        isGenerating={isGeneratingIntelligence}
-        onGenerate={onGenerateIntelligence}
-        onRefresh={onGenerateIntelligence}
-        onMarkHelpful={onMarkIntelligenceHelpful}
-        onMarkNotHelpful={onMarkIntelligenceNotHelpful}
-        onDismissRiskSignal={onDismissRiskSignal}
-      />
+      {/*
+        Company intelligence + risk signals + recruiter leads only
+        render when there's something to show (non-empty intel, real
+        risk signals, real leads, or an in-flight generation). The
+        empty-state "No intelligence has been generated for this job
+        yet…" panel was visual noise — surfacing the Generate button
+        behind a single disclosure keeps the candidate's primary
+        flow uncluttered.
+      */}
+      {intelligence ||
+      riskSignals.length > 0 ||
+      recruiterLeads.length > 0 ||
+      isGeneratingIntelligence ? (
+        <IntelligenceCard
+          intelligence={intelligence}
+          riskSignals={riskSignals}
+          recruiterLeads={recruiterLeads}
+          isGenerating={isGeneratingIntelligence}
+          onGenerate={onGenerateIntelligence}
+          onRefresh={onGenerateIntelligence}
+          onMarkHelpful={onMarkIntelligenceHelpful}
+          onMarkNotHelpful={onMarkIntelligenceNotHelpful}
+          onDismissRiskSignal={onDismissRiskSignal}
+        />
+      ) : (
+        <details className="rounded-lg border border-line bg-white shadow-soft" data-testid="package-intelligence-collapsed">
+          <summary className="cursor-pointer list-none p-4 text-xs font-semibold uppercase tracking-wide text-slate-500 hover:bg-slate-50">
+            Company intelligence, risk signals, recruiter leads ▾
+          </summary>
+          <div className="border-t border-slate-100 p-4">
+            <IntelligenceCard
+              intelligence={intelligence}
+              riskSignals={riskSignals}
+              recruiterLeads={recruiterLeads}
+              isGenerating={isGeneratingIntelligence}
+              onGenerate={onGenerateIntelligence}
+              onRefresh={onGenerateIntelligence}
+              onMarkHelpful={onMarkIntelligenceHelpful}
+              onMarkNotHelpful={onMarkIntelligenceNotHelpful}
+              onDismissRiskSignal={onDismissRiskSignal}
+            />
+          </div>
+        </details>
+      )}
     </div>
   );
 }
