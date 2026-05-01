@@ -48,62 +48,92 @@
   let advanceCountdownId = null;
 
   /** ------------------------------------------------------------------
-   * Field mapping. Stable selectors first (Greenhouse / Lever ID +
-   * name= patterns), then HTML5 autocomplete attribute, then a
-   * label-based fallback for custom textareas. Keep the list short —
-   * over-aggressive matching causes wrong-field fills which are worse
-   * than missing fields.
+   * Profile → field-matcher table.
+   *
+   * Each entry is a list of label keywords (substring-matched against
+   * the input's associated label after normalization) plus the value
+   * to fill and an optional `kind` hint:
+   *
+   *   - "text"    (default) — text-like inputs / textareas / single-
+   *                option selects matched by visible text. Matching
+   *                STOPS after the first hit per matcher entry.
+   *   - "choice"  — radios / checkboxes / selects. For radios, picks
+   *                the option whose label contains the value. For
+   *                checkboxes (multi-select like "How did you hear
+   *                about us?"), keeps matching siblings so we can
+   *                tick multiple boxes if the value is comma-separated.
+   *
+   * The list ORDER matters: more-specific matchers must come before
+   * more-general ones. "Confirm email" must be tried before bare
+   * "email"; "preferred name" before "name"; "city, state, zip"
+   * before "city" / "location".
    * ------------------------------------------------------------------ */
-  function buildSelectorGroups(profile) {
+  function buildFieldMatchers(profile) {
     const fullName = (profile.fullName || "").trim();
     const parts = fullName.split(/\s+/).filter(Boolean);
     const firstName = parts[0] || "";
     const lastName = parts.length > 1 ? parts.slice(1).join(" ") : "";
 
     return [
+      // --- Names. Preferred name comes BEFORE generic "name" so
+      // "What is your preferred name?" doesn't match the generic
+      // full-name matcher first. Same logic for confirm-email.
       {
-        sel:
-          "#first_name, input[name='first_name'], input[autocomplete='given-name']",
-        value: firstName
+        keywords: ["preferred name", "nickname", "name you go by"],
+        value: firstName,
+        kind: "text"
+      },
+      { keywords: ["first name", "given name", "fname"], value: firstName, kind: "text" },
+      { keywords: ["last name", "family name", "surname", "lname"], value: lastName, kind: "text" },
+      { keywords: ["full name"], value: fullName, kind: "text" },
+
+      // --- Contact
+      {
+        keywords: ["confirm email", "verify email", "re-enter email", "email confirmation", "re-type email"],
+        value: profile.email || "",
+        kind: "text"
+      },
+      { keywords: ["email"], value: profile.email || "", kind: "text" },
+      { keywords: ["phone", "mobile", "telephone"], value: profile.phone || "", kind: "text" },
+
+      // --- Location. Order: most specific first.
+      {
+        keywords: ["city, state, and zip", "city state zip", "geographic location", "compensation and benefits based on geographic"],
+        value: profile.location || "",
+        kind: "text"
+      },
+      { keywords: ["location (city)", "city"], value: profile.location || "", kind: "text" },
+      { keywords: ["location"], value: profile.location || "", kind: "text" },
+
+      // --- Public profiles
+      { keywords: ["linkedin"], value: profile.linkedinUrl || "", kind: "text" },
+      { keywords: ["github"], value: profile.githubUrl || "", kind: "text" },
+      { keywords: ["portfolio", "personal website", "personal site"], value: profile.portfolioUrl || "", kind: "text" },
+      { keywords: ["website"], value: profile.portfolioUrl || "", kind: "text" },
+
+      // --- Application defaults (radios / selects / checkboxes)
+      {
+        keywords: ["visa sponsorship", "require sponsorship", "require visa"],
+        value: profile.visaSponsorshipNeeded || "",
+        kind: "choice"
       },
       {
-        sel:
-          "#last_name, input[name='last_name'], input[autocomplete='family-name']",
-        value: lastName
+        keywords: ["eligible to work", "authorized to work", "work authorization"],
+        value: profile.workAuthorization || "",
+        kind: "choice"
       },
       {
-        sel: "input[name='name'], input[autocomplete='name']",
-        value: fullName
+        keywords: ["how did you hear", "where did you hear", "how did you find", "source"],
+        value: profile.howDidYouHearAboutUs || "",
+        kind: "choice"
       },
-      {
-        sel:
-          "#email, input[name='email'], input[type='email'], input[autocomplete='email']",
-        value: profile.email || ""
-      },
-      {
-        sel:
-          "#phone, input[name='phone'], input[type='tel'], input[autocomplete='tel']",
-        value: profile.phone || ""
-      },
-      {
-        sel:
-          "input[name='location'], input[autocomplete='address-level2'], input[name*='location' i]",
-        value: profile.location || ""
-      },
-      {
-        sel:
-          "input[name='urls[LinkedIn]'], input[name='linkedin'], input[name*='linkedin' i]",
-        value: profile.linkedinUrl || ""
-      },
-      {
-        sel: "input[name='urls[GitHub]'], input[name='github'], input[name*='github' i]",
-        value: profile.githubUrl || ""
-      },
-      {
-        sel:
-          "input[name='urls[Portfolio]'], input[name='website'], input[name*='portfolio' i], input[name*='website' i]",
-        value: profile.portfolioUrl || ""
-      }
+
+      // --- Voluntary self-id (EEO-1 / Section 503)
+      { keywords: ["gender"], value: profile.genderIdentity || "", kind: "choice" },
+      { keywords: ["hispanic or latino", "are you hispanic", "hispanic/latino"], value: profile.raceEthnicity || "", kind: "choice" },
+      { keywords: ["race", "ethnicity"], value: profile.raceEthnicity || "", kind: "choice" },
+      { keywords: ["veteran"], value: profile.veteranStatus || "", kind: "choice" },
+      { keywords: ["disability", "disabled"], value: profile.disabilityStatus || "", kind: "choice" }
     ];
   }
 
@@ -131,12 +161,16 @@
     el.style.outlineOffset = "1px";
   }
 
+  /**
+   * @deprecated Kept for backwards-compatible test exports. New
+   * fill flow uses fillFormByLabelMatching below, which walks every
+   * field on the page and matches by associated label.
+   */
   function tryFill(selector, value) {
     if (!value) return false;
     const el = document.querySelector(selector);
     if (!el) return false;
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
-      // NEVER touch password / hidden / file inputs.
       const type = (el.getAttribute("type") || "").toLowerCase();
       if (type === "password" || type === "hidden" || type === "file") return false;
       setReactValue(el, value);
@@ -144,9 +178,8 @@
       return true;
     }
     if (el.tagName === "SELECT") {
-      const options = el.options;
-      for (let i = 0; i < options.length; i += 1) {
-        if (options[i].text === value || options[i].value === value) {
+      for (let i = 0; i < el.options.length; i += 1) {
+        if (el.options[i].text === value || el.options[i].value === value) {
           el.selectedIndex = i;
           el.dispatchEvent(new Event("change", { bubbles: true }));
           highlight(el);
@@ -155,6 +188,257 @@
       }
     }
     return false;
+  }
+
+  /** ------------------------------------------------------------------
+   * Universal label finder. Works for inputs, textareas, selects,
+   * radios, checkboxes. Tries (in order):
+   *   1. <label for="elementId"> — explicit association
+   *   2. wrapping <label> — implicit association
+   *   3. parent .field / .form-field / fieldset > label
+   *   4. fieldset > legend (for radio / checkbox groups)
+   *   5. aria-label / aria-labelledby
+   *   6. closest preceding heading or text element (best-effort)
+   * Returns "" when no label is found.
+   * ------------------------------------------------------------------ */
+  // CSS.escape isn't available in older jsdom test environments.
+  // Fall back to a safe escape (backslash before any non-alphanumeric).
+  function safeAttrEscape(s) {
+    if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+      return CSS.escape(s);
+    }
+    return String(s).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
+  }
+
+  function findElementLabel(el) {
+    // 1. explicit for=
+    if (el.id) {
+      const explicit = document.querySelector("label[for='" + safeAttrEscape(el.id) + "']");
+      if (explicit) return explicit.textContent || "";
+    }
+    // 2. wrapping label
+    const wrapping = el.closest("label");
+    if (wrapping) return wrapping.textContent || "";
+    // 3. parent field/form-field
+    const parentField = el.closest(
+      ".field, .input-field, .form-field, .input, fieldset, [class*='field'], [class*='Field']"
+    );
+    if (parentField) {
+      // For radio/checkbox groups, prefer the legend
+      const legend = parentField.querySelector("legend");
+      if (legend) return legend.textContent || "";
+      const lbl = parentField.querySelector("label");
+      if (lbl) return lbl.textContent || "";
+    }
+    // 4. aria-label / aria-labelledby
+    const ariaLabel = el.getAttribute("aria-label");
+    if (ariaLabel) return ariaLabel;
+    const labelledBy = el.getAttribute("aria-labelledby");
+    if (labelledBy) {
+      const ref = document.getElementById(labelledBy);
+      if (ref) return ref.textContent || "";
+    }
+    // 5. fall back to placeholder / name (last-resort)
+    const placeholder = el.getAttribute("placeholder");
+    if (placeholder) return placeholder;
+    return el.getAttribute("name") || "";
+  }
+
+  /**
+   * Find the question text for a radio button GROUP (multiple radios
+   * sharing a `name`). The individual radio's label is the option
+   * label ("Yes, I currently need…"); the GROUP's label is the
+   * question ("Will you require visa sponsorship now or in the
+   * future?"). We resolve it by walking up to the nearest fieldset
+   * or `.field`/`.form-field` container and reading its legend or
+   * heading.
+   */
+  function findRadioGroupQuestion(radio) {
+    const fieldset = radio.closest("fieldset");
+    if (fieldset) {
+      const legend = fieldset.querySelector("legend");
+      if (legend) return legend.textContent || "";
+    }
+    const container = radio.closest(
+      ".field, .input-field, .form-field, .input, [class*='field'], [class*='Field']"
+    );
+    if (container) {
+      // Look for the FIRST label or heading inside the container that
+      // isn't itself one of the option labels.
+      const candidates = container.querySelectorAll(
+        "label:not([for]), legend, h1, h2, h3, h4, h5, h6, .label, [class*='Label']"
+      );
+      for (const c of candidates) {
+        const t = (c.textContent || "").trim();
+        if (t.length > 5 && t.length < 240) return t;
+      }
+    }
+    return "";
+  }
+
+  /** ------------------------------------------------------------------
+   * Comprehensive form filler. Walks every fillable field on the
+   * page, finds its label, and matches against the profile
+   * matchers. Handles:
+   *   - text / email / tel / url inputs (React-aware setter)
+   *   - textareas (React-aware setter)
+   *   - selects (option text / value match)
+   *   - radio groups (per-group, picks the option matching the value)
+   *   - checkboxes (multi-fill — checks each box matching a value)
+   *
+   * NEVER touches password / hidden / file / submit / button inputs.
+   * ------------------------------------------------------------------ */
+  function fillFormByLabelMatching(matchers) {
+    const allInputs = Array.from(
+      document.querySelectorAll(
+        "input:not([type='hidden']):not([type='password']):not([type='file']):not([type='submit']):not([type='button']):not([type='reset'])," +
+          "select, textarea"
+      )
+    );
+
+    // Group radios by name so we treat each group as one logical
+    // field (the GROUP gets the question label, not individual radios).
+    const radioGroups = new Map();
+    for (const input of allInputs) {
+      if ((input.type || "").toLowerCase() === "radio") {
+        const name = input.getAttribute("name") || "";
+        if (!name) continue;
+        if (!radioGroups.has(name)) radioGroups.set(name, []);
+        radioGroups.get(name).push(input);
+      }
+    }
+
+    let filledCount = 0;
+    const matchedRadioGroups = new Set();
+
+    for (const matcher of matchers) {
+      const value = (matcher.value || "").trim();
+      if (!value) continue;
+
+      let matchedThisIteration = false;
+
+      for (const input of allInputs) {
+        if (input.dataset.agenticFilled === "1") continue;
+        const tag = input.tagName;
+        const type = (input.getAttribute("type") || "text").toLowerCase();
+
+        // Find the question label for matching
+        let questionLabel;
+        if (type === "radio") {
+          const name = input.getAttribute("name") || "";
+          if (matchedRadioGroups.has(name)) continue;
+          questionLabel = findRadioGroupQuestion(input);
+        } else if (type === "checkbox") {
+          // For checkboxes, the question label comes from the parent
+          // group; the field's own label is the option text.
+          questionLabel = findRadioGroupQuestion(input);
+        } else {
+          questionLabel = findElementLabel(input);
+        }
+
+        const labelNorm = normalizeLabel(questionLabel);
+        if (!labelNorm) continue;
+
+        // Match a keyword phrase if (a) the label contains the phrase
+        // as a contiguous substring OR (b) every word in the phrase
+        // appears somewhere in the label (handles inserted words like
+        // "Confirm your email address" matching "confirm email").
+        const labelWords = new Set(labelNorm.split(/\s+/).filter(Boolean));
+        const matches = matcher.keywords.some((kw) => {
+          const kwNorm = normalizeLabel(kw);
+          if (labelNorm.includes(kwNorm)) return true;
+          const kwWords = kwNorm.split(/\s+/).filter(Boolean);
+          if (kwWords.length < 2) return false;
+          return kwWords.every((w) => labelWords.has(w));
+        });
+        if (!matches) continue;
+
+        // Apply
+        let didFill = false;
+        if (tag === "INPUT" || tag === "TEXTAREA") {
+          if (type === "checkbox") {
+            // Multi-select: tick boxes whose own label contains the value
+            const optionLabel = (findElementLabel(input) || "").toLowerCase();
+            const target = value.toLowerCase();
+            if (optionLabel.includes(target)) {
+              input.checked = true;
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+              highlight(input);
+              didFill = true;
+            }
+          } else if (type === "radio") {
+            // Find the radio in this group whose individual label
+            // matches the value. After filling, mark EVERY radio in
+            // the group with dataset.agenticFilled so a re-run can't
+            // accidentally re-pick a different option in the same
+            // group (the marker persists across calls).
+            const name = input.getAttribute("name") || "";
+            const group = radioGroups.get(name) || [input];
+            const target = value.toLowerCase();
+            for (const radio of group) {
+              const radioLabel = (findElementLabel(radio) || "").toLowerCase();
+              if (
+                radioLabel.includes(target) ||
+                radioLabel.includes(target.slice(0, 30))
+              ) {
+                radio.checked = true;
+                radio.dispatchEvent(new Event("change", { bubbles: true }));
+                highlight(radio);
+                didFill = true;
+                break;
+              }
+            }
+            if (didFill) {
+              matchedRadioGroups.add(name);
+              for (const radio of group) {
+                radio.dataset.agenticFilled = "1";
+              }
+            }
+          } else {
+            setReactValue(input, value);
+            highlight(input);
+            didFill = true;
+          }
+        } else if (tag === "SELECT") {
+          const target = value.toLowerCase();
+          for (let i = 0; i < input.options.length; i += 1) {
+            const optText = (input.options[i].text || "").toLowerCase();
+            const optValue = (input.options[i].value || "").toLowerCase();
+            // Skip placeholder / "Select…" options
+            if (i === 0 && /^(select|choose|pick|—)/i.test(input.options[i].text || "")) {
+              continue;
+            }
+            if (
+              optText === target ||
+              optValue === target ||
+              (target.length > 4 && optText.includes(target.slice(0, 30))) ||
+              (optText.length > 4 && target.includes(optText))
+            ) {
+              input.selectedIndex = i;
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+              highlight(input);
+              didFill = true;
+              break;
+            }
+          }
+        }
+
+        if (didFill) {
+          input.dataset.agenticFilled = "1";
+          filledCount += 1;
+          matchedThisIteration = true;
+          // For text/select, stop after the first hit per matcher.
+          // For checkboxes, keep going so we can tick multiple.
+          if (type !== "checkbox") break;
+        }
+      }
+
+      // Note: matchedThisIteration is informational; could be surfaced
+      // in a future "what didn't match" diagnostic UI.
+      void matchedThisIteration;
+    }
+
+    return filledCount;
   }
 
   /** ------------------------------------------------------------------
@@ -352,14 +636,14 @@
           return;
         }
         const profile = payload.profile;
-        const groups = buildSelectorGroups(profile);
-        let filledCount = 0;
-        groups.forEach((g) => {
-          if (tryFill(g.sel, g.value)) filledCount += 1;
-        });
-
-        // Fill standard application-defaults / EEO selects too.
-        filledCount += fillSelects(profile);
+        // The new path: walk every fillable field on the page, find
+        // its label, and match against profile-derived matchers.
+        // Covers text inputs, textareas, selects, radio groups, and
+        // checkboxes — Spring Health's form has ~16 fields beyond
+        // the standard #first_name / #email / #phone, and all of
+        // them get filled via this label-walker.
+        const matchers = buildFieldMatchers(profile);
+        let filledCount = fillFormByLabelMatching(matchers);
 
         // Custom-question textareas — first try the saved-answer
         // library (cross-application reuse), then the active package's
@@ -731,34 +1015,14 @@
     });
   }
 
-  function fillSelects(profile) {
-    let count = 0;
-    // Visa sponsorship — Greenhouse uses a select sometimes named
-    // "job_application[answers_attributes][...][text_value]" with
-    // pre-canned options, sometimes a radio group. For the select
-    // case, we match on option text containing the user's answer.
-    const visaSelects = document.querySelectorAll("select");
-    if (profile.visaSponsorshipNeeded) {
-      visaSelects.forEach((s) => {
-        // Skip if this select isn't visa-related (basic heuristic via
-        // name or surrounding label).
-        const name = (s.getAttribute("name") || "").toLowerCase();
-        const label = findTextareaLabel(s).toLowerCase();
-        const haystack = name + " " + label;
-        if (!/visa|sponsor/.test(haystack)) return;
-        const target = profile.visaSponsorshipNeeded.toLowerCase();
-        for (let i = 0; i < s.options.length; i += 1) {
-          if (s.options[i].text.toLowerCase().includes(target.slice(0, 25))) {
-            s.selectedIndex = i;
-            s.dispatchEvent(new Event("change", { bubbles: true }));
-            highlight(s);
-            count += 1;
-            break;
-          }
-        }
-      });
-    }
-    return count;
+  /**
+   * @deprecated The visa-only fillSelects has been subsumed by
+   * `fillFormByLabelMatching` via the broader keyword match on
+   * "visa sponsorship" / "require sponsorship". Kept as a no-op
+   * for backwards-compatible test exports.
+   */
+  function fillSelects(_profile) {
+    return 0;
   }
 
   function escapeHtml(s) {
@@ -804,13 +1068,41 @@
    * ------------------------------------------------------------------ */
   if (window.__agenticJobOpsPillTestMode) {
     window.__agenticJobOpsPill = {
-      buildSelectorGroups,
+      buildSelectorGroups: function (profile) {
+        // Legacy export — kept so existing tests that still reference
+        // it pass. Returns the matchers for the same standard fields
+        // (first/last/full name + email + phone + URLs).
+        const matchers = buildFieldMatchers(profile);
+        return matchers
+          .filter(
+            (m) =>
+              m.kind === "text" &&
+              [
+                "first name",
+                "last name",
+                "full name",
+                "email",
+                "phone",
+                "linkedin",
+                "github",
+                "portfolio"
+              ].some((k) => m.keywords.includes(k))
+          )
+          .map((m) => ({
+            sel: "#" + m.keywords[0].replace(/\s+/g, "_"),
+            value: m.value
+          }));
+      },
+      buildFieldMatchers,
       setReactValue,
       tryFill,
       fillCustomTextareas,
+      fillFormByLabelMatching,
       fillSelects,
       normalizeLabel,
       escapeHtml,
+      findElementLabel,
+      findRadioGroupQuestion,
       findContinueButton,
       looksLikeSubmitPage,
       mergeAnswerSources,

@@ -278,6 +278,298 @@ describe("pill.js — fill-and-advance safety", () => {
   });
 });
 
+describe("pill.js — fillFormByLabelMatching on a Spring Health-shape form", () => {
+  let api: PillTestApi & {
+    buildFieldMatchers: (profile: Record<string, string>) => Array<{
+      keywords: string[];
+      value: string;
+      kind?: string;
+    }>;
+    fillFormByLabelMatching: (
+      matchers: Array<{ keywords: string[]; value: string; kind?: string }>
+    ) => number;
+  };
+  beforeEach(() => {
+    api = loadPill() as typeof api;
+    document.body.innerHTML = "";
+  });
+  afterEach(() => {
+    document.body.innerHTML = "";
+  });
+
+  function fullSpringHealthForm() {
+    // Mirror the actual Spring Health Greenhouse application page
+    // structure as closely as possible. Field types are accurate;
+    // the surrounding layout classes are simplified.
+    document.body.innerHTML = `
+      <form>
+        <div class="field">
+          <label for="first_name">First Name *</label>
+          <input id="first_name" name="first_name" type="text" />
+        </div>
+        <div class="field">
+          <label for="last_name">Last Name *</label>
+          <input id="last_name" name="last_name" type="text" />
+        </div>
+        <div class="field">
+          <label for="email">Email *</label>
+          <input id="email" name="email" type="email" />
+        </div>
+        <div class="field">
+          <label for="phone">Phone *</label>
+          <input id="phone" name="phone" type="tel" />
+        </div>
+        <div class="field">
+          <label for="location">Location (City) *</label>
+          <input id="location" name="job_application[location]" type="text" />
+        </div>
+        <div class="field">
+          <label for="linkedin">LinkedIn Profile</label>
+          <input id="linkedin" name="job_application[urls_attributes][0][value]" type="text" />
+        </div>
+        <div class="field">
+          <label for="website">Website</label>
+          <input id="website" name="job_application[urls_attributes][1][value]" type="text" />
+        </div>
+        <fieldset class="field">
+          <legend>Will you require visa sponsorship now or in the future? *</legend>
+          <label><input type="radio" name="visa" value="yes_now" /> Yes, I currently need a visa sponsorship.</label>
+          <label><input type="radio" name="visa" value="yes_future" /> Yes, I may need a visa sponsorship in the future.</label>
+          <label><input type="radio" name="visa" value="no" /> No, I do not and will not need a visa sponsorship.</label>
+          <label><input type="radio" name="visa" value="unsure" /> I am unsure and will discuss in the interview.</label>
+        </fieldset>
+        <div class="field">
+          <label for="eligible_us">Are you eligible to work in the U.S.? *</label>
+          <select id="eligible_us" name="eligible_us">
+            <option value="">Select...</option>
+            <option>Yes</option>
+            <option>No</option>
+          </select>
+        </div>
+        <fieldset class="field">
+          <legend>How did you hear about us? *</legend>
+          <label><input type="checkbox" name="how_heard[]" value="LinkedIn" /> LinkedIn</label>
+          <label><input type="checkbox" name="how_heard[]" value="Glassdoor" /> Glassdoor</label>
+          <label><input type="checkbox" name="how_heard[]" value="Indeed" /> Indeed</label>
+          <label><input type="checkbox" name="how_heard[]" value="Other" /> Other</label>
+        </fieldset>
+        <div class="field">
+          <label for="confirm_email">Confirm your email address *</label>
+          <input id="confirm_email" name="confirm_email" type="email" />
+        </div>
+        <div class="field">
+          <label for="preferred_name">What is your preferred name?</label>
+          <input id="preferred_name" name="preferred_name" type="text" />
+        </div>
+        <div class="field">
+          <label for="city_state_zip">To help us determine appropriate compensation and benefits based on geographic location, please provide your city, state, and zip code. *</label>
+          <textarea id="city_state_zip" name="city_state_zip"></textarea>
+        </div>
+        <div class="field">
+          <label for="gender">Gender</label>
+          <select id="gender" name="gender">
+            <option value="">Select...</option>
+            <option>Female</option>
+            <option>Male</option>
+            <option>Non-binary</option>
+            <option>Prefer not to say</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="hispanic">Are you Hispanic/Latino?</label>
+          <select id="hispanic" name="hispanic">
+            <option value="">Select...</option>
+            <option>Yes</option>
+            <option>No</option>
+            <option>Prefer not to say</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="veteran">Veteran Status</label>
+          <select id="veteran" name="veteran">
+            <option value="">Select...</option>
+            <option>I am a protected veteran.</option>
+            <option>I am not a protected veteran.</option>
+            <option>I do not wish to answer.</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="disability">Disability Status</label>
+          <select id="disability" name="disability">
+            <option value="">Select...</option>
+            <option>Yes, I have a disability, or have had one in the past.</option>
+            <option>No, I do not have a disability and have not had one in the past.</option>
+            <option>I do not want to answer.</option>
+          </select>
+        </div>
+        <button type="submit">Submit application</button>
+      </form>
+    `;
+  }
+
+  function fullProfile() {
+    return {
+      fullName: "Gopal Patwa",
+      email: "gopalpatwa@gmail.com",
+      phone: "415-302-4337",
+      location: "San Francisco Bay Area",
+      linkedinUrl: "https://linkedin.com/in/gopalpatwa",
+      githubUrl: "",
+      portfolioUrl: "",
+      workAuthorization: "Yes",
+      visaSponsorshipNeeded:
+        "No, I do not and will not need a visa sponsorship.",
+      howDidYouHearAboutUs: "LinkedIn",
+      genderIdentity: "Prefer not to say",
+      raceEthnicity: "Prefer not to say",
+      veteranStatus: "I am not a protected veteran.",
+      disabilityStatus: "I do not want to answer."
+    };
+  }
+
+  it("fills first name + last name + email + phone via #id labels", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    const filled = api.fillFormByLabelMatching(matchers);
+    expect(filled).toBeGreaterThanOrEqual(4);
+    expect(
+      (document.getElementById("first_name") as HTMLInputElement).value
+    ).toBe("Gopal");
+    expect(
+      (document.getElementById("last_name") as HTMLInputElement).value
+    ).toBe("Patwa");
+    expect((document.getElementById("email") as HTMLInputElement).value).toBe(
+      "gopalpatwa@gmail.com"
+    );
+    expect((document.getElementById("phone") as HTMLInputElement).value).toBe(
+      "415-302-4337"
+    );
+  });
+
+  it("fills LinkedIn even when name is the Greenhouse urls_attributes pattern", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("linkedin") as HTMLInputElement).value
+    ).toBe("https://linkedin.com/in/gopalpatwa");
+  });
+
+  it("fills Location (City) and the city/state/zip textarea from profile.location", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("location") as HTMLInputElement).value
+    ).toBe("San Francisco Bay Area");
+    expect(
+      (document.getElementById("city_state_zip") as HTMLTextAreaElement).value
+    ).toBe("San Francisco Bay Area");
+  });
+
+  it("fills Confirm email using profile.email (not skipped because of the bare 'email' matcher)", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("confirm_email") as HTMLInputElement).value
+    ).toBe("gopalpatwa@gmail.com");
+  });
+
+  it("fills Preferred name with the candidate's first name", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("preferred_name") as HTMLInputElement).value
+    ).toBe("Gopal");
+  });
+
+  it("checks the visa-sponsorship radio matching the user's saved answer", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    const radios = document.querySelectorAll(
+      "input[name='visa']"
+    ) as NodeListOf<HTMLInputElement>;
+    const checked = Array.from(radios).find((r) => r.checked);
+    expect(checked?.value).toBe("no");
+  });
+
+  it("checks the 'How did you hear about us?' checkbox whose label matches the user's saved value", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    const checkboxes = document.querySelectorAll(
+      "input[name='how_heard[]']"
+    ) as NodeListOf<HTMLInputElement>;
+    const checked = Array.from(checkboxes).filter((c) => c.checked);
+    expect(checked).toHaveLength(1);
+    expect(checked[0].value).toBe("LinkedIn");
+  });
+
+  it("picks the matching option in EEO selects (Gender / Veteran / Disability)", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("gender") as HTMLSelectElement).value
+    ).toBe("Prefer not to say");
+    expect(
+      (document.getElementById("veteran") as HTMLSelectElement).value
+    ).toBe("I am not a protected veteran.");
+    expect(
+      (document.getElementById("disability") as HTMLSelectElement).value
+    ).toBe("I do not want to answer.");
+  });
+
+  it("fills the U.S. eligibility select from profile.workAuthorization", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    expect(
+      (document.getElementById("eligible_us") as HTMLSelectElement).value
+    ).toBe("Yes");
+  });
+
+  it("never touches the type=submit button", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    api.fillFormByLabelMatching(matchers);
+    const submit = document.querySelector(
+      "button[type='submit']"
+    ) as HTMLButtonElement;
+    // Submit button should not have agenticFilled marker; we never
+    // even look at it because the querySelectorAll filter excludes
+    // type=submit.
+    expect(submit.dataset.agenticFilled).toBeUndefined();
+  });
+
+  it("on a re-fill, dataset.agenticFilled marker prevents double-fill", () => {
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    const firstCount = api.fillFormByLabelMatching(matchers);
+    expect(firstCount).toBeGreaterThanOrEqual(10);
+    // Re-running the matcher should fill ZERO new fields (every
+    // already-filled input is marked dataset.agenticFilled="1" and
+    // skipped).
+    const secondCount = api.fillFormByLabelMatching(matchers);
+    expect(secondCount).toBe(0);
+  });
+
+  it("hits ≥12 fields on a full Spring Health-shape form (vs. the 4 the old engine hit)", () => {
+    // Regression target: the user reported the OLD pill filled only
+    // 4 of 16 detected fields on the real Spring Health page. The
+    // new label-walker should fill at least 12 (every standard
+    // contact + URL + visa radio + how-heard checkbox + EEO select
+    // + confirm email + preferred name + city/state/zip).
+    fullSpringHealthForm();
+    const matchers = api.buildFieldMatchers(fullProfile());
+    const filled = api.fillFormByLabelMatching(matchers);
+    expect(filled).toBeGreaterThanOrEqual(12);
+  });
+});
+
 describe("pill.js — saved-library answer merging", () => {
   let api: PillTestApi;
   beforeEach(() => {
